@@ -1,0 +1,17 @@
+{
+  "name": "@abdsynths/bank-manager-core",
+  "version": "0.1.0",
+  "description": "Core library — pure CRUD, search, persistence, fingerprinting",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@abdsynths/bank-manager-contracts": "*",
+    "dexie": "^4.0.0"
+  }
+}

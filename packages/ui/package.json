@@ -1,0 +1,17 @@
+{
+  "name": "@abdsynths/bank-manager-ui",
+  "version": "0.1.0",
+  "description": "Reusable UI components — BankManagerModal, PatchList, SearchBar",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@abdsynths/bank-manager-core": "*",
+    "@abdsynths/bank-manager-contracts": "*"
+  }
+}

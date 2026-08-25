@@ -1,13 +1,21 @@
 {
-  "name": "abdbankmanager",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@abdsynths/bank-manager",
+  "version": "0.1.0",
+  "description": "Universal Bank Manager for ABDSynths — cross-project synthesizer patch library, SysEx management, and hardware communication",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/contracts",
+    "packages/adapters",
+    "packages/ui"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
 }
