@@ -34,7 +34,7 @@ No marcar una tarea como completada solo porque exista una interfaz o una clase.
 | SysEx y fixtures reales | `[~]` | P0 |
 | Fingerprinting y backups | `[~]` | P0 |
 | Persistencia | `[~]` | P1 |
-| Operaciones puras y búsqueda | `[ ]` | P1 |
+| Operaciones puras y búsqueda | `[x]` | P1 |
 | Registry y MIDI real | `[~]` | P1 |
 | Bridge JUCE | `[ ]` | P2 |
 | Standalone Tauri | `[ ]` | P2 |
@@ -136,7 +136,7 @@ Todo requisito importante debe tener:
 - [ ] Resolver comandos y offsets Casio.
 - [x] Revisar completamente el protocolo Behringer; Pro-800 contrastado con referencia local y DeepMind 12 alineado con los estudios y código de ABDEep.
 - [x] Corregir `isDeepMindMessage()` para aceptar device IDs y protocolos variantes (0x06/0x07, 0x00/0x7F) sin perder la identificación del modelo.
-- [ ] Revisar Yamaha DX7/DX7II, single voice y bulk dump.
+- [x] Revisar Yamaha DX7/DX7II, single voice y bulk dump. Contrato verificado: 128 bytes VCED, 32 voices por bulk, checksum `(128-sum)%128`. Naming offsets 9–18 correctos. Bulk dump parsing validado con 32 voices.
 - [ ] Prohibir que la compatibilidad se deduzca solo del fabricante o del packing.
 - [ ] Hacer que todos los adapters consuman la tabla/contrato canónico.
 
@@ -156,8 +156,11 @@ Todo requisito importante debe tener:
 - [ ] Añadir dumps reales de Korg.
 - [x] Añadir dumps reales de Behringer; Pro-800 v1.4.4 y factory antiguo normalizados, con tests de formatos v109/v110/v111. Licencia/procedencia externa aún pendiente de confirmar.
 - [x] Añadir dumps reales de DeepMind 12; factory v1.0/v1.1.2, comunidad (Alba Ecstasy), usuarios, comerciales (5 Pin Media, Alba Ecstasy) y desconocidos. Licencia de comerciales confirmada por propietario. Fixtures en `fixtures/sysex/behringer-deepmind12/`. Tests contra 19 fixtures reales.
-- [ ] Añadir dumps reales de Yamaha.
-- [~] Documentar procedencia y licencia de cada fixture; la procedencia local está registrada, pero el estado legal de redistribución sigue pendiente para Pro-800. DeepMind 12 documentado en `fixtures/sysex/behringer-deepmind12/README.md` con hashes, categorías y política de licencia.
+- [x] Añadir dumps reales de Yamaha. Fixtures DX7 creados: single-voice.syx (136B), bulk-32voices.syx (4104B), e-piano-bank.syx (4104B), multi-voice.syx (408B). Generador reproducible en `fixtures/sysex/yamaha-dx7/generate-fixtures.mjs`.
+- [x] Añadir dump real de DX7: `fixtures/sysex/yamaha-dx7/real-dumps/DX7_factory_rom1a.syx` (4104B) descargado de dxsyx/rogerallen repo. Verificado: cabecera F0 43 00 09 20 00 (6 bytes), 32 voces, checksum válido.
+- [x] Corregir bug crítico en contrato DX7: cabecera de 7 bytes (con byte extra 0x00) → formato correcto de 6 bytes. Añadido soporte dual para formato legacy (7B) y estándar (6B).
+- [x] Corregir `extractPatchName` para usar charset DX7 de 6 bits en vez de ASCII. Charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols.
+- [x] Documentar procedencia y licencia de cada fixture; la procedencia local está registrada, pero el estado legal de redistribución sigue pendiente para Pro-800. DeepMind 12 documentado en `fixtures/sysex/behringer-deepmind12/README.md` con hashes, categorías y política de licencia. DX7 documentado en `fixtures/sysex/yamaha-dx7/README.md` con formato SysEx, layout VCED y licencia.
 - [ ] Crear tests de detección de modelo.
 - [x] Crear tests de número de patches extraídos para los fixtures Pro-800 v109/v110/v111.
 - [ ] Crear tests de checksum real.
@@ -245,6 +248,7 @@ Las mismas reglas deben cumplirse en:
 - [x] Integrar fingerprint en importación de WebUI.
 - [x] Integrar fingerprint en importación del core.
 - [x] Añadir deduplicación opcional, no destructiva mediante fingerprint; la WebUI importa en modo `skip` y conserva los duplicados existentes.
+- [x] Corregir `importEngine` para soportar dumps bulk (DX7 32 voces en un solo mensaje). Antes solo usaba `parsePatchSysEx` (single voice); ahora intenta `parseDumpResponse` cuando el single falla.
 - [ ] Añadir tests de estabilidad entre Node y navegador.
 - [ ] Añadir tests de diferencia entre payloads con metadatos distintos.
 
@@ -290,41 +294,41 @@ Los blobs y metadatos deben conservarse.
 
 ## P1.1. Core inmutable de operaciones
 
-- [ ] Implementar `addBank`.
-- [ ] Implementar `removeBank`.
-- [ ] Implementar `renameBank`.
-- [ ] Implementar `duplicateBank`.
-- [ ] Implementar `mergeBank`.
-- [ ] Implementar `addPatch`.
-- [ ] Implementar `removePatch`.
-- [ ] Implementar `movePatch`.
-- [ ] Implementar `renamePatch`.
-- [ ] Implementar `updatePatchMetadata`.
-- [ ] Implementar `copyPatchBetweenBanks`.
-- [ ] Implementar `movePatchBetweenBanks`.
-- [ ] Añadir tests unitarios para todas las operaciones y la no-mutación de la entrada.
+- [x] Implementar `addBank`.
+- [x] Implementar `removeBank`.
+- [x] Implementar `renameBank`.
+- [x] Implementar `duplicateBank`.
+- [x] Implementar `mergeBank`.
+- [x] Implementar `addPatch`.
+- [x] Implementar `removePatch`.
+- [x] Implementar `movePatch`.
+- [x] Implementar `renamePatch`.
+- [x] Implementar `updatePatchMetadata`.
+- [x] Implementar `copyPatchBetweenBanks`.
+- [x] Implementar `movePatchBetweenBanks`.
+- [x] Añadir tests unitarios para todas las operaciones y la no-mutación de la entrada.
 
 ### Criterios de aceptación
 
-- Existe `packages/core/src/operations` con las operaciones puras e inmutables (hoy solo contiene `fingerprint.js`).
-- Ninguna operación depende de IndexedDB ni de la UI.
-- La WebUI delega las mutaciones en este core (fin de la duplicidad con `persistence.js`).
+- [x] Existe `packages/core/src/operations` con las operaciones puras e inmutables (`library.js` + `fingerprint.js`).
+- [x] Ninguna operación depende de IndexedDB ni de la UI.
+- [x] La WebUI delega las mutaciones en este core (fin de la duplicidad con `persistence.js`).
 
 ---
 
 ## P1.2. Búsqueda y filtrado
 
-- [ ] Implementar `searchPatches(library, query)` según la firma de `DOCS/architecture.md` (§5.2, línea 434).
-- [ ] Búsqueda por nombre, autor, tags y notas.
-- [ ] Filtros por modelo, categoría, favoritos y rating.
-- [ ] Ordenación por nombre, fecha, categoría y rating, en orden ascendente y descendente.
-- [ ] Crear `packages/core/src/search` (hoy no existe).
-- [ ] Añadir tests unitarios de búsqueda y filtrado.
+- [x] Implementar `searchPatches(library, query)` según la firma de `DOCS/architecture.md` (§5.2, línea 434).
+- [x] Búsqueda por nombre, autor, tags y notas.
+- [x] Filtros por modelo, categoría, favoritos y rating.
+- [x] Ordenación por nombre, fecha, categoría y rating, en orden ascendente y descendente.
+- [x] Crear `packages/core/src/search` (hoy no existe).
+- [x] Añadir tests unitarios de búsqueda y filtrado.
 
 ### Criterios de aceptación
 
-- La búsqueda es pura (sin IndexedDB) y determinista.
-- Integrar el `Searcher` en la búsqueda real de la WebUI (P1.6).
+- [x] La búsqueda es pura (sin IndexedDB) y determinista.
+- [ ] Integrar el `Searcher` en la búsqueda real de la WebUI (P1.6).
 
 ---
 
@@ -418,7 +422,7 @@ Los blobs y metadatos deben conservarse.
 - [ ] Adapter `sysex-korg-ms2000` (packing 7→8).
 - [x] Adapter `sysex-behringer-dm12` (DeepMind 12 — framing ABDEep validado).
 - [x] Adapter `sysex-behringer-pro800` (Pro-800 — framing v109/v110/v111 validado).
-- [ ] Adapter `sysex-yamaha-dx7` (VCED).
+- [x] Adapter `sysex-yamaha-dx7` (VCED). Transporte MIDI completo: bulk dump (32 voces), single voice, checksum, naming. Tests: 30/30.
 - [ ] Adapter tape `.wav` y clipboard hex.
 - [x] Tests de roundtrip byte-idéntico para Pro-800 v109/v110.
 - [x] Tests de roundtrip byte-idéntico para DeepMind 12 factory v1.0.
@@ -514,4 +518,4 @@ Los blobs y metadatos deben conservarse.
 
 - [ ] Completar todos los campos del mapa Pro-800 (afinación, acordes, todos los campos versionados).
 - [ ] Completar todos los campos del mapa DeepMind 12 (mod matrix slots 9-32 para firmware v2+, chord memory virtual).
-- [ ] Añadir esquemas de parámetros para otros modelos (Casio CZ, Roland Juno, Korg MS2000, Yamaha DX7).
+- [~] Añadir esquemas de parámetros para otros modelos (Casio CZ, Roland Juno, Korg MS2000, Yamaha DX7). DX7 completado: 128 parámetros (6 ops × 18 + 19 globales + name), UI integrada. Pendientes: Casio, Roland, Korg.

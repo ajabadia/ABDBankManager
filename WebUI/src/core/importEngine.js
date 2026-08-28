@@ -237,19 +237,22 @@ async function importSyx(file) {
       }
 
       const { contract, confidence } = result;
-      const rawData = contract.parsePatchSysEx?.(msg)?.rawData || null;
-      const patchName = rawData ? (contract.extractPatchName?.(rawData) || null) : null;
 
-      modelCounts.set(contract.modelId, (modelCounts.get(contract.modelId) || 0) + 1);
-
-      parsed.push({
-        contract,
-        rawData,
-        patchName,
-        confidence,
-        manufacturer: contract.manufacturer,
-        modelId: contract.modelId
-      });
+      // Try single voice first, then bulk dump (e.g. DX7 32-voice bulk)
+      const singleResult = contract.parsePatchSysEx?.(msg);
+      if (singleResult) {
+        const rawData = singleResult.rawData;
+        const patchName = contract.extractPatchName?.(rawData) || null;
+        modelCounts.set(contract.modelId, (modelCounts.get(contract.modelId) || 0) + 1);
+        parsed.push({ contract, rawData, patchName, confidence, manufacturer: contract.manufacturer, modelId: contract.modelId });
+      } else {
+        const bulkResults = contract.parseDumpResponse?.(msg) || [];
+        for (const br of bulkResults) {
+          const patchName = contract.extractPatchName?.(br.rawData) || null;
+          modelCounts.set(contract.modelId, (modelCounts.get(contract.modelId) || 0) + 1);
+          parsed.push({ contract, rawData: br.rawData, patchName, confidence, manufacturer: contract.manufacturer, modelId: contract.modelId, slot: br.slot });
+        }
+      }
     }
 
     if (parsed.length === 0) {

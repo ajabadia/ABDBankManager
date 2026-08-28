@@ -88,7 +88,7 @@ const casioCzContract: ModelContract = {
   displayName: 'Casio CZ-101',
   manufacturer: 'Casio',
   icon: 'casio-logo.svg',
-  thumbnail: 'casio-cz101.webp',
+  thumbnail: 'casio-cz101.jpg',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,

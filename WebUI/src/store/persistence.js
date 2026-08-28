@@ -5,10 +5,27 @@
  */
 
 import Dexie from 'dexie';
-import { getModelContract, getHardwareIds } from '../contracts/modelContracts.js';
-import { validateBankAgainstContract, validatePatchAgainstContract } from '../core/domainValidation.js';
-import { calculateFingerprint } from '../core/fingerprint.js';
-import { partitionDuplicates } from '../core/deduplication.js';
+
+import {
+  isLibrary,
+  assertBankEditable,
+  assertBankHasCapacity,
+  ERR_BANK_NOT_FOUND,
+  ERR_BANK_FULL,
+  ERR_PATCH_NOT_FOUND,
+  ERR_INDEX_CONFLICT,
+  ERR_INCOMPATIBLE_HARDWARE,
+  ERR_SOURCE_EQUALS_TARGET,
+  ERR_DUPLICATE_PATCH_ID,
+  createBank as coreCreateBank,
+  updateBank as coreUpdateBank,
+  deleteBank as coreDeleteBank,
+  createPatch as coreCreatePatch,
+  updatePatch as coreUpdatePatch,
+  deletePatch as coreDeletePatch,
+  movePatch as coreMovePatch,
+  importBank as coreImportBank
+} from './libraryAdapter.js';
 
 class BankManagerDB extends Dexie {
   constructor() {
@@ -169,51 +186,22 @@ export async function runPreMigrationBackup() {
   }
 }
 
-// ─── Factory & Capacity Guards (pure, testable without IndexedDB) ───
-
-/**
- * Throws if the bank is a factory bank (immutable by design).
- * Factory banks can only be auditioned or copied to a user bank.
- * @param {{ isFactory?: boolean }} bank
- */
-export function assertBankEditable(bank) {
-  if (bank?.isFactory) {
-    throw new Error('ERR_FACTORY_BANK: Factory banks are immutable — copy the patch to a user bank to edit it');
-  }
-}
-
-/**
- * Throws if adding a patch would exceed the model's capacity.
- * @param {number} currentCount — current number of patches in the bank
- * @param {number} maxPatches — programsPerBank from the ModelContract
- */
-export function assertBankHasCapacity(currentCount, maxPatches) {
-  if (maxPatches && currentCount >= maxPatches) {
-    throw new Error(`ERR_BANK_FULL: Bank is full (${currentCount}/${maxPatches} patches) — cannot add more`);
-  }
-}
+export {
+  isLibrary,
+  assertBankEditable,
+  assertBankHasCapacity,
+  ERR_BANK_NOT_FOUND,
+  ERR_BANK_FULL,
+  ERR_PATCH_NOT_FOUND,
+  ERR_INDEX_CONFLICT,
+  ERR_INCOMPATIBLE_HARDWARE,
+  ERR_SOURCE_EQUALS_TARGET,
+  ERR_DUPLICATE_PATCH_ID
+};
 
 // ─── Bank Operations ───
 export async function createBank(bankData) {
-  const id = bankData.id || crypto.randomUUID();
-  const contract = getModelContract(bankData.modelId);
-  const bank = {
-    id,
-    name: bankData.name,
-    modelId: bankData.modelId,
-    // Asociación multi-hardware (canónico + compatibles); default: solo el canónico
-    hardwareIds: bankData.hardwareIds || (bankData.modelId ? [bankData.modelId] : []),
-    manufacturer: bankData.manufacturer || '',
-    isFactory: bankData.isFactory || false,
-    isLocked: bankData.isLocked || false,
-    source: bankData.source || null,
-    creationDate: new Date().toISOString(),
-    modifiedDate: new Date().toISOString()
-  };
-
-  validateBankAgainstContract(bank, [], contract);
-  await db.banks.add(bank);
-  return bank;
+  return coreCreateBank(bankData);
 }
 
 export async function getBank(bankId) {
@@ -225,53 +213,16 @@ export async function getAllBanks() {
 }
 
 export async function updateBank(bankId, changes) {
-  const bank = await getBank(bankId);
-  assertBankEditable(bank);
-  await db.banks.where('id').equals(bankId).modify(changes);
+  return coreUpdateBank(bankId, changes);
 }
 
 export async function deleteBank(bankId) {
-  const bank = await getBank(bankId);
-  assertBankEditable(bank);
-  await db.patches.where('bankId').equals(bankId).delete();
-  await db.banks.where('id').equals(bankId).delete();
+  return coreDeleteBank(bankId);
 }
 
 // ─── Patch Operations ───
 export async function createPatch(bankId, patchData, { maxPatches } = {}) {
-  const bank = await db.banks.where('id').equals(bankId).first();
-  assertBankEditable(bank);
-  const existingPatches = await db.patches.where('bankId').equals(bankId).toArray();
-  const contract = getModelContract(bank?.modelId);
-  const effectiveMax = maxPatches || contract?.programsPerBank;
-  assertBankHasCapacity(existingPatches.length, effectiveMax);
-  const nextIndex = existingPatches.length;
-
-  const patch = {
-    id: patchData.id || crypto.randomUUID(),
-    bankId,
-    index: patchData.index ?? nextIndex,
-    name: patchData.name || 'Init Patch',
-    category: patchData.category || 'Other',
-    author: patchData.author || '',
-    tags: patchData.tags || [],
-    notes: patchData.notes || '',
-    rawData: patchData.rawData || new Uint8Array(0),
-    // Asociación multi-hardware: hereda la del banco (canónico + compatibles)
-    hardwareIds: patchData.hardwareIds || bank?.hardwareIds || (bank?.modelId ? [bank.modelId] : []),
-    parameters: patchData.parameters || {},
-    fingerprint: patchData.fingerprint || await calculateFingerprint(patchData.rawData || new Uint8Array(0), contract),
-    isFavorite: patchData.isFavorite || false,
-    rating: patchData.rating || 0,
-    versionNumber: patchData.versionNumber || 1,
-    previousVersionId: patchData.previousVersionId || null,
-    creationDate: new Date().toISOString(),
-    modifiedDate: new Date().toISOString()
-  };
-
-  validatePatchAgainstContract(patch, contract, patch.index);
-  await db.patches.add(patch);
-  return patch;
+  return coreCreatePatch(bankId, patchData, { maxPatches });
 }
 
 export async function getPatchesForBank(bankId) {
@@ -287,58 +238,15 @@ export async function getPatch(patchId) {
 }
 
 export async function updatePatch(patchId, changes) {
-  const patch = await getPatch(patchId);
-  if (!patch) throw new Error(`ERR_PATCH_NOT_FOUND: Patch '${patchId}' not found`);
-  const bank = await getBank(patch.bankId);
-  // isFavorite and notes are user preferences — allowed on factory patches.
-  const bankMutationKeys = Object.keys(changes).filter(k => k !== 'isFavorite' && k !== 'notes');
-  if (bankMutationKeys.length > 0) assertBankEditable(bank);
-
-  const candidate = { ...patch, ...changes };
-  validatePatchAgainstContract(candidate, getModelContract(bank?.modelId), candidate.index);
-  await db.patches.where('id').equals(patchId).modify({ ...changes, modifiedDate: new Date().toISOString() });
+  return coreUpdatePatch(patchId, changes);
 }
 
 export async function deletePatch(patchId) {
-  const patch = await getPatch(patchId);
-  if (patch) {
-    const bank = await getBank(patch.bankId);
-    assertBankEditable(bank);
-  }
-  await db.patchTags.where('patchId').equals(patchId).delete();
-  await db.patches.where('id').equals(patchId).delete();
+  return coreDeletePatch(patchId);
 }
 
 export async function movePatch(patchId, newBankId, newIndex) {
-  const patch = await getPatch(patchId);
-  if (!patch) throw new Error(`ERR_PATCH_NOT_FOUND: Patch '${patchId}' not found`);
-  const sourceBank = await getBank(patch.bankId);
-  const targetBank = await getBank(newBankId);
-  assertBankEditable(sourceBank);
-  assertBankEditable(targetBank);
-
-  const targetContract = getModelContract(targetBank?.modelId);
-  if (!targetContract) throw new Error(`ERR_MODEL_NOT_FOUND: Unknown model '${targetBank?.modelId}'`);
-  if (patch.hardwareIds?.length && !patch.hardwareIds.includes(targetBank.modelId)) {
-    throw new Error(`ERR_INCOMPATIBLE_HARDWARE: Patch cannot be moved to '${targetBank.modelId}'`);
-  }
-
-  const targetPatches = await getPatchesForBank(newBankId);
-  const movingWithinBank = patch.bankId === newBankId;
-  if (!movingWithinBank) assertBankHasCapacity(targetPatches.length, targetContract.programsPerBank);
-  if (!Number.isInteger(newIndex) || newIndex < 0 || newIndex >= targetContract.programsPerBank) {
-    throw new Error(`ERR_INVALID_INDEX: Index '${newIndex}' is outside bank capacity`);
-  }
-  if (targetPatches.some(candidate => candidate.id !== patchId && candidate.index === newIndex)) {
-    throw new Error(`ERR_INDEX_CONFLICT: Index '${newIndex}' is already occupied`);
-  }
-
-  await db.patches.where('id').equals(patchId).modify({
-    bankId: newBankId,
-    index: newIndex,
-    hardwareIds: patch.hardwareIds?.length ? patch.hardwareIds : getHardwareIds(targetBank.modelId),
-    modifiedDate: new Date().toISOString()
-  });
+  return coreMovePatch(patchId, newBankId, newIndex);
 }
 
 // ─── Favorites & Search ───
@@ -393,37 +301,7 @@ export async function getHistoryForPatch(patchId) {
 
 // ─── Bulk Operations ───
 export async function importBank(bankData, patchesData, { deduplication = 'allow' } = {}) {
-  const contract = getModelContract(bankData?.modelId);
-  if (!contract) throw new Error(`ERR_MODEL_NOT_FOUND: Unknown model '${bankData?.modelId}'`);
-
-  const bank = {
-    ...bankData,
-    id: bankData.id || crypto.randomUUID(),
-    hardwareIds: bankData.hardwareIds?.length ? bankData.hardwareIds : getHardwareIds(contract.modelId),
-    creationDate: bankData.creationDate || new Date().toISOString(),
-    modifiedDate: new Date().toISOString()
-  };
-  const patches = await Promise.all(patchesData.map(async (patch, index) => ({
-    ...patch,
-    id: patch.id || crypto.randomUUID(),
-    bankId: bank.id,
-    fingerprint: patch.fingerprint || await calculateFingerprint(patch.rawData || new Uint8Array(0), contract),
-    index: patch.index ?? index,
-    hardwareIds: patch.hardwareIds?.length ? patch.hardwareIds : bank.hardwareIds,
-    creationDate: patch.creationDate || new Date().toISOString(),
-    modifiedDate: new Date().toISOString()
-  })));
-
-  const existingPatches = await db.patches.toArray();
-  const { accepted, duplicates } = partitionDuplicates(patches, existingPatches, deduplication);
-  validateBankAgainstContract(bank, accepted, contract);
-
-  const bankId = await db.transaction('rw', db.banks, db.patches, async () => {
-    await db.banks.add(bank);
-    await db.patches.bulkAdd(accepted);
-    return bank.id;
-  });
-  return { bankId, importedCount: accepted.length, duplicateCount: duplicates.length, duplicates };
+  return coreImportBank(bankData, patchesData, { deduplication });
 }
 
 export async function exportBank(bankId) {

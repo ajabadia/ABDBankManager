@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "generate": "node Scripts/registry_generator.js && node Scripts/build_contracts_web.js && node Scripts/build_webui.js",
+    "generate": "node Scripts/registry_generator.js && node Scripts/build_contracts_web.js && node Scripts/build_core_web.js && node Scripts/build_webui.js",
     "catalog:dm12": "node Scripts/catalog_dm12_sysex.js",
     "test": "vitest run",
     "test:watch": "vitest",

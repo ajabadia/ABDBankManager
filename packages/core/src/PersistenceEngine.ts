@@ -1,14 +1,30 @@
 /**
- * ABD Bank Manager — Dexie.js Persistence Engine
- * IndexedDB with versioned schema migrations and native ZIP backups.
+ * ABD Bank Manager — Unified Dexie Persistence Engine (P1.3)
+ *
+ * Single source of truth for IndexedDB persistence across WebUI, core, and standalone.
+ * Schema v4 matches WebUI/src/store/persistence.js (banks, patches, history, tags M:N).
+ * Mutations delegate to core pure operations (packages/core/src/operations/library.js).
  */
-
 import Dexie from 'dexie';
 import JSZip from 'jszip';
 import { calculateFingerprint } from './operations/fingerprint.js';
 import type { PatchData, Bank, Library, ImportResult, ExportOptions } from './validationSchemas.js';
 import type { ImportAdapter, ExportAdapter } from '../../contracts/src/index.js';
 import { BackupManifestSchema, assertBackupPatchData } from './backupValidation.js';
+import {
+  addBank,
+  removeBank,
+  renameBank,
+  addPatch,
+  removePatch,
+  movePatch,
+  updatePatchMetadata,
+  movePatchBetweenBanks,
+  duplicateBank,
+  assertBankEditable,
+  assertBankHasCapacity,
+  isLibrary
+} from './operations/library.js';
 
 export interface PersistenceEngine {
   loadLibrary(): Promise<Library | null>;
@@ -19,71 +35,287 @@ export interface PersistenceEngine {
   restoreFromBackup(data: Uint8Array): Promise<boolean>;
 }
 
-class DexiePersistence extends Dexie implements PersistenceEngine {
-  patches!: Dexie.Table<PatchData, string>;
+class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
   banks!: Dexie.Table<Bank, string>;
-  tags!: Dexie.Table<{ id: string; name: string }, string>;
-  patchTags!: Dexie.Table<{ patchId: string; tagId: string }, [string, string]>;
+  patches!: Dexie.Table<PatchData, string>;
+  history!: Dexie.Table<{ dbId: number; patchId: string; rawData: Uint8Array; timestamp: number }, number>;
+  tags!: Dexie.Table<{ dbId: number; name: string }, number>;
+  patchTags!: Dexie.Table<{ dbId: number; patchId: string; tagId: number }, [string, number]>;
 
   constructor() {
     super('ABDBankManager');
 
+    // v1: base schema
     this.version(1).stores({
-      patches: '++id, name, category, originModel, fingerprint, bankId, isFavorite, rating, versionNumber',
-      banks: '++id, name, modelId, isFactory, isLocked',
-      tags: '++id, &name',
-      patchTags: '[patchId+tagId], patchId, tagId'
+      banks: '++dbId, id, modelId, name, isFactory',
+      patches: '++dbId, id, bankId, [bankId+index], name, fingerprint, isFavorite, category',
+      history: '++dbId, patchId, timestamp',
+      tags: '++dbId, name',
+      patchTags: '++dbId, [patchId+tagId]'
     });
 
+    // v2: add category to patches
     this.version(2).stores({
-      patches: '++id, name, category, originModel, fingerprint, bankId, isFavorite, rating, versionNumber, previousVersionId'
-    }).upgrade(tx => tx.table('patches').toCollection().modify(patch => {
-      patch.versionNumber = patch.versionNumber || 1;
-      patch.previousVersionId = patch.previousVersionId || null;
-    }));
+      banks: '++dbId, id, modelId, name, isFactory',
+      patches: '++dbId, id, bankId, [bankId+index], name, fingerprint, isFavorite, category',
+      history: '++dbId, patchId, timestamp',
+      tags: '++dbId, name',
+      patchTags: '++dbId, [patchId+tagId]'
+    });
 
+    // v3: add creationDate to banks and patches
     this.version(3).stores({
-      libraries: '++id, version, activeBankId, activePresetIndex, lastImportPath, lastExportPath'
-    }).upgrade(tx => tx.table('libraries').add({
-      id: 'default', version: 1, activeBankId: null, activePresetIndex: 0,
-      lastImportPath: '', lastExportPath: ''
-    }));
+      banks: '++dbId, id, modelId, name, isFactory, creationDate',
+      patches: '++dbId, id, bankId, [bankId+index], name, fingerprint, isFavorite, category, creationDate',
+      history: '++dbId, patchId, timestamp',
+      tags: '++dbId, name',
+      patchTags: '++dbId, [patchId+tagId]'
+    });
+
+    // v4: purge legacy settings store
+    this.version(4).stores({
+      banks: '++dbId, id, modelId, name, isFactory, creationDate',
+      patches: '++dbId, id, bankId, [bankId+index], name, fingerprint, isFavorite, category, creationDate',
+      history: '++dbId, patchId, timestamp',
+      tags: '++dbId, name',
+      patchTags: '++dbId, [patchId+tagId]',
+      settings: null
+    }).upgrade((tx) => {
+      const idb = tx.idbtrans.db;
+      if (idb.objectStoreNames.contains('settings')) {
+        idb.deleteObjectStore('settings');
+        console.log('[UnifiedPersistence] Object store "settings" purged (migration v4)');
+      }
+    });
+
+    // Hooks for timestamps
+    this.banks.hook('creating', (_, obj) => {
+      obj.creationDate = obj.creationDate || new Date().toISOString();
+      obj.modifiedDate = obj.modifiedDate || new Date().toISOString();
+    });
+    this.banks.hook('updating', (modifications) => {
+      modifications.modifiedDate = new Date().toISOString();
+    });
   }
 
+  // ─── Load / Save ───
+
   async loadLibrary(): Promise<Library | null> {
-    const lib = await this.table('libraries').get('default');
-    if (!lib) return null;
     const banks = await this.banks.toArray();
-    for (const bank of banks) {
-      bank.patches = await this.patches.where('bankId').equals(bank.id).toArray();
+    if (!banks.length) return null;
+
+    const patches = await this.patches.toArray();
+    const patchesByBank = new Map<string, PatchData[]>();
+    for (const patch of patches) {
+      const arr = patchesByBank.get(patch.bankId) || [];
+      arr.push(patch);
+      patchesByBank.set(patch.bankId, arr);
     }
+
+    for (const bank of banks) {
+      bank.patches = (patchesByBank.get(bank.id) || [])
+        .slice()
+        .sort((a, b) => a.index - b.index);
+    }
+
+    // Load tags M:N and attach to patches
+    const tagMap = new Map<number, string>();
+    const allTags = await this.tags.toArray();
+    for (const t of allTags) tagMap.set(t.dbId, t.name);
+
+    const patchTagRows = await this.patchTags.toArray();
+    for (const pt of patchTagRows) {
+      const patch = patches.find(p => p.id === pt.patchId);
+      if (patch) {
+        const tagName = tagMap.get(pt.tagId);
+        if (tagName && !patch.tags?.includes(tagName)) {
+          patch.tags = [...(patch.tags || []), tagName];
+        }
+      }
+    }
+
     return {
-      version: lib.version,
-      activeBankId: lib.activeBankId,
-      activePresetIndex: lib.activePresetIndex,
+      version: 1,
+      activeBankId: null,
+      activePresetIndex: 0,
       banks,
-      lastImportPath: lib.lastImportPath,
-      lastExportPath: lib.lastExportPath
+      lastImportPath: '',
+      lastExportPath: ''
     };
   }
 
   async saveLibrary(library: Library): Promise<boolean> {
-    await this.transaction('rw', this.banks, this.patches, this.table('libraries'), async () => {
-      await this.table('libraries').put({
-        id: 'default', version: library.version, activeBankId: library.activeBankId,
-        activePresetIndex: library.activePresetIndex,
-        lastImportPath: library.lastImportPath, lastExportPath: library.lastExportPath
-      });
+    if (!isLibrary(library)) throw new Error('Invalid library');
+
+    await this.transaction('rw', this.banks, this.patches, async () => {
+      // Clear and rebuild — simple and correct for library-sized data
       await this.banks.clear();
       await this.patches.clear();
+
       for (const bank of library.banks) {
         const { patches, ...bankData } = bank;
         await this.banks.put(bankData);
-        for (const patch of patches) await this.patches.put({ ...patch, bankId: bank.id });
+        for (const patch of patches || []) {
+          await this.patches.put({ ...patch, bankId: bank.id });
+        }
       }
     });
     return true;
   }
+
+  // ─── Mutation Delegation (core pure ops) ───
+
+  async createBank(bankData: Partial<Bank> & { id?: string }): Promise<Bank> {
+    const library = await this.loadLibrary() || { version: 1, activeBankId: null, activePresetIndex: 0, banks: [] };
+    const bank = {
+      id: bankData.id || crypto.randomUUID(),
+      name: bankData.name,
+      modelId: bankData.modelId,
+      hardwareIds: bankData.hardwareIds || (bankData.modelId ? [bankData.modelId] : []),
+      manufacturer: bankData.manufacturer || '',
+      isFactory: bankData.isFactory || false,
+      isLocked: bankData.isLocked || false,
+      source: bankData.source || null,
+      creationDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+      patches: []
+    } as Bank;
+
+    const next = addBank(library, bank);
+    await this.saveLibrary(next);
+    return bank;
+  }
+
+  async createPatch(bankId: string, patchData: Partial<PatchData>, options: { maxPatches?: number } = {}): Promise<PatchData> {
+    const library = await this.loadLibrary() || { version: 1, activeBankId: null, activePresetIndex: 0, banks: [] };
+    const bank = library.banks.find(b => b.id === bankId);
+    if (!bank) throw new Error(`ERR_BANK_NOT_FOUND: Bank '${bankId}' not found`);
+    assertBankEditable(bank);
+
+    const maxPatches = options.maxPatches ?? bank.patches?.length ?? 0; // capacity from contract handled by caller
+    const existingPatches = bank.patches || [];
+    const nextIndex = patchData.index ?? existingPatches.length;
+
+    const patch: PatchData = {
+      id: patchData.id || `patch-${crypto.randomUUID()}`,
+      bankId,
+      index: nextIndex,
+      name: patchData.name || 'Init Patch',
+      category: patchData.category || 'Other',
+      author: patchData.author || '',
+      tags: patchData.tags || [],
+      notes: patchData.notes || '',
+      rawData: patchData.rawData || new Uint8Array(0),
+      hardwareIds: patchData.hardwareIds?.length ? patchData.hardwareIds : bank.hardwareIds || (bank.modelId ? [bank.modelId] : []),
+      parameters: patchData.parameters || {},
+      fingerprint: patchData.fingerprint || await calculateFingerprint(patchData.rawData || new Uint8Array(0), { programsPerBank: maxPatches } as any),
+      isFavorite: patchData.isFavorite || false,
+      rating: patchData.rating || 0,
+      versionNumber: patchData.versionNumber || 1,
+      previousVersionId: patchData.previousVersionId || null,
+      creationDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString()
+    };
+
+    const next = addPatch(library, bankId, patch, undefined, { maxPatches });
+    await this.saveLibrary(next);
+
+    const created = next.banks.find(b => b.id === bankId)?.patches?.find(p => p.id === patch.id);
+    return created || patch;
+  }
+
+  async updatePatch(patchId: string, changes: Partial<PatchData>): Promise<void> {
+    const library = await this.loadLibrary();
+    if (!library) throw new Error('Library not loaded');
+
+    let bankId = '';
+    let patchIndex = -1;
+    for (const bank of library.banks) {
+      const idx = bank.patches?.findIndex(p => p.id === patchId) ?? -1;
+      if (idx >= 0) { bankId = bank.id; patchIndex = idx; break; }
+    }
+    if (!bankId) throw new Error(`ERR_PATCH_NOT_FOUND: Patch '${patchId}' not found`);
+
+    const bank = library.banks.find(b => b.id === bankId)!;
+    assertBankEditable(bank);
+
+    // Separate metadata (core handles) from identity/content fields
+    const { id, index, bankId: _b, rawData, ...metadata } = changes;
+    let next = updatePatchMetadata(library, bankId, patchIndex, metadata);
+
+    // Handle rawData/content updates separately (core ignores them)
+    if ('rawData' in changes) {
+      next = {
+        ...next,
+        banks: next.banks.map(b =>
+          b.id === bankId
+            ? { ...b, patches: b.patches.map(p => p.id === patchId ? { ...p, rawData: changes.rawData!, modifiedDate: new Date().toISOString() } : p) }
+            : b
+        )
+      };
+    }
+
+    await this.saveLibrary(next);
+  }
+
+  async deletePatch(patchId: string): Promise<void> {
+    const library = await this.loadLibrary();
+    if (!library) return;
+
+    let bankId = '';
+    let patchIndex = -1;
+    for (const bank of library.banks) {
+      const idx = bank.patches?.findIndex(p => p.id === patchId) ?? -1;
+      if (idx >= 0) { bankId = bank.id; patchIndex = idx; break; }
+    }
+    if (!bankId) return;
+
+    const bank = library.banks.find(b => b.id === bankId)!;
+    assertBankEditable(bank);
+
+    const next = removePatch(library, bankId, patchIndex);
+    await this.saveLibrary(next);
+
+    // Clean M:N tags
+    await this.patchTags.where('patchId').equals(patchId).delete();
+  }
+
+  async movePatch(patchId: string, newBankId: string, newIndex: number): Promise<void> {
+    const library = await this.loadLibrary();
+    if (!library) throw new Error('Library not loaded');
+
+    let sourceBankId = '';
+    let sourceIndex = -1;
+    for (const bank of library.banks) {
+      const idx = bank.patches?.findIndex(p => p.id === patchId) ?? -1;
+      if (idx >= 0) { sourceBankId = bank.id; sourceIndex = idx; break; }
+    }
+    if (!sourceBankId) throw new Error(`ERR_PATCH_NOT_FOUND: Patch '${patchId}' not found`);
+
+    const sourceBank = library.banks.find(b => b.id === sourceBankId)!;
+    const targetBank = library.banks.find(b => b.id === newBankId)!;
+    assertBankEditable(sourceBank);
+    assertBankEditable(targetBank);
+
+    if (sourceBankId === newBankId) {
+      const next = movePatch(library, sourceBankId, sourceIndex, newIndex);
+      await this.saveLibrary(next);
+      return;
+    }
+
+    // Cross-bank: delegate to core
+    const next = movePatchBetweenBanks(library, sourceBankId, sourceIndex, newBankId, newIndex);
+    await this.saveLibrary(next);
+  }
+
+  async deleteBank(bankId: string): Promise<void> {
+    const library = await this.loadLibrary();
+    if (!library) return;
+    const next = removeBank(library, bankId);
+    await this.saveLibrary(next);
+  }
+
+  // ─── Import / Export / Backup ───
 
   async importFile(data: Uint8Array, filename: string, adapters: ImportAdapter[]): Promise<ImportResult> {
     const adapter = adapters.find(candidate => candidate.canParse(data, filename));
@@ -92,7 +324,7 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
     const result = adapter.parse(data, filename);
     if (!result.success) return result;
 
-    const library = await this.loadLibrary() || this.createEmptyLibrary();
+    const library = await this.loadLibrary() || { version: 1, activeBankId: null, activePresetIndex: 0, banks: [] };
     const targetBank = library.banks.find(bank => bank.name === result.bankName) || library.banks[0];
     if (!targetBank) return this.failedImport('No target bank');
 
@@ -117,10 +349,12 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
 
     const zip = new JSZip();
     const banks = [];
+
     for (let bankIndex = 0; bankIndex < library.banks.length; bankIndex++) {
       const bank = library.banks[bankIndex];
       const patches = [];
-      for (let patchIndex = 0; patchIndex < bank.patches.length; patchIndex++) {
+
+      for (let patchIndex = 0; patchIndex < (bank.patches?.length || 0); patchIndex++) {
         const patch = bank.patches[patchIndex];
         const rawDataFile = `banks/${String(bankIndex).padStart(3, '0')}/patch_${String(patchIndex).padStart(3, '0')}.bin`;
         if (!(patch.rawData instanceof Uint8Array) || patch.rawData.length === 0) {
@@ -144,6 +378,7 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
           previousVersionId: patch.previousVersionId || null
         });
       }
+
       banks.push({
         bank: {
           id: bank.id,
@@ -179,23 +414,29 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
       if (!manifestFile) return false;
       const manifest = BackupManifestSchema.parse(JSON.parse(await manifestFile.async('string')));
       if (manifest.schemaVersion != null && manifest.schemaVersion > this.verno) return false;
+
       const banks: Bank[] = [];
       const bankIds = new Set<string>();
 
       for (const entry of manifest.banks) {
         if (bankIds.has(entry.bank.id)) return false;
         bankIds.add(entry.bank.id);
+
         const patches: PatchData[] = [];
         const patchIndexes = new Set<number>();
+
         for (const patchEntry of entry.patches) {
           if (patchIndexes.has(patchEntry.index)) return false;
           patchIndexes.add(patchEntry.index);
+
           const blob = zip.file(patchEntry.rawDataFile);
           if (!blob) return false;
           const rawData = new Uint8Array(await blob.async('arraybuffer'));
           assertBackupPatchData(patchEntry, rawData);
+
           const fingerprint = await calculateFingerprint(rawData);
           if (patchEntry.fingerprint && patchEntry.fingerprint !== fingerprint) return false;
+
           patches.push({
             ...patchEntry,
             id: crypto.randomUUID(),
@@ -207,14 +448,11 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
             creationDate: new Date().toISOString()
           } as PatchData);
         }
+
         banks.push({ ...entry.bank, patches } as Bank);
       }
 
-      await this.transaction('rw', this.banks, this.patches, this.table('libraries'), async () => {
-        await this.table('libraries').put({
-          id: 'default', version: manifest.version, activeBankId: null,
-          activePresetIndex: 0, lastImportPath: '', lastExportPath: ''
-        });
+      await this.transaction('rw', this.banks, this.patches, async () => {
         await this.banks.clear();
         await this.patches.clear();
         for (const bank of banks) {
@@ -234,18 +472,8 @@ class DexiePersistence extends Dexie implements PersistenceEngine {
   private failedImport(error: string): ImportResult {
     return { success: false, modelId: '', bankName: '', patches: [], warnings: [], error };
   }
-
-  private createEmptyLibrary(): Library {
-    return {
-      version: 1,
-      activeBankId: null,
-      activePresetIndex: 0,
-      banks: [],
-      lastImportPath: '',
-      lastExportPath: ''
-    };
-  }
 }
 
-export const persistenceEngine = new DexiePersistence();
-export { DexiePersistence };
+export const persistenceEngine = new UnifiedDexiePersistence();
+export { UnifiedDexiePersistence };
+export { UnifiedDexiePersistence as DexiePersistence };

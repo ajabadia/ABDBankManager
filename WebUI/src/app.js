@@ -12,19 +12,20 @@ import {
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
-import { getModelContract } from './contracts/modelContracts.js';
+import { getModelContract, MODEL_CONTRACTS } from './contracts/modelContracts.js';
 import {
   applyRenameTemplate, validateRenameTemplate,
   patchesToCsv, parseNamesCsv
 } from './core/patchBulk.js';
-import { decodePro800Parameters } from './core/pro800Parameters.js';
-import { decodeDeepMindParameters } from './core/deepMindParameters.js';
+import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getAllModels, getManufacturer } from './core/modelRegistry.js';
+import { extractDx7Name } from './core/dx7Parameters.js';
 import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
-import { requestMidiAccess, listMidiPorts, createBehringerMidiTransport, fetchBehringerBank } from './core/pro800Midi.js';
+import { requestMidiAccess, listMidiPorts, createBehringerMidiTransport, fetchBehringerBank, createDx7MidiTransport, fetchDx7Bank } from './core/pro800Midi.js';
 
 let midiAccess = null;
 let behringerMidiTransport = null;
+let dx7MidiTransport = null;
 
 // ─── State ───
 let activeBankId = null;
@@ -278,55 +279,32 @@ function renderInterpretedParameters(patch, bank) {
   if (!section || !body || !format) return;
   body.replaceChildren();
   const modelId = bank?.modelId;
-  if (!['behringer-pro800', 'behringer-deepmind12', 'behringer-dm12'].includes(modelId) || !patch.rawData) {
+  const schema = hasParameterSchema(modelId) ? getParameterSchema(modelId) : null;
+  if (!schema || !patch.rawData) {
     section.hidden = true;
     return;
   }
   const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
-  if (modelId === 'behringer-pro800') {
-    const version = rawData[4] || 111;
-    format.textContent = `Pro-800 · Formato v${version}`;
-    for (const parameter of decodePro800Parameters(rawData)) {
-      const row = document.createElement('tr');
-      const name = document.createElement('td');
-      name.textContent = parameter.name;
-      const value = document.createElement('td');
-      value.className = 'parameter-value';
-      const selected = parameter.options?.[parameter.value];
-      value.textContent = selected || (Array.isArray(parameter.value) ? parameter.value.join(', ') : String(parameter.value ?? '—'));
-      const offset = document.createElement('td');
-      offset.textContent = `${parameter.offset}–${parameter.offset + parameter.length - 1}`;
-      const description = document.createElement('td');
-      description.textContent = parameter.description;
-      row.append(name, value, offset, description);
-      body.appendChild(row);
-    }
-  } else if (modelId === 'behringer-deepmind12' || modelId === 'behringer-dm12') {
-    format.textContent = `DeepMind 12 · 242 bytes`;
-    for (const parameter of decodeDeepMindParameters(rawData)) {
-      const row = document.createElement('tr');
-      const name = document.createElement('td');
-      name.textContent = parameter.name;
-      const value = document.createElement('td');
-      value.className = 'parameter-value';
-      if (parameter.kind === 'name') {
-        value.textContent = parameter.displayValue || '—';
-      } else if (parameter.kind === 'enum') {
-        value.textContent = parameter.displayValue;
-      } else if (parameter.kind === 'bipolar') {
-        const bipolar = ((parameter.rawByte ?? 0) - 128);
-        value.textContent = `${bipolar >= 0 ? '+' : ''}${bipolar}`;
-      } else {
-        value.textContent = parameter.rawByte != null ? String(parameter.rawByte) : '—';
-      }
-      const offset = document.createElement('td');
-      const len = parameter.length || 1;
-      offset.textContent = len > 1 ? `${parameter.offset}–${parameter.offset + len - 1}` : `${parameter.offset}`;
-      const description = document.createElement('td');
-      description.textContent = parameter.description;
-      row.append(name, value, offset, description);
-      body.appendChild(row);
-    }
+  format.textContent = schema.formatLabel(rawData);
+  for (const parameter of schema.getTable(rawData)) {
+    const row = document.createElement('tr');
+    const nameCell = document.createElement('td');
+    nameCell.textContent = parameter.name;
+    const valueCell = document.createElement('td');
+    valueCell.className = 'parameter-value';
+    // Generic value rendering — works for all schema formats
+    if (parameter.displayValue != null) valueCell.textContent = parameter.displayValue;
+    else if (parameter.options?.[parameter.value]) valueCell.textContent = parameter.options[parameter.value];
+    else if (parameter.kind === 'bipolar') { const b = ((parameter.rawByte ?? 0) - 128); valueCell.textContent = `${b >= 0 ? '+' : ''}${b}`; }
+    else if (parameter.kind === 'name') valueCell.textContent = parameter.displayValue || '—';
+    else valueCell.textContent = parameter.value != null ? String(parameter.value) : (parameter.rawByte != null ? String(parameter.rawByte) : '—');
+    const offsetCell = document.createElement('td');
+    const len = parameter.length || 1;
+    offsetCell.textContent = len > 1 ? `${parameter.offset}–${parameter.offset + len - 1}` : `${parameter.offset}`;
+    const descCell = document.createElement('td');
+    descCell.textContent = parameter.description;
+    row.append(nameCell, valueCell, offsetCell, descCell);
+    body.appendChild(row);
   }
   section.hidden = false;
 }
@@ -443,11 +421,7 @@ function setupButtons() {
           <span class="patch-info-label">Modelo</span>
           <select class="param-select" id="modal-bank-model">
             <option value="generic">Generico</option>
-            <option value="casio-cz101">Casio CZ-101</option>
-            <option value="roland-juno106">Roland Juno-106</option>
-            <option value="korg-ms2000">Korg MS2000</option>
-            <option value="behringer-dm12">Behringer DeepMind 12</option>
-            <option value="yamaha-dx7">Yamaha DX7</option>
+            ${MODEL_CONTRACTS.map(c => `<option value="${c.modelId}">${escHtml(c.displayName)}</option>`).join('\n            ')}
           </select>
         </div>
       </div>
@@ -458,7 +432,8 @@ function setupButtons() {
     document.getElementById('modal-confirm').onclick = async () => {
       const name = document.getElementById('modal-bank-name').value.trim() || 'Nuevo Banco';
       const modelId = document.getElementById('modal-bank-model').value;
-      const bank = await createBank({ name, modelId, manufacturer: '' });
+      const contract = modelId !== 'generic' ? getModelContract(modelId) : null;
+      const bank = await createBank({ name, modelId, manufacturer: contract?.manufacturer || '' });
       await refreshBankList();
       await selectBank(bank.id);
       await updateStats();
@@ -477,6 +452,8 @@ function setupButtons() {
   document.getElementById('btn-import-csv').onclick = () => document.getElementById('csv-input').click();
   document.getElementById('btn-midi-connect').onclick = handleMidiConnect;
   document.getElementById('btn-midi-fetch').onclick = handleMidiFetch;
+  document.getElementById('btn-midi-send-patch').onclick = handleMidiSendPatch;
+  document.getElementById('btn-midi-send-bank').onclick = handleMidiSendBank;
   document.getElementById('csv-input').onchange = handleImportCsv;
 
   document.getElementById('modal-overlay').onclick = (e) => {
@@ -484,33 +461,212 @@ function setupButtons() {
   };
 }
 
+/**
+ * Detect model from port name.
+ * Returns { modelId, displayName } or null if unknown.
+ */
+const detectModelFromName = detectModelFromPortName;
+
+function findMatchingInput(outputName, inputs) {
+  if (!outputName || inputs.length === 0) return null;
+  const n = outputName.toLowerCase();
+  return inputs.find(p => {
+    const inp = (p.name || '').toLowerCase();
+    return inp === n || inp.includes(n) || n.includes(inp);
+  }) || null;
+}
+
+const ALL_MODELS = getAllModels().map(m => ({ id: m.id, name: m.name }));
+
 async function handleMidiConnect() {
   try {
     midiAccess = await requestMidiAccess();
     const { inputs, outputs } = listMidiPorts(midiAccess);
-    const output = outputs.find(port => /deep.?mind|dm.?12|pro.?800/i.test(port.name || '')) || outputs[0];
-    const input = inputs.find(port => /deep.?mind|dm.?12|pro.?800/i.test(port.name || '')) || inputs[0];
-    if (!output) throw new Error('No se encontró una salida MIDI');
-    behringerMidiTransport?.close();
-    behringerMidiTransport = createBehringerMidiTransport({ modelId: 'behringer-deepmind12', input, output });
-    setStatus('connected', `MIDI conectado: ${output.name || 'salida MIDI'}`);
-    toast('MIDI DeepMind 12 conectado', 'success');
+    if (outputs.length === 0) throw new Error('No se encontró una salida MIDI');
+
+    // --- Phase 1: silent scan ---
+    const classified = outputs.map((port, idx) => ({
+      port, idx,
+      model: detectModelFromName(port.name),
+    }));
+    const known = classified.filter(c => c.model);
+
+    // Case A: exactly 1 known device → auto-connect
+    if (known.length === 1) {
+      const { port, model } = known[0];
+      const input = findMatchingInput(port.name, inputs);
+      connectMidiDevice(port, input, model.modelId);
+      return;
+    }
+
+    // Case B: multiple known devices → pick one
+    if (known.length > 1) {
+      showKnownDevicePicker(known, inputs);
+      return;
+    }
+
+    // Case C: no known devices → manual selector
+    showManualSelector(outputs, inputs);
   } catch (error) {
     setStatus('error', error.message);
     toast(error.message, 'error');
   }
 }
 
+// ─── Case B: multiple known devices ───
+function showKnownDevicePicker(known, inputs) {
+  const rows = known.map((c, i) => {
+    const inPort = findMatchingInput(c.port.name, inputs);
+    const inLabel = inPort ? inPort.name : 'Ninguna';
+    return `<div style="padding:0.5rem 0.7rem;border:1px solid var(--border,#333);border-radius:6px;margin-bottom:0.4rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--surface,#1a1a1a);" class="midi-device-row" data-idx="${i}">
+      <div><strong>${escHtml(c.model.displayName)}</strong><br><small style="color:var(--text-secondary,#888);">Out: ${escHtml(c.port.name || '?')} · In: ${escHtml(inLabel)}</small></div>
+      <span style="color:var(--text-secondary,#888);">▶</span>
+    </div>`;
+  }).join('');
+
+  showModal(`<div style="padding:1rem;">
+    <h3 style="margin:0 0 0.6rem;">Varios dispositivos detectados</h3>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary,#888);font-size:0.85rem;">Selecciona cuál conectar:</p>
+    ${rows}
+    <div class="modal-actions" style="margin-top:0.8rem;">
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
+    </div>
+  </div>`);
+
+  document.querySelectorAll('.midi-device-row').forEach((el, i) => {
+    el.onclick = () => {
+      const c = known[i];
+      const inPort = findMatchingInput(c.port.name, inputs);
+      hideModal();
+      connectMidiDevice(c.port, inPort, c.model.modelId);
+    };
+    el.onmouseenter = () => el.style.borderColor = 'var(--primary,#4fc3f7)';
+    el.onmouseleave = () => el.style.borderColor = 'var(--border,#333)';
+  });
+}
+
+// ─── Case C: manual selector with detect ───
+function showManualSelector(outputs, inputs) {
+  const outOpts = outputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Sin nombre')}</option>`).join('');
+  const inOpts = inputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Sin nombre')}</option>`).join('');
+
+  showModal(`<div style="padding:1rem;">
+    <h3 style="margin:0 0 0.6rem;">Conexión MIDI</h3>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary,#888);font-size:0.85rem;">No se detectaron dispositivos conocidos. Selecciona los puertos:</p>
+    <div class="patch-info-field">
+      <span class="patch-info-label">Salida MIDI</span>
+      <select class="param-select" id="midi-out" style="width:100%">${outOpts}</select>
+    </div>
+    <div class="patch-info-field" style="margin-top:0.5rem;">
+      <span class="patch-info-label">Entrada MIDI</span>
+      <select class="param-select" id="midi-in" style="width:100%"><option value="-1">— No conectar entrada —</option>${inOpts}</select>
+    </div>
+    <button class="btn" id="midi-detect-btn" style="margin-top:0.6rem;width:100%;">🔍 Detectar modelo</button>
+    <div id="midi-detect-result"></div>
+    <div id="midi-model-manual" style="display:none;margin-top:0.5rem;" class="patch-info-field">
+      <span class="patch-info-label">Modelo</span>
+      <select class="param-select" id="midi-port-model" style="width:100%">${ALL_MODELS.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name)}</option>`).join('')}</select>
+    </div>
+    <div class="modal-actions" style="margin-top:1rem;">
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
+      <button class="btn btn-primary" id="midi-confirm" style="display:none;">Conectar</button>
+    </div>
+  </div>`);
+
+  let detectedId = null;
+
+  document.getElementById('midi-detect-btn').onclick = () => {
+    const outIdx = parseInt(document.getElementById('midi-out').value);
+    const port = outputs[outIdx];
+    const found = detectModelFromName(port?.name);
+    const result = document.getElementById('midi-detect-result');
+    const manualDiv = document.getElementById('midi-model-manual');
+    const confirmBtn = document.getElementById('midi-confirm');
+
+    if (found) {
+      detectedId = found.modelId;
+      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(46,204,113,0.15);border:1px solid rgba(46,204,113,0.3);color:#2ecc71;font-weight:600;">✔ Detectado: <strong>${escHtml(found.displayName)}</strong></div>`;
+      manualDiv.style.display = 'none';
+      confirmBtn.style.display = '';
+      confirmBtn.textContent = 'Conectar';
+    } else {
+      detectedId = null;
+      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.3);color:#e74c3c;">✘ Modelo no reconocido. Selecciona uno:</div>`;
+      manualDiv.style.display = '';
+      confirmBtn.style.display = '';
+      confirmBtn.textContent = 'Conectar con modelo seleccionado';
+    }
+  };
+
+  document.getElementById('midi-confirm').onclick = () => {
+    const outIdx = parseInt(document.getElementById('midi-out').value);
+    const inIdx = parseInt(document.getElementById('midi-in').value);
+    const output = outputs[outIdx];
+    const input = inIdx === -1 ? null : inputs[inIdx];
+    const modelId = detectedId || document.getElementById('midi-port-model').value;
+    hideModal();
+    connectMidiDevice(output, input, modelId);
+  };
+}
+
+function connectMidiDevice(output, input, modelId) {
+  dx7MidiTransport?.close();
+  behringerMidiTransport?.close();
+  dx7MidiTransport = null;
+  behringerMidiTransport = null;
+
+  if (modelId === 'yamaha-dx7') {
+    dx7MidiTransport = createDx7MidiTransport({ input, output });
+  } else {
+    behringerMidiTransport = createBehringerMidiTransport({ modelId, input, output });
+  }
+
+  const displayName = getModelDisplayName(modelId);
+  setStatus('connected', `${displayName} conectado: ${output?.name || 'MIDI'}`);
+  toast(`${displayName} conectado${input ? '' : ' (solo envío)'}`, 'success');
+}
+
 async function handleMidiFetch() {
+  // DX7 bulk dump
+  if (dx7MidiTransport) {
+    let bank = activeBankId ? await getBank(activeBankId) : null;
+    const isDx7 = id => id && (id === 'yamaha-dx7' || id === 'yamaha-dx7ii');
+    if (!bank || !isDx7(bank.modelId)) {
+      const allBanks = await getAllBanks();
+      bank = allBanks.find(b => isDx7(b.bank?.modelId || b.modelId));
+      if (!bank) {
+        const contract = getContract('yamaha-dx7');
+        bank = await createBank({ name: contract?.displayName || 'Yamaha DX7', modelId: 'yamaha-dx7', manufacturer: contract?.manufacturer || '' });
+        await refreshBankList();
+      }
+      await selectBank(bank.id);
+    }
+    const button = document.getElementById('btn-midi-fetch');
+    button.disabled = true;
+    try {
+      const controller = new AbortController();
+      const patches = await fetchDx7Bank(dx7MidiTransport, { signal: controller.signal, onProgress: ({ completed, total }) => setStatus('connecting', `Fetch DX7 ${completed}/${total}`) });
+      for (const patch of patches) {
+        const existing = (await getPatchesForBank(bank.id)).find(candidate => candidate.index === patch.slot);
+        const name = extractDx7Name(patch.rawData) || `V${String(patch.slot + 1).padStart(2, '0')}`;
+        if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name });
+        else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name });
+      }
+      await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo');    toast(`Fetch ${getModelDisplayName('yamaha-dx7')} completado — ${patches.length} voces`, 'success');
+    } catch (error) { setStatus('error', error.message); toast(error.message, 'error'); } finally { button.disabled = false; }
+    return;
+  }
+
+  // Behringer (DeepMind 12 / Pro-800)
   if (!behringerMidiTransport) { toast('Conecta primero una salida MIDI', 'error'); return; }
   const isDeepMindModel = id => id && (id === 'behringer-deepmind12' || id === 'behringer-dm12');
   let bank = activeBankId ? await getBank(activeBankId) : null;
   if (!bank || !isDeepMindModel(bank.modelId)) {
-    // Buscar un banco DeepMind existente o crear uno nuevo
     const allBanks = await getAllBanks();
-    bank = allBanks.find(b => isDeepMindModel(b.modelId));
+    bank = allBanks.find(b => isDeepMindModel(b.bank?.modelId || b.modelId));
     if (!bank) {
-      bank = await createBank({ name: 'DeepMind 12', modelId: 'behringer-deepmind12', manufacturer: 'Behringer' });
+      const contract = getContract('behringer-deepmind12');
+      bank = await createBank({ name: contract?.displayName || 'DeepMind 12', modelId: 'behringer-deepmind12', manufacturer: contract?.manufacturer || 'Behringer' });
       await refreshBankList();
     }
     await selectBank(bank.id);
@@ -525,8 +681,60 @@ async function handleMidiFetch() {
       if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name: getModelContract(bank.modelId)?.extractPatchName?.(patch.rawData) || existing.name });
       else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name: getModelContract(bank.modelId)?.extractPatchName?.(patch.rawData) || `P${patch.slot + 1}` });
     }
-    await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo'); toast('Fetch DeepMind 12 completado', 'success');
-  } catch (error) { setStatus('error', error.message); toast(error.message, 'error'); }  finally { button.disabled = false; }
+    await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo');    toast(`Fetch ${getModelDisplayName('behringer-deepmind12')} completado`, 'success');
+  } catch (error) { setStatus('error', error.message); toast(error.message, 'error'); } finally { button.disabled = false; }
+}
+
+// ─── MIDI Send: send patch or bank to connected hardware ───
+async function handleMidiSendPatch() {
+  const transport = dx7MidiTransport || behringerMidiTransport;
+  if (!transport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
+  if (!selectedPatchId) { toast('Selecciona un patch para enviar', 'error'); return; }
+  const patch = await getPatch(selectedPatchId);
+  if (!patch) { toast('Patch no encontrado', 'error'); return; }
+  const bank = await getBank(patch.bankId);
+  if (!bank) { toast('Banco no encontrado', 'error'); return; }
+  const contract = getModelContract(bank.modelId);
+  if (!contract) { toast(`No hay contrato para ${bank.modelId}`, 'error'); return; }
+  const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
+  try {
+    transport.sendPatch({ rawData }, patch.index, contract.midi?.defaultChannel ?? 1);
+    setStatus('connected', `Patch "${patch.name}" enviado a MIDI`);
+    toast(`Patch "${patch.name}" enviado`, 'success');
+  } catch (error) {
+    setStatus('error', error.message);
+    toast(error.message, 'error');
+  }
+}
+
+async function handleMidiSendBank() {
+  const transport = dx7MidiTransport || behringerMidiTransport;
+  if (!transport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
+  if (!activeBankId) { toast('Selecciona un banco para enviar', 'error'); return; }
+  const bank = await getBank(activeBankId);
+  if (!bank) { toast('Banco no encontrado', 'error'); return; }
+  const contract = getModelContract(bank.modelId);
+  if (!contract) { toast(`No hay contrato para ${bank.modelId}`, 'error'); return; }
+  const patches = await getPatchesForBank(activeBankId);
+  if (patches.length === 0) { toast('El banco está vacío', 'error'); return; }
+  const button = document.getElementById('btn-midi-send-bank');
+  button.disabled = true;
+  try {
+    const delay = contract.interMessageDelayMs || 50;
+    for (let i = 0; i < patches.length; i++) {
+      const p = patches[i];
+      const rawData = p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData);
+      transport.sendPatch({ rawData }, p.index, contract.midi?.defaultChannel ?? 1);
+      setStatus('connecting', `Enviando ${i + 1}/${patches.length} — ${p.name}`);
+      if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
+    }
+    await refreshPatchList();
+    setStatus('connected', 'Listo');
+    toast(`Banco "${bank.name}" enviado (${patches.length} patches)`, 'success');
+  } catch (error) {
+    setStatus('error', error.message);
+    toast(error.message, 'error');
+  } finally { button.disabled = false; }
 }
 
 // ─── Bulk rename ───

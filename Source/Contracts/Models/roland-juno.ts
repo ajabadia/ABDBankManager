@@ -74,7 +74,7 @@ const rolandJuno106Contract: ModelContract = {
   displayName: 'Roland Juno-106',
   manufacturer: 'Roland',
   icon: 'roland-logo.svg',
-  thumbnail: 'roland-juno106.webp',
+  thumbnail: 'roland-juno106.jpg',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,

@@ -113,7 +113,7 @@ const korgMs2000Contract: ModelContract = {
   displayName: 'Korg MS2000',
   manufacturer: 'Korg',
   icon: 'korg-logo.svg',
-  thumbnail: 'korg-ms2000.webp',
+  thumbnail: 'korg-ms2000.jpg',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
@@ -225,7 +225,7 @@ export const korgMicrokorgContract: ModelContract = {
   ...korgMs2000Contract,
   modelId: 'korg-microkorg',
   displayName: 'Korg microKORG',
-  thumbnail: 'korg-microkorg.webp'
+  thumbnail: 'korg-microkorg.jpg'
 };
 
 // Prophecy (different model byte, potentially different data size)

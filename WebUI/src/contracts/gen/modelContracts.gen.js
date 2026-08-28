@@ -120,7 +120,7 @@ var casioCzContract = {
   displayName: "Casio CZ-101",
   manufacturer: "Casio",
   icon: "casio-logo.svg",
-  thumbnail: "casio-cz101.webp",
+  thumbnail: "casio-cz101.jpg",
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
   programsPerBank: PROGRAMS_PER_BANK,
@@ -300,7 +300,7 @@ var rolandJuno106Contract = {
   displayName: "Roland Juno-106",
   manufacturer: "Roland",
   icon: "roland-logo.svg",
-  thumbnail: "roland-juno106.webp",
+  thumbnail: "roland-juno106.jpg",
   bankCapacity: BANK_CAPACITY2,
   banksCount: BANKS_COUNT2,
   programsPerBank: PROGRAMS_PER_BANK2,
@@ -494,7 +494,7 @@ var korgMs2000Contract = {
   displayName: "Korg MS2000",
   manufacturer: "Korg",
   icon: "korg-logo.svg",
-  thumbnail: "korg-ms2000.webp",
+  thumbnail: "korg-ms2000.jpg",
   bankCapacity: BANK_CAPACITY3,
   banksCount: BANKS_COUNT3,
   programsPerBank: PROGRAMS_PER_BANK3,
@@ -587,7 +587,7 @@ var korgMicrokorgContract = {
   ...korgMs2000Contract,
   modelId: "korg-microkorg",
   displayName: "Korg microKORG",
-  thumbnail: "korg-microkorg.webp"
+  thumbnail: "korg-microkorg.jpg"
 };
 var korgProphecyContract = {
   ...korgMs2000Contract,
@@ -984,11 +984,32 @@ function splitSysex6(raw) {
   }
   return msgs;
 }
+function dx7HeaderLen(msg) {
+  if (msg.length >= 8 && msg[3] === CMD_BULK && msg[4] === SUB_SINGLE && msg[5] === 0) return 6;
+  if (msg.length >= 9 && msg[4] === CMD_BULK && msg[5] === SUB_SINGLE) return 7;
+  return 0;
+}
 function isDx7Voice(msg, modelByte) {
-  return msg.length === 7 + DX7_PATCH_DATA_SIZE + 2 && msg[0] === 240 && msg[1] === 67 && msg[3] === modelByte && msg[4] === CMD_BULK && msg[5] === SUB_SINGLE && msg[6] === 0 && msg[msg.length - 1] === 247;
+  if (msg[0] !== 240 || msg[1] !== 67 || msg[msg.length - 1] !== 247) return false;
+  const hdr = dx7HeaderLen(msg);
+  if (hdr === 6) {
+    return msg.length === hdr + DX7_PATCH_DATA_SIZE + 2;
+  }
+  if (hdr === 7) {
+    return msg.length === hdr + DX7_PATCH_DATA_SIZE + 2 && msg[3] === modelByte;
+  }
+  return false;
 }
 function isDx7Bulk(msg, modelByte) {
-  return msg.length === 7 + 32 * DX7_PATCH_DATA_SIZE + 2 && msg[0] === 240 && msg[1] === 67 && msg[3] === modelByte && msg[4] === CMD_BULK && msg[5] === SUB_SINGLE && msg[6] === 1 && msg[msg.length - 1] === 247;
+  if (msg[0] !== 240 || msg[1] !== 67 || msg[msg.length - 1] !== 247) return false;
+  const hdr = dx7HeaderLen(msg);
+  if (hdr === 6) {
+    return msg.length === hdr + 32 * DX7_PATCH_DATA_SIZE + 2;
+  }
+  if (hdr === 7) {
+    return msg.length === hdr + 32 * DX7_PATCH_DATA_SIZE + 2 && msg[3] === modelByte;
+  }
+  return false;
 }
 function getDx7ProgramNumber(index) {
   return index % 32 + 1;
@@ -1001,7 +1022,7 @@ var yamahaDx7Contract = {
   displayName: "Yamaha DX7",
   manufacturer: "Yamaha",
   icon: "yamaha-logo.svg",
-  thumbnail: "yamaha-dx7.webp",
+  thumbnail: "yamaha-dx7.jpg",
   bankCapacity: 32,
   banksCount: 1,
   programsPerBank: 32,
@@ -1019,7 +1040,13 @@ var yamahaDx7Contract = {
   patchNameMaxLength: DX7_PATCH_NAME_MAX_LENGTH,
   extractPatchName(data) {
     if (data.length < 19) return "";
-    return new TextDecoder().decode(data.slice(9, 19)).replace(/\0/g, "").trim();
+    const DX7_CHARSET = ` ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!"#$%&'()*+,-./:;<=>?@[\\\\]^_`;
+    const nameBytes = data.slice(9, 19);
+    let name = "";
+    for (const b of nameBytes) {
+      name += DX7_CHARSET[b] || ".";
+    }
+    return name.trimEnd();
   },
   categories: CATEGORIES6,
   defaultCategory: DEFAULT_CATEGORY5,
@@ -1044,7 +1071,7 @@ var yamahaDx7Contract = {
     const data = rawData.slice(0, DX7_PATCH_DATA_SIZE);
     const padded = new Uint8Array(DX7_PATCH_DATA_SIZE);
     padded.set(data);
-    const header = new Uint8Array([240, 67, 16 | channel & 15, 0, CMD_BULK, SUB_SINGLE, 0]);
+    const header = new Uint8Array([240, 67, 16 | channel & 15, CMD_BULK, SUB_SINGLE, 0]);
     const payload = new Uint8Array(header.length + DX7_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
@@ -1057,19 +1084,22 @@ var yamahaDx7Contract = {
   },
   parsePatchSysEx(sysex) {
     if (!isDx7Voice(sysex, 0)) return null;
-    return { rawData: new Uint8Array(sysex.slice(7, 7 + DX7_PATCH_DATA_SIZE)), slot: 0 };
+    const hdr = dx7HeaderLen(sysex);
+    return { rawData: new Uint8Array(sysex.slice(hdr, hdr + DX7_PATCH_DATA_SIZE)), slot: 0 };
   },
   buildDumpRequest(_slot, channel) {
-    return new Uint8Array([240, 67, 16 | channel & 15, 0, CMD_BULK, SUB_SINGLE, 0, 247]);
+    return new Uint8Array([240, 67, 16 | channel & 15, CMD_BULK, SUB_SINGLE, 0, 247]);
   },
   parseDumpResponse(sysex) {
     const msgs = splitSysex6(sysex);
     const results = [];
     for (const msg of msgs) {
+      const hdr = dx7HeaderLen(msg);
+      if (hdr === 0) continue;
       if (isDx7Voice(msg, 0)) {
-        results.push({ rawData: new Uint8Array(msg.slice(7, 7 + DX7_PATCH_DATA_SIZE)), slot: results.length });
+        results.push({ rawData: new Uint8Array(msg.slice(hdr, hdr + DX7_PATCH_DATA_SIZE)), slot: results.length });
       } else if (isDx7Bulk(msg, 0)) {
-        const patchData = msg.slice(7, 7 + 32 * DX7_PATCH_DATA_SIZE);
+        const patchData = msg.slice(hdr, hdr + 32 * DX7_PATCH_DATA_SIZE);
         for (let i = 0; i < 32; i++) {
           const s = i * DX7_PATCH_DATA_SIZE;
           results.push({ rawData: new Uint8Array(patchData.slice(s, s + DX7_PATCH_DATA_SIZE)), slot: i });
@@ -1088,7 +1118,7 @@ var yamahaDx7iiContract = {
   ...yamahaDx7Contract,
   modelId: "yamaha-dx7ii",
   displayName: "Yamaha DX7II",
-  thumbnail: "yamaha-dx7ii.webp",
+  thumbnail: "yamaha-dx7ii.jpg",
   bankCapacity: 64,
   programsPerBank: 64,
   patchDataSize: DX7II_PATCH_DATA_SIZE,
@@ -1105,7 +1135,13 @@ var yamahaDx7iiContract = {
   },
   extractPatchName(data) {
     if (data.length < 19) return "";
-    return new TextDecoder().decode(data.slice(9, 19)).replace(/\0/g, "").trim();
+    const DX7_CHARSET = ` ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!"#$%&'()*+,-./:;<=>?@[\\\\]^_`;
+    const nameBytes = data.slice(9, 19);
+    let name = "";
+    for (const b of nameBytes) {
+      name += DX7_CHARSET[b] || ".";
+    }
+    return name.trimEnd();
   },
   buildPatchSysEx(rawData, _slot, channel) {
     const data = rawData.slice(0, DX7II_PATCH_DATA_SIZE);
