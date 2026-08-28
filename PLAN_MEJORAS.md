@@ -438,6 +438,9 @@ Los blobs y metadatos deben conservarse.
 - [ ] Adapter tape `.wav` y clipboard hex.
 - [x] Tests de roundtrip byte-idéntico para Pro-800 v109/v110.
 - [x] Tests de roundtrip byte-idéntico para DeepMind 12 factory v1.0.
+- [x] Tests de roundtrip byte-idéntico para **Casio CZ** (4 modelos: CZ-101, CZ-1000, CZ-5000, CZ-1 — nibble encoding + checksum).
+- [x] Tests de roundtrip byte-idéntico para **Roland Juno** (4 modelos: Juno-106, Juno-60, Juno-6, HS-60 — XOR checksum).
+- [x] Tests de roundtrip byte-idéntico para **Korg MS2000/microKORG/Prophecy** (3 modelos — 7-to-8 packing).
 - [ ] Tests de roundtrip byte-idéntico para el resto de formatos con fixtures reales.
 
 ### Criterios de aceptación
@@ -531,3 +534,16 @@ Los blobs y metadatos deben conservarse.
 - [ ] Completar todos los campos del mapa Pro-800 (afinación, acordes, todos los campos versionados).
 - [ ] Completar todos los campos del mapa DeepMind 12 (mod matrix slots 9-32 para firmware v2+, chord memory virtual).
 - [~] Añadir esquemas de parámetros para otros modelos (Casio CZ, Roland Juno, Korg MS2000, Yamaha DX7). DX7 completado: 128 parámetros (6 ops × 18 + 19 globales + name), UI integrada. Pendientes: Casio, Roland, Korg.
+
+## MF.5. Imagen personalizada por banco
+
+- [ ] Permitir al usuario subir una imagen (foto del hardware, portada de librería, etc.) para cada banco.
+- [ ] Almacenar la imagen como blob en IndexedDB (junto al rawData de los patches).
+- [ ] Mostrar la imagen en el panel de detalle del banco y como miniatura en la lista.
+- [ ] Soportar formats: JPEG, PNG, WebP. Limitar tamaño a 500KB, redimensionar automáticamente a 400×240px.
+- [ ] Opción para usar el thumbnail del modelo como imagen por defecto del banco.
+- [ ] Exportar la imagen dentro del archivo `.abdlibrary` (ZIP).
+- [ ] Añadir botón "Cambiar imagen" en el editor de banco (junto a renombrar).
+- [ ] Drag & drop de imagen sobre el banco en la sidebar.
+
+> **Nota**: Los thumbnails de modelo (`/images/models/thumbs/`) son imágenes genéricas por modelo. La imagen personalizada del banco permite al usuario identificar visualmente cada colección de patches (ej: "Mi librería de pads", "Patches de koncert", "ROM 1A factory").
