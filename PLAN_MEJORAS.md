@@ -547,3 +547,28 @@ Los blobs y metadatos deben conservarse.
 - [ ] Drag & drop de imagen sobre el banco en la sidebar.
 
 > **Nota**: Los thumbnails de modelo (`/images/models/thumbs/`) son imágenes genéricas por modelo. La imagen personalizada del banco permite al usuario identificar visualmente cada colección de patches (ej: "Mi librería de pads", "Patches de koncert", "ROM 1A factory").
+
+## MF.6. Ficha de datos del hardware
+
+- [ ] Panel expandible en el sidebar o modal con especificaciones del modelo seleccionado.
+- [ ] Campos: fabricante, modelo, año, tipo de síntesis, polifonía, teclado (nº teclas), display, dimensiones, peso, alimentación.
+- [ ] Conexiones: MIDI In/Out/Thru, audio out, audio in (si aplica), pedal, USB.
+- [ ] Características especiales: efectos, arpegiador, secuenciador, mod matrix, etc.
+- [ ] Enlaces útiles: manual PDF, página oficial, foro, comunidad.
+- [ ] Datos almacenados en el contrato del modelo (`ModelContract.ts`) como campo `hardwareSpec`.
+- [ ] Renderizado en UI como ficha estilo "ficha técnica" con iconos por sección.
+- [ ] Cada modelo tiene su propia ficha pre-cargada (EDITABLE por el usuario para notas personales).
+
+## MF.7. Ficha de datos del banco
+
+- [ ] Panel de metadatos extensible por banco (junto a nombre y modelo).
+- [ ] Campos predefinidos: descripción, autor/creador, fecha de creación, fuente/procedencia, licencia.
+- [ ] Campos de contenido: nº patches, categorías representativas, rango de patches (A01–D32), formato SysEx.
+- [ ] Campos técnicos: versión de firmware compatible, notas de compatibilidad, known issues.
+- [ ] Tags/librería de etiquetas libre (ej: "pads", "leads", "factory", "user", "community").
+- [ ] Notas libre del usuario (markdown o texto plano).
+- [ ] Historial de cambios: última importación, última modificación, último envío a hardware.
+- [ ] Exportar la ficha dentro del archivo `.abdlibrary` y en exportación CSV.
+- [ ] Búsqueda全文 que incluya campos de la ficha (descripción, tags, notas).
+
+> **Casos de uso**: Un usuario con 50 bancos necesita identificar rápidamente cuál es "ROM 1A original de Yamaha" vs "Colección de Pads de la comunidad" vs "Mis patches editados". La ficha del banco permite esa catalogación. La ficha del hardware permite consultar rápidamente "¿cuántas voces tiene el Pro-800?" sin salir de la app.
