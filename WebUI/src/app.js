@@ -54,6 +54,9 @@ async function init() {
   // MIDI status button
   document.getElementById('midi-status').onclick = handleMidiConnect;
 
+  // Help button
+  document.getElementById('btn-help').onclick = showShortcutsHelp;
+
   // Keyboard shortcuts
   document.addEventListener('keydown', handleKeyboard);
 
@@ -963,16 +966,119 @@ async function handleImportCsv(e) {
   toast(`${updated} nombres actualizados`, 'success');
 }
 
-// ─── Keyboard shortcuts ───
+// ─── MF.12 Keyboard shortcuts ───
 function handleKeyboard(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  if (e.ctrlKey || e.metaKey) {
-    if (e.key === 'i') { e.preventDefault(); document.getElementById('file-input')?.click(); }
-    if (e.key === 'e') { e.preventDefault(); handleExport(); }
-    if (e.key === 'm') { e.preventDefault(); handleMidiConnect(); }
-    if (e.key === 'f') { e.preventDefault(); document.getElementById('global-search')?.focus(); }
+  const isInInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+  const ctrl = e.ctrlKey || e.metaKey;
+
+  // Escape always works
+  if (e.key === 'Escape') {
+    if (document.getElementById('modal-overlay').classList.contains('active')) {
+      hideModal();
+    } else if (compareIds.size > 0) {
+      compareIds.clear(); renderContent();
+    } else if (selectedPatchId) {
+      selectedPatchId = null; renderNav(); renderContent();
+    }
+    return;
   }
-  if (e.key === 'Escape') { hideModal(); }
+
+  // Don't process shortcuts when typing in inputs
+  if (isInInput) return;
+
+  // Ctrl/Cmd shortcuts
+  if (ctrl) {
+    if (e.key === 'i') { e.preventDefault(); document.getElementById('file-input')?.click(); }
+    else if (e.key === 'e' && !e.shiftKey) { e.preventDefault(); handleExport(); }
+    else if (e.key === 'e' && e.shiftKey) { e.preventDefault(); handleExportLibrary(); }
+    else if (e.key === 's') { e.preventDefault(); toast('Guardado', 'success'); }
+    else if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); toast('Deshacer (próximamente)', 'info'); }
+    else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); toast('Rehacer (próximamente)', 'info'); }
+    else if (e.key === 'm') { e.preventDefault(); handleMidiConnect(); }
+    else if (e.key === 'f') { e.preventDefault(); document.getElementById('global-search')?.focus(); }
+    return;
+  }
+
+  // Arrow keys — navigate patches
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    navigatePatches(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+
+  // Enter — select focused patch
+  if (e.key === 'Enter') {
+    const focused = document.querySelector('.list-item.active, .patch-chip.active');
+    if (focused) focused.click();
+    return;
+  }
+
+  // Delete — remove selected patch
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (selectedPatchId) confirmDeletePatch();
+    return;
+  }
+
+  // ? — show shortcuts help
+  if (e.key === '?') {
+    showShortcutsHelp();
+    return;
+  }
+}
+
+async function navigatePatches(direction) {
+  if (!selectedBankId) return;
+  const patches = await getPatchesForBank(selectedBankId);
+  if (patches.length === 0) return;
+  const currentIdx = patches.findIndex(p => p.id === selectedPatchId);
+  let nextIdx = currentIdx + direction;
+  if (nextIdx < 0) nextIdx = patches.length - 1;
+  if (nextIdx >= patches.length) nextIdx = 0;
+  selectPatch(patches[nextIdx].id);
+}
+
+function confirmDeletePatch() {
+  if (!selectedPatchId) return;
+  showModal(`
+    <h3>Eliminar Patch</h3>
+    <p style="margin-bottom:1rem;color:var(--text-secondary);">¿Eliminar este patch?</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
+      <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Eliminar</button>
+    </div>`);
+  document.getElementById('modal-confirm').onclick = async () => {
+    await deletePatch(selectedPatchId);
+    selectedPatchId = null;
+    renderNav(); renderContent();
+    toast('Patch eliminado', 'success');
+    hideModal();
+  };
+}
+
+function showShortcutsHelp() {
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const mod = isMac ? '⌘' : 'Ctrl';
+  showModal(`
+    <h3>Atajos de teclado</h3>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:0.4rem 1rem;font-size:0.85rem;">
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+I</kbd><span>Importar archivo</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+E</kbd><span>Exportar banco</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+⇧+E</kbd><span>Exportar librería</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+S</kbd><span>Guardar</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+M</kbd><span>Conectar MIDI</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+F</kbd><span>Buscar</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Z</kbd><span>Deshacer</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Y</kbd><span>Rehacer</span>
+      <hr style="grid-column:1/-1;border-color:var(--border);margin:0.3rem 0;">
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">↑ ↓</kbd><span>Navegar patches</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Enter</kbd><span>Seleccionar patch</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Supr</kbd><span>Eliminar patch</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Esc</kbd><span>Cerrar modal / Deseleccionar</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">?</kbd><span>Mostrar esta ayuda</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cerrar</button>
+    </div>`);
 }
 
 // ─── Utils ───
