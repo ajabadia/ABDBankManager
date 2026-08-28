@@ -1,49 +1,64 @@
 import { describe, it, expect } from 'vitest';
-import { validateContract, areModelsCompatible } from '../src/ModelContract.js';
+import { validateModelContract } from '@contracts/ModelContract';
+import { allModelContracts, getModelContract } from '@contracts/Models';
 
-describe('validateContract', () => {
-  const validContract = {
-    modelId: 'korg-ms2000',
-    displayName: 'Korg MS2000',
-    manufacturer: 'Korg',
-    bankCapacity: 128,
-    banksCount: 8,
-    programsPerBank: 16,
-    getProgramAddress: (i) => `${'ABCDEFGH'[Math.floor(i/16)]}.${String((i%16)+1).padStart(2,'0')}`,
-    patchDataSize: 288,
-    categories: ['Bass','Lead','Pad','FX','Keys'],
-    sysexManufacturerId: [0x42],
-    formatVersion: 1,
-  };
-
-  it('validates a correct contract', () => {
-    const res = validateContract(validContract);
-    expect(res.valid).toBe(true);
-    expect(res.errors).toHaveLength(0);
+describe('ModelContract Validation', () => {
+  it('should validate all built-in model contracts', () => {
+    allModelContracts.forEach(contract => {
+      const result = validateModelContract(contract);
+      expect(result.valid).toBe(true);
+      if (!result.valid) {
+        console.error(`${contract.modelId} failed:`, result.errors);
+      }
+    });
   });
 
-  it('catches missing fields', () => {
-    const { modelId, ...incomplete } = validContract;
-    const res = validateContract(incomplete);
-    expect(res.valid).toBe(false);
-    expect(res.errors).toContain('Missing required field: modelId');
+  it('should have unique modelIds', () => {
+    const ids = allModelContracts.map(c => c.modelId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('should have correct bankCapacity = banksCount * programsPerBank', () => {
+    allModelContracts.forEach(contract => {
+      expect(contract.bankCapacity).toBe(contract.banksCount * contract.programsPerBank);
+    });
+  });
+
+  it('should have valid address round-trip', () => {
+    allModelContracts.forEach(contract => {
+      for (let i = 0; i < Math.min(5, contract.bankCapacity); i++) {
+        const addr = contract.getProgramAddress(i);
+        const parsed = contract.parseProgramAddress(addr);
+        expect(parsed).toBe(i);
+      }
+    });
+  });
+
+  it('should have sysexManufacturerId defined', () => {
+    allModelContracts.forEach(contract => {
+      expect(Array.isArray(contract.sysexManufacturerId)).toBe(true);
+      expect(contract.sysexManufacturerId.length).toBeGreaterThan(0);
+    });
   });
 });
 
-describe('areModelsCompatible', () => {
-  const ms2000 = { modelId: 'korg-ms2000', compatibleModels: ['korg-microkorg'] };
-  const microkorg = { modelId: 'korg-microkorg', compatibleModels: ['korg-ms2000'] };
-  const cz101 = { modelId: 'casio-cz101', compatibleModels: ['casio-cz1000'] };
-
-  it('handles self compatibility', () => {
-    expect(areModelsCompatible(ms2000, ms2000)).toBe(true);
+describe('ModelContract Lookup', () => {
+  it('should find contracts by modelId', () => {
+    expect(getModelContract('casio-cz101')).toBeDefined();
+    expect(getModelContract('roland-juno106')).toBeDefined();
+    expect(getModelContract('korg-ms2000')).toBeDefined();
+    expect(getModelContract('behringer-deepmind12')).toBeDefined();
+    expect(getModelContract('yamaha-dx7')).toBeDefined();
   });
 
-  it('detects compatible model pair', () => {
-    expect(areModelsCompatible(ms2000, microkorg)).toBe(true);
+  it('should return undefined for unknown modelId', () => {
+    expect(getModelContract('unknown-model')).toBeUndefined();
   });
 
-  it('blocks incompatible models', () => {
-    expect(areModelsCompatible(ms2000, cz101)).toBe(false);
+  it('should return compatible models', () => {
+    const cz101Compat = getModelContract('casio-cz101')?.compatibleModels;
+    expect(cz101Compat).toContain('casio-cz1000');
+    expect(cz101Compat).toContain('casio-cz5000');
+    expect(cz101Compat).toContain('casio-cz1');
   });
 });

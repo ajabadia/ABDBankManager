@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ABD Bank Manager Parameter Registry",
+  "schemaVersion": "1.0.0",
+  "description": "Single Source of Truth for Bank Manager parameters. Vacío a propósito: el gestor de bancos no edita parámetros de sintetizador. La configuración MIDI (canal/device ID) se deriva del ModelContract.midi y de HARDWARE_QUEUE_CONFIGS (Source/Core/MidiSysExQueue.ts), no es editable. Este registro queda como SSOT para los parámetros de editor que definan los plugins ABD (panelFactory/paramStore). Generator produces C++ headers, JS registry, and validation data.",
+  "parameters": []
+}

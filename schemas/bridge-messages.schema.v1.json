@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ABD Bank Manager Bridge Messages Schema",
+  "schemaVersion": "1.0.0",
+  "description": "Schema for IPC messages between WebUI and C++ (WebView2/WASM)",
+  "oneOf": [
+    { "$ref": "#/definitions/webuiToCpp" },
+    { "$ref": "#/definitions/cppToWebui" }
+  ],
+  "definitions": {
+    "webuiToCpp": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "enum": ["setParam", "requestFullState", "loadBank", "saveBank", "importFile", "exportFile", "fetchFromHardware", "dumpToHardware", "auditionPatch", "randomizePatch", "createBank", "deleteBank", "renameBank", "movePatch", "copyPatch", "deletePatch", "updatePatchMetadata"] },
+        "paramId": { "type": "string" },
+        "value": { "type": ["number", "boolean", "string"] },
+        "bankId": { "type": "string" },
+        "patchIndex": { "type": "integer" },
+        "patchData": { "type": "object" },
+        "options": { "type": "object" },
+        "fileName": { "type": "string" },
+        "fileData": { "type": "string", "description": "Base64 encoded" }
+      }
+    },
+    "cppToWebui": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "enum": ["paramChanged", "syncAllParams", "bankLoaded", "bankSaved", "importResult", "exportResult", "hardwareConnected", "hardwareDisconnected", "hardwareProgress", "hardwareError", "patchAuditioned", "patchRandomized", "bankListChanged", "patchListChanged", "midiActivity"] },
+        "paramId": { "type": "string" },
+        "value": { "type": ["number", "boolean", "string"] },
+        "data": { "type": "object" },
+        "bankId": { "type": "string" },
+        "banks": { "type": "array" },
+        "patches": { "type": "array" },
+        "patchIndex": { "type": "integer" },
+        "result": { "type": "object" },
+        "error": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+        "channel": { "type": "integer" },
+        "cc": { "type": "integer" },
+        "isIncoming": { "type": "boolean" }
+      }
+    }
+  }
+}

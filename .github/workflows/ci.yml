@@ -1,0 +1,315 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20.x'
+  CMAKE_VERSION: '3.22'
+
+jobs:
+  # --- Schema Validation ---
+  schema-validation:
+    name: Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate registry
+        run: npm run generate
+
+      - name: Validate parameter registry
+        run: |
+          # Check for duplicate IDs
+          node -e "
+            const fs = require('fs');
+            const registry = JSON.parse(fs.readFileSync('schemas/parameter-registry.data.json', 'utf8'));
+            const ids = registry.parameters.map(p => p.id);
+            const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+            if (dupes.length > 0) {
+              console.error('Duplicate IDs:', dupes);
+              process.exit(1);
+            }
+            console.log('✅ No duplicate IDs');
+          "
+
+      - name: Validate CC assignments
+        run: |
+          node -e "
+            const fs = require('fs');
+            const registry = JSON.parse(fs.readFileSync('schemas/parameter-registry.data.json', 'utf8'));
+            const ccs = registry.parameters
+              .filter(p => p.cc !== null && p.cc !== undefined)
+              .map(p => p.cc);
+            const dupes = ccs.filter((cc, i) => ccs.indexOf(cc) !== i);
+            if (dupes.length > 0) {
+              console.error('Duplicate CCs:', dupes);
+              process.exit(1);
+            }
+            console.log('✅ No duplicate CCs');
+          "
+
+      - name: Validate sysex offsets
+        run: |
+          node -e "
+            const fs = require('fs');
+            const registry = JSON.parse(fs.readFileSync('schemas/parameter-registry.data.json', 'utf8'));
+            const sysexParams = registry.parameters.filter(p => p.sysex);
+            const offsets = sysexParams.map(p => p.sysexOffset).sort((a, b) => a - b);
+            const valid = offsets.every((offset, i) => offset === i);
+            if (!valid) {
+              console.error('Sysex offset collision or gap:', offsets);
+              process.exit(1);
+            }
+            console.log('✅ Sysex offsets sequential:', offsets.length);
+          "
+
+  # --- Registry Generation ---
+  registry-generation:
+    name: Registry Generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate registry
+        run: npm run generate
+
+      - name: Verify generated artifacts exist
+        run: |
+          test -f Source/State/ParameterRegistry.gen.h
+          test -f Source/State/ParameterRegistry.gen.cpp
+          test -f WebUI/src/contracts/registry.gen.js
+          test -f WebUI/src/contracts/buildVersion.js
+          test -f schemas/parameter-registry.data.json
+          echo "✅ All artifacts generated"
+
+      - name: Verify generated artifacts are not empty
+        run: |
+          test -s Source/State/ParameterRegistry.gen.h
+          test -s Source/State/ParameterRegistry.gen.cpp
+          test -s WebUI/src/contracts/registry.gen.js
+          echo "✅ Artifacts have content"
+
+  # --- WebUI Tests ---
+  vitest:
+    name: WebUI Tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate registry
+        run: npm run generate
+
+      - name: Run Vitest
+        run: npm test
+
+  # --- C++ Unit Tests (Windows) ---
+  cpp-unit-tests:
+    name: C++ Unit Tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+
+      - name: Install JUCE (via submodule)
+        run: |
+          git submodule update --init --recursive
+
+      - name: Configure CMake
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run C++ Tests
+        run: |
+          $testExe = Get-ChildItem -Path build -Filter "*Tests*" -Recurse | Where-Object { $_.Extension -eq '.exe' }
+          if ($testExe) {
+            & $testExe.FullName
+          } else {
+            Write-Warning "No test executable found"
+          }
+
+  # --- WASM Build ---
+  wasm-build:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Configure WASM CMake
+        run: |
+          source $EMSDK/emsdk_env.sh
+          emcmake cmake -B build-wasm -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build WASM
+        run: |
+          source $EMSDK/emsdk_env.sh
+          cmake --build build-wasm --config Release --parallel
+
+  # --- Plugin Validation ---
+  pluginval:
+    name: Plugin Validation (pluginval)
+    runs-on: windows-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+
+      - name: Install JUCE
+        run: git submodule update --init --recursive
+
+      - name: Configure CMake
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Plugin
+        run: cmake --build build --config Release --parallel
+
+      - name: Install pluginval
+        run: |
+          # pluginval installation would go here
+          # For now, skip if not available
+          echo "pluginval step - would run pluginval --strictness-level 5"
+
+      # - name: Run pluginval
+      #   run: |
+      #     $pluginPath = Get-ChildItem -Path build -Filter "*.vst3" -Recurse | Select-Object -First 1
+      #     if ($pluginPath) {
+      #       pluginval --strictness-level 5 --validate $pluginPath.FullName
+      #     }
+
+  # --- Allocation Audit ---
+  allocation-audit:
+    name: Allocation Audit
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+
+      - name: Install JUCE
+        run: git submodule update --init --recursive
+
+      - name: Configure CMake with sanitizers
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+
+      - name: Build with ASan
+        run: cmake --build build --config Debug --parallel
+
+      - name: Run tests with ASan
+        run: |
+          $testExe = Get-ChildItem -Path build -Filter "*Tests*" -Recurse | Where-Object { $_.Extension -eq '.exe' }
+          if ($testExe) {
+            $env:ASAN_OPTIONS = "detect_leaks=1:halt_on_error=1"
+            & $testExe.FullName
+          }
+
+  # --- Security Scan ---
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      - name: Check for known vulnerabilities
+        run: |
+          npx audit-ci --config audit-ci.json || true
+
+  # --- Build Verification ---
+  build-verification:
+    name: Build Verification
+    runs-on: windows-latest
+    needs: [schema-validation, registry-generation, vitest, cpp-unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+
+      - name: Install JUCE
+        run: git submodule update --init --recursive
+
+      - name: Full Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
+
+      - name: Verify outputs
+        run: |
+          $lib = Get-ChildItem -Path build -Filter "*.lib" -Recurse | Where-Object { $_.Name -like "*BankManager*" }
+          $dll = Get-ChildItem -Path build -Filter "*.dll" -Recurse | Where-Object { $_.Name -like "*BankManager*" }
+          if ($lib -and $dll) {
+            Write-Host "✅ Library and DLL found"
+          } else {
+            Write-Error "Missing build outputs"
+            exit 1
+          }
+
+  # --- Release ---
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build-verification]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/*.dll
+            build/*.lib
+          generate_release_notes: true

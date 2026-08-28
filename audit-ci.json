@@ -1,0 +1,12 @@
+{
+  "audit": {
+    "level": "high",
+    "ignore": [],
+    "registry": "https://registry.npmjs.org/"
+  },
+  "ci": {
+    "audit-level": "high",
+    "ignore": [],
+    "registry": "https://registry.npmjs.org/"
+  }
+}

@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ABD Universal Bank Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+    {
+      "imports": {
+        "dexie": "https://esm.sh/dexie@4.4.5",
+        "jszip": "https://esm.sh/jszip@3.10.1",
+        "file-saver": "https://esm.sh/file-saver@2.0.5"
+      }
+    }
+    </script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --accent: #00d4ff;
+            --accent-dim: #00d4ff22;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --border: #30363d;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+        }
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary);
+        }
+        .header h1 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), #3fb950);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .header-actions { display: flex; gap: 0.5rem; align-items: center; }
+        .version-badge {
+            background: var(--accent-dim);
+            color: var(--accent);
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+        }
+
+        /* Status bar */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 1.5rem;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+        }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .status-dot.connected { background: var(--success); }
+        .status-dot.connecting { background: var(--warning); animation: pulse 1s infinite; }
+        .status-dot.error { background: var(--error); }
+        @keyframes pulse { 50% { opacity: 0.4; } }
+
+        /* Main layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            height: calc(100vh - 80px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sidebar-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            list-style: none;
+            padding: 0.25rem;
+        }
+        .list-item {
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.1s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .list-item:hover { background: var(--bg-tertiary); }
+        .list-item.active { background: var(--accent-dim); color: var(--accent); }
+        .list-item .item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .list-item .patch-check { flex-shrink: 0; margin-right: 0.5rem; accent-color: var(--accent); cursor: pointer; }
+        .list-item .item-badge {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+            flex-shrink: 0;
+        }
+        .list-item .item-actions {
+            display: none;
+            gap: 0.25rem;
+            margin-left: 0.5rem;
+        }
+        .list-item:hover .item-actions { display: flex; }
+        .list-item:hover .item-badge { display: none; }
+        .list-empty {
+            padding: 1.5rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        /* Sidebar sections */
+        .sidebar-section {
+            border-bottom: 1px solid var(--border);
+        }
+        .sidebar-section-body { max-height: 40vh; overflow-y: auto; }
+        .sidebar-section.collapsed .sidebar-section-body { display: none; }
+        .sidebar-section-toggle {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .sidebar-section-toggle:hover { color: var(--text-primary); }
+
+        /* Action buttons */
+        .sidebar-actions {
+            padding: 0.75rem 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .btn:hover { background: var(--border); }
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg-primary);
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+        .btn-primary:hover { opacity: 0.85; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
+        .btn-icon { padding: 0.25rem; width: 24px; height: 24px; justify-content: center; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Main content */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 1.5rem;
+            gap: 1.5rem;
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .panel-body { padding: 1rem; }
+        .params-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 0.75rem;
+        }
+
+        /* Param controls */
+        .param-control {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.4rem;
+            transition: border-color 0.15s;
+        }
+        .param-control:hover { border-color: var(--accent); }
+        .param-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-align: center;
+            font-weight: 500;
+        }
+        .param-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Rotary knob */
+        .rotary-knob {
+            width: 64px; height: 64px;
+            background: conic-gradient(from -135deg, var(--bg-primary) 0%, var(--accent) 50%, var(--bg-primary) 100%);
+            border-radius: 50%;
+            border: 3px solid var(--border);
+            position: relative;
+            cursor: grab;
+            transition: transform 0.03s linear;
+        }
+        .rotary-knob::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 3px; height: 16px;
+            background: var(--accent);
+            transform: translate(-50%, -100%);
+            transform-origin: center bottom;
+            border-radius: 2px;
+        }
+        .rotary-knob.dragging { cursor: grabbing; }
+
+        /* Choice select */
+        .param-select {
+            width: 100%;
+            padding: 0.4rem;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.8rem;
+        }
+
+        /* Boolean toggle */
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .toggle-input { display: none; }
+        .toggle-slider {
+            width: 36px; height: 20px;
+            background: var(--bg-primary);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            position: relative;
+            transition: all 0.2s;
+        }
+        .toggle-slider::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 12px; height: 12px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        .toggle-input:checked + .toggle-slider {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+        }
+        .toggle-input:checked + .toggle-slider::after {
+            left: 18px;
+            background: var(--accent);
+        }
+
+        /* Patch info */
+        .patch-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+        .patch-info-field { display: flex; flex-direction: column; gap: 0.25rem; }
+        .patch-info-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+        }
+        .patch-info-input {
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .patch-info-input:focus { outline: none; border-color: var(--accent); }
+        .interpreted-parameters { margin-top: 1rem; }
+        .parameter-table-wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+        .parameter-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+        .parameter-table th, .parameter-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
+        .parameter-table th { position: sticky; top: 0; background: var(--bg-secondary); color: var(--text-secondary); font-size: 0.65rem; text-transform: uppercase; }
+        .parameter-table td:nth-child(2), .parameter-table td:nth-child(3) { font-family: 'JetBrains Mono', monospace; }
+        .parameter-table .parameter-value { color: var(--accent); font-weight: 600; }
+
+        /* SysEx viewer */
+        .sysex-viewer { margin-top: 1rem; }
+        .hex-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.6rem 0;
+        }
+        .hex-toolbar .spacer { flex: 1; }
+        .hex-toggle.active {
+            background: var(--accent);
+            color: #0b0f1c;
+            font-weight: 600;
+        }
+        .hexdump {
+            background: #0a0d16;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            color: #b8d4e8;
+            overflow-x: auto;
+            overflow-y: auto;
+            max-height: 340px;
+            white-space: pre;
+        }
+        .hexdump .hex-offset { color: #5b6b7a; user-select: none; }
+        .hexdump .hex-ascii { color: #7ee787; }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast {
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            animation: slideIn 0.2s ease-out;
+            max-width: 360px;
+        }
+        .toast.success { background: #3fb95022; border: 1px solid var(--success); color: var(--success); }
+        .toast.error { background: #f8514922; border: 1px solid var(--error); color: var(--error); }
+        .toast.info { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* Footer */
+        .footer {
+            padding: 0.5rem 1.5rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.65rem;
+            background: var(--bg-secondary);
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 500;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            min-width: 360px;
+            max-width: 500px;
+        }
+        .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
+        .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+        @media (max-width: 900px) {
+            .main-grid { grid-template-columns: 1fr; }
+            .sidebar { max-height: 40vh; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>ABD Bank Manager</h1>
+        <div class="header-actions">
+            <span id="version" class="version-badge">v0.1.0</span>
+        </div>
+    </header>
+
+    <div class="status-bar">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Inicializando...</span>
+        <span style="margin-left:auto; color:var(--text-secondary); font-size:0.75rem;" id="db-stats"></span>
+    </div>
+
+    <div class="main-grid">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-section-toggle" onclick="toggleSection(this)">
+                    <span>&#9660;</span> Bancos
+                </div>
+                <div class="sidebar-section-body">
+                    <ul class="sidebar-list" id="bank-list"></ul>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-section-toggle" onclick="toggleSection(this)">
+                    <span>&#9660;</span> Patches
+                </div>
+                <div class="sidebar-section-body" style="max-height:50vh;">
+                    <ul class="sidebar-list" id="patch-list"></ul>
+                </div>
+            </div>
+
+            <div class="sidebar-actions">
+                <button class="btn btn-primary" id="btn-new-bank">+ Nuevo Banco</button>
+                <button class="btn" id="btn-import">Importar</button>
+                <button class="btn" id="btn-export">Exportar</button>
+                <button class="btn" id="btn-export-library">Exportar Librería</button>
+                <button class="btn" id="btn-midi-connect">Conectar MIDI</button>
+                <button class="btn" id="btn-midi-fetch">Fetch DeepMind 12</button>
+                <button class="btn" id="btn-bulk-rename">Renombrar</button>
+                <button class="btn" id="btn-export-csv">Exportar nombres CSV</button>
+                <button class="btn" id="btn-import-csv">Importar nombres CSV</button>
+            </div>
+        </aside>
+
+        <main class="main-content" id="main-content">
+            <div class="panel" id="panel-patch-info" style="display:none;">
+                <div class="panel-header">
+                    <span class="panel-title">Parche Activo</span>
+                    <div style="display:flex;gap:0.4rem;">
+                        <button class="btn btn-sm" id="btn-fav">&#9734; Favorito</button>
+                        <button class="btn btn-sm" style="color:var(--error);" id="btn-delete-patch">Borrar</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="patch-info">
+                        <div class="patch-info-field">
+                            <span class="patch-info-label">Nombre</span>
+                            <input class="patch-info-input" id="patch-name" type="text" maxlength="64">
+                        </div>
+                        <div class="patch-info-field">
+                            <span class="patch-info-label">Categoria</span>
+                            <select class="param-select" id="patch-category">
+                                <option>Bass</option><option>Lead</option><option>Pad</option>
+                                <option>Keys</option><option>FX</option><option>Perc</option>
+                                <option>Synth</option><option>Other</option>
+                            </select>
+                        </div>
+                        <div class="patch-info-field">
+                            <span class="patch-info-label">Autor</span>
+                            <input class="patch-info-input" id="patch-author" type="text" maxlength="64">
+                        </div>
+                        <div class="patch-info-field">
+                            <span class="patch-info-label">Notas</span>
+                            <input class="patch-info-input" id="patch-notes" type="text">
+                        </div>
+                    </div>
+                    <section id="interpreted-parameters" class="interpreted-parameters" hidden>
+                        <div class="panel-header" style="padding-left:0;padding-right:0;">
+                            <span class="panel-title">Parámetros interpretados</span>
+                            <span id="parameter-format" class="item-badge"></span>
+                        </div>
+                        <div class="parameter-table-wrap">
+                            <table class="parameter-table">
+                                <thead><tr><th>Parámetro</th><th>Valor</th><th>Offset</th><th>Descripción</th></tr></thead>
+                                <tbody id="parameter-table-body"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section id="sysex-viewer" class="sysex-viewer" hidden>
+                        <div class="panel-header" style="padding-left:0;padding-right:0;">
+                            <span class="panel-title">Datos SysEx</span>
+                            <span id="sysex-meta" class="item-badge"></span>
+                        </div>
+                        <div class="hex-toolbar">
+                            <div class="btn-group">
+                                <button class="btn btn-sm hex-toggle active" id="btn-hex-decoded">Blob</button>
+                                <button class="btn btn-sm hex-toggle" id="btn-hex-message" hidden>Mensaje F0…F7</button>
+                            </div>
+                            <span class="spacer"></span>
+                            <button class="btn btn-sm" id="btn-copy-hex">Copiar hex</button>
+                            <button class="btn btn-sm" id="btn-download-syx">Descargar .syx</button>
+                        </div>
+                        <pre class="hexdump" id="sysex-hex"></pre>
+                    </section>
+                </div>
+            </div>
+
+            <div id="panel-empty" style="display:flex;justify-content:center;align-items:center;height:200px;color:var(--text-secondary);">
+                Selecciona un banco y parche, o importa un archivo para comenzar
+            </div>
+        </main>
+    </div>
+
+    <footer class="footer">
+        ABD Universal Bank Manager v0.1.0 — Dexie.js · Zod · JSZip · JUCE 8
+    </footer>
+
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="modal-content"></div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <input type="file" id="file-input" accept=".abdbank,.abdlibrary,.json,.syx" style="display:none">
+    <input type="file" id="csv-input" accept=".csv" style="display:none">
+    <div id="midi-status" style="display:none"></div>
+
+    <script type="module" src="src/app.js"></script>
+</body>
+</html>

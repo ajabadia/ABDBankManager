@@ -1,21 +1,45 @@
 {
   "name": "@abdsynths/bank-manager",
   "version": "0.1.0",
-  "description": "Universal Bank Manager for ABDSynths — cross-project synthesizer patch library, SysEx management, and hardware communication",
+  "description": "Universal patch & bank management library for ABDSynths projects",
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/core",
-    "packages/contracts",
-    "packages/adapters",
-    "packages/ui"
+    "packages/*"
   ],
   "scripts": {
+    "generate": "node Scripts/registry_generator.js && node Scripts/build_contracts_web.js && node Scripts/build_webui.js",
+    "catalog:dm12": "node Scripts/catalog_dm12_sysex.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "build:webui": "vite build --config WebUI/vite.config.js",
+    "typecheck": "tsc --noEmit",
+    "tauri:dev": "cd apps/standalone && npm run tauri dev",
+    "tauri:build": "cd apps/standalone && npm run tauri build",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "devDependencies": {
-    "vitest": "^3.0.0"
+    "@eslint/js": "^9.0.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^20.0.0",
+    "dexie": "^4.0.0",
+    "eslint": "^9.0.0",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^15.0.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vite": "^5.0.0",
+    "vitest": "^2.0.0",
+    "zod": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "dependencies": {
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1"
   }
 }

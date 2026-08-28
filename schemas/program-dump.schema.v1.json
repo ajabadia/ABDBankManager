@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ABD Bank Manager Program Dump Schema",
+  "schemaVersion": "1.0.0",
+  "description": "Schema for a single program/patch dump from hardware",
+  "type": "object",
+  "required": ["modelId", "data", "address"],
+  "properties": {
+    "modelId": {
+      "type": "string",
+      "enum": ["casio-cz101", "casio-cz5000", "casio-cz1", "roland-juno106", "roland-juno60", "roland-juno6", "korg-ms2000", "korg-microkorg", "korg-prophecy", "behringer-deepmind12", "behringer-pro800", "yamaha-dx7", "yamaha-dx7ii"]
+    },
+    "address": {
+      "type": "string",
+      "description": "Original program address (e.g., 'A.01', 'P1', 'A001')"
+    },
+    "data": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+      "description": "Raw program data bytes"
+    },
+    "checksum": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255,
+      "description": "Optional checksum byte (manufacturer specific)"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "author": { "type": "string" },
+        "bankName": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

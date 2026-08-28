@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ABD Bank Manager Library File Schema (.abdlibrary manifest)",
+  "schemaVersion": "1.0.0",
+  "description": "Schema for the manifest.json inside .abdlibrary ZIP files. Formato dedicado a exportar/importar TODA la librería (multi-banco). El .abdbank queda reservado a un banco individual.",
+  "type": "object",
+  "required": ["version", "format", "library", "banks"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "format": { "type": "string", "const": "abdlibrary" },
+    "library": {
+      "type": "object",
+      "required": ["bankCount", "exportedAt"],
+      "properties": {
+        "bankCount": { "type": "integer", "minimum": 0 },
+        "exportedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "banks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["bank", "patches"],
+        "properties": {
+          "bank": { "$ref": "#/definitions/bank" },
+          "patches": { "$ref": "#/definitions/patches" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "bank": {
+      "type": "object",
+      "required": ["id", "name", "modelId", "manufacturer", "isFactory", "creationDate", "patchCount"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "maxLength": 64 },
+        "modelId": { "type": "string" },
+        "manufacturer": { "type": "string" },
+        "isFactory": { "type": "boolean" },
+        "isLocked": { "type": "boolean", "default": false },
+        "creationDate": { "type": "string", "format": "date-time" },
+        "modifiedDate": { "type": "string", "format": "date-time" },
+        "patchCount": { "type": "integer", "minimum": 0 },
+        "source": { "type": ["string", "null"], "description": "Original file path/URL" }
+      }
+    },
+    "patches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "name", "address", "category", "author", "tags", "isFavorite", "rating", "rawDataFile", "parameters"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "name": { "type": "string", "maxLength": 64 },
+          "address": { "type": "string" },
+          "category": { "type": "string" },
+          "author": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "string", "default": "" },
+          "isFavorite": { "type": "boolean" },
+          "rating": { "type": "integer", "minimum": 0, "maximum": 5 },
+          "rawDataFile": { "type": "string", "description": "Relative path (banks/NN/)" },
+          "parameters": { "type": "object", "additionalProperties": { "type": "number" } },
+          "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of sound bytes" },
+          "versionNumber": { "type": "integer", "minimum": 1, "default": 1 },
+          "previousVersionId": { "type": ["string", "null"], "format": "uuid" }
+        }
+      }
+    }
+  }
+}
