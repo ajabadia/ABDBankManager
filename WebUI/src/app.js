@@ -29,6 +29,7 @@ let selectedManufacturer = null;
 let selectedModelId = null;
 let selectedBankId = null;
 let selectedPatchId = null;
+let compareIds = new Set(); // For MF.11 patch comparison
 
 // Group contracts by manufacturer
 const manufacturers = {};
@@ -259,6 +260,105 @@ async function selectPatch(patchId) {
   renderContent();
 }
 
+function toggleCompare(patchId, checked) {
+  if (checked) {
+    compareIds.add(patchId);
+    if (compareIds.size > 2) {
+      const first = compareIds.values().next().value;
+      compareIds.delete(first);
+    }
+  } else {
+    compareIds.delete(patchId);
+  }
+  renderContent();
+}
+
+async function showComparison(container) {
+  if (compareIds.size < 2) return;
+  const [idA, idB] = Array.from(compareIds);
+  const patchA = await getPatch(idA);
+  const patchB = await getPatch(idB);
+  if (!patchA || !patchB) return;
+
+  const bankA = await getBank(patchA.bankId);
+  const bankB = await getBank(patchB.bankId);
+  const contractA = getModelContract(bankA?.modelId);
+  const rawA = patchA.rawData instanceof Uint8Array ? patchA.rawData : new Uint8Array(patchA.rawData);
+  const rawB = patchB.rawData instanceof Uint8Array ? patchB.rawData : new Uint8Array(patchB.rawData);
+
+  let rows = '';
+  if (hasParameterSchema(bankA?.modelId)) {
+    const schema = getParameterSchema(bankA.modelId);
+    const paramsA = schema.getTable(rawA);
+    const paramsB = schema.getTable(rawB);
+    for (let i = 0; i < paramsA.length; i++) {
+      const pA = paramsA[i];
+      const pB = paramsB[i] || {};
+      const valA = pA.displayValue ?? pA.value ?? pA.rawByte ?? '—';
+      const valB = pB.displayValue ?? pB.value ?? pB.rawByte ?? '—';
+      const diff = String(valA) !== String(valB);
+      rows += `<tr${diff ? ' style="background:rgba(248,81,73,0.1);"' : ''}>
+        <td>${escHtml(pA.name)}</td>
+        <td class="parameter-value"${diff ? ' style="color:var(--accent);"' : ''}>${escHtml(String(valA))}</td>
+        <td class="parameter-value"${diff ? ' style="color:var(--warning);"' : ''}>${escHtml(String(valB))}</td>
+        <td>${diff ? '≠' : '='}</td>
+      </tr>`;
+    }
+  } else {
+    const len = Math.max(rawA.length, rawB.length);
+    for (let i = 0; i < len; i++) {
+      const bA = rawA[i] ?? 0;
+      const bB = rawB[i] ?? 0;
+      const diff = bA !== bB;
+      rows += `<tr${diff ? ' style="background:rgba(248,81,73,0.1);"' : ''}>
+        <td style="font-family:monospace;">0x${i.toString(16).toUpperCase().padStart(2,'0')}</td>
+        <td class="parameter-value"${diff ? ' style="color:var(--accent);"' : ''}>0x${bA.toString(16).toUpperCase().padStart(2,'0')}</td>
+        <td class="parameter-value"${diff ? ' style="color:var(--warning);"' : ''}>0x${bB.toString(16).toUpperCase().padStart(2,'0')}</td>
+        <td>${diff ? '≠' : '='}</td>
+      </tr>`;
+    }
+  }
+
+  container.innerHTML = `
+    <div class="panel" style="margin-top:1rem;">
+      <div class="panel-header">
+        <span class="panel-title">Comparación: ${escHtml(patchA.name)} ↔ ${escHtml(patchB.name)}</span>
+        <div style="display:flex;gap:0.3rem;">
+          <button class="btn btn-sm" id="btn-compare-swap">↕ Intercambiar</button>
+          <button class="btn btn-sm" id="btn-compare-copy">Copiar B → A</button>
+          <button class="btn btn-sm" id="btn-compare-csv">CSV</button>
+          <button class="btn btn-sm" id="btn-compare-close">✕ Cerrar</button>
+        </div>
+      </div>
+      <div class="parameter-table-wrap">
+        <table class="parameter-table">
+          <thead><tr><th>Parámetro</th><th style="color:var(--accent);">${escHtml(patchA.name)}</th><th style="color:var(--warning);">${escHtml(patchB.name)}</th><th>Diff</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  container.querySelector('#btn-compare-close').onclick = () => { compareIds.clear(); renderContent(); };
+  container.querySelector('#btn-compare-swap').onclick = () => { const tmp = Array.from(compareIds); compareIds.clear(); compareIds.add(tmp[1]); compareIds.add(tmp[0]); showComparison(container); };
+  container.querySelector('#btn-compare-copy').onclick = async () => {
+    await updatePatch(idA, { rawData: rawB });
+    toast(`Parámetros copiados de "${patchB.name}" a "${patchA.name}"`, 'success');
+    compareIds.clear();
+    renderNav();
+    renderContent();
+  };
+  container.querySelector('#btn-compare-csv').onclick = () => {
+    const header = 'Parameter,Patch A,Patch B,Diff\n';
+    const body = rows.replace(/<[^>]+>/g, '').split('\n').filter(l => l.trim()).map(l => l.replace(/\s+/g, ',')).join('\n');
+    const blob = new Blob([header + body], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `compare-${patchA.name}-vs-${patchB.name}.csv`;
+    a.click();
+    toast('Comparación exportada como CSV', 'success');
+  };
+}
+
 // ─── Content panel rendering ───
 async function renderContent() {
   const welcome = document.getElementById('panel-welcome');
@@ -415,14 +515,32 @@ async function renderBankContent(el) {
   for (const patch of patches) {
     const chip = document.createElement('div');
     chip.className = 'patch-chip' + (patch.id === selectedPatchId ? ' active' : '');
+    const isCompare = compareIds.has(patch.id);
     const fav = patch.isFavorite ? ' ★' : '';
-    chip.innerHTML = `<span>${escHtml(patch.name)}${fav}</span><span class="patch-cat">${patch.category}</span>`;
-    chip.onclick = () => selectPatch(patch.id);
+    chip.innerHTML = `<input type="checkbox" class="patch-compare-check" data-patch-id="${patch.id}"${isCompare ? ' checked' : ''} title="Seleccionar para comparar">
+      <span>${escHtml(patch.name)}${fav}</span><span class="patch-cat">${patch.category}</span>`;
+    chip.querySelector('.patch-compare-check').onclick = (e) => {
+      e.stopPropagation();
+      toggleCompare(patch.id, e.target.checked);
+    };
+    chip.onclick = (e) => { if (e.target.tagName !== 'INPUT') selectPatch(patch.id); };
     grid.appendChild(chip);
   }
 
+  // Compare bar
+  if (compareIds.size >= 2) {
+    const compareBar = document.createElement('div');
+    compareBar.className = 'action-bar';
+    compareBar.innerHTML = `
+      <button class="btn btn-primary" id="btn-compare-now">⚖️ Comparar ${compareIds.size} patches</button>
+      <button class="btn" id="btn-compare-clear">Limpiar selección</button>`;
+    el.querySelector('#patch-grid').after(compareBar);
+    compareBar.querySelector('#btn-compare-now').onclick = () => showComparison(el.querySelector('#patch-detail-container'));
+    compareBar.querySelector('#btn-compare-clear').onclick = () => { compareIds.clear(); renderContent(); };
+  }
+
   // Render patch detail if selected
-  if (selectedPatchId) {
+  if (selectedPatchId && compareIds.size < 2) {
     await renderPatchDetail(el.querySelector('#patch-detail-container'));
   }
 }
