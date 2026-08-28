@@ -391,11 +391,22 @@ Los blobs y metadatos deben conservarse.
 - [ ] Añadir tests con transporte ficticio (sin hardware) para la cola y los retries.
 - [ ] Integrar los transportes Pro-800 y DeepMind 12 en la UI como selectable por modelo.
 
+### Transporte MIDI — Delay y fragmentación
+
+- [x] Implementar delay post-envío en `sendPatch()` y `sendBulk()` (50ms por defecto, configurable via `contract.interMessageDelayMs`).
+- [x] Implementar fragmentación automática de mensajes SysEx grandes (`splitSysExMessage()` en `pro800Midi.js`).
+- [x] Añadir campo `maxSysExMessageSize` al contrato (`ModelContract.ts`).
+- [x] Configurar DX7 con `maxSysExMessageSize: 2048` para compatibilidad con FM-1.
+- [x] App `handleMidiSendBank` y `handleMidiSendPatch` esperan delay post-envío.
+
+> **FM-1**: El buffer interno del FM-1 es limitado. El bulk dump DX7 (4104B) se fragmenta en chunks de ≤2048B con delays intermedios.
+
 ### Criterios de aceptación
 
 - El mismo transporte se usa en web y en standalone (Tauri).
 - Los tests no requieren hardware (fake transport determinista).
 - Fetch/Send funcionan con el hardware físico conectado.
+- El FM-1 recibe correctamente los patches enviados (bulk dump fragmentado).
 
 ---
 
@@ -404,7 +415,7 @@ Los blobs y metadatos deben conservarse.
 - [x] Panel "Datos SysEx" en el detalle de patch (hexdump con bytecount, toggle blob/mensaje, copiar hex y descargar `.syx`).
 - [x] Tabla de parámetros interpretados Pro-800 en el detalle (nombre, valor, offset, descripción).
 - [x] Tabla de parámetros interpretados DeepMind 12 en el detalle (236+ parámetros, secciones LFO/OSC/VCF/ENV/VCA/Voice/ModMatrix/Seq/Arp/FX).
-- [ ] Integrar la búsqueda real en la UI mediante el `Searcher` (P1.2).
+- [x] Integrar la búsqueda real en la UI mediante el `Searcher` (P1.2).
 - [ ] Empaquetar las dependencias (dexie, jszip, file-saver) con Vite y eliminar el importmap CDN (`esm.sh`) — WebUI offline/autocontenida.
 - [ ] Auditoría de `innerHTML` con contenido de usuario en la UI.
 - [ ] Añadir visualización del SysEx completo en hexadecimal en el detalle del patch (copiable).
