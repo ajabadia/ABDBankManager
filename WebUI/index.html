@@ -36,6 +36,7 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
+            overflow: hidden;
         }
 
         /* Header */
@@ -43,55 +44,59 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0.75rem 1.5rem;
+            padding: 0.6rem 1.5rem;
             border-bottom: 1px solid var(--border);
             background: var(--bg-secondary);
+            gap: 1rem;
         }
         .header h1 {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 1.25rem;
+            font-size: 1.1rem;
             font-weight: 700;
             background: linear-gradient(135deg, var(--accent), #3fb950);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            white-space: nowrap;
         }
-        .header-actions { display: flex; gap: 0.5rem; align-items: center; }
+        .header-actions { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
         .version-badge {
             background: var(--accent-dim);
             color: var(--accent);
-            padding: 0.2rem 0.6rem;
+            padding: 0.15rem 0.5rem;
             border-radius: 9999px;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.7rem;
+            font-size: 0.65rem;
         }
-
-        /* Status bar */
-        .status-bar {
+        .midi-status {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
-            padding: 0.5rem 1.5rem;
-            background: var(--bg-primary);
-            border-bottom: 1px solid var(--border);
-            font-size: 0.8rem;
+            gap: 0.4rem;
+            padding: 0.3rem 0.7rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
         }
-        .status-dot {
-            width: 8px; height: 8px;
+        .midi-status:hover { border-color: var(--accent); }
+        .midi-status.connected { border-color: var(--success); background: rgba(63,185,80,0.1); }
+        .midi-status .midi-dot {
+            width: 6px; height: 6px;
             border-radius: 50%;
             background: var(--text-secondary);
             flex-shrink: 0;
         }
-        .status-dot.connected { background: var(--success); }
-        .status-dot.connecting { background: var(--warning); animation: pulse 1s infinite; }
-        .status-dot.error { background: var(--error); }
-        @keyframes pulse { 50% { opacity: 0.4; } }
+        .midi-status.connected .midi-dot { background: var(--success); }
+        .midi-status .midi-label { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 
         /* Main layout */
         .main-grid {
             display: grid;
-            grid-template-columns: 300px 1fr;
-            height: calc(100vh - 80px);
+            grid-template-columns: 280px 1fr;
+            height: calc(100vh - 72px);
         }
 
         /* Sidebar */
@@ -102,20 +107,21 @@
             flex-direction: column;
             overflow-y: auto;
         }
-        .sidebar-header {
-            padding: 0.75rem 1rem;
+        .sidebar-search {
+            padding: 0.5rem;
             border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
-        .sidebar-title {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-secondary);
-            font-weight: 600;
+        .sidebar-search input {
+            width: 100%;
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            font-family: inherit;
         }
+        .sidebar-search input:focus { outline: none; border-color: var(--accent); }
         .sidebar-list {
             flex: 1;
             overflow-y: auto;
@@ -123,101 +129,51 @@
             padding: 0.25rem;
         }
         .list-item {
-            padding: 0.5rem 0.75rem;
+            padding: 0.45rem 0.6rem;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             transition: background 0.1s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .list-item:hover { background: var(--bg-tertiary); }
-        .list-item.active { background: var(--accent-dim); color: var(--accent); }
-        .list-item .item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .list-item .item-thumb { width: 32px; height: 20px; object-fit: contain; border-radius: 3px; margin-right: 0.5rem; flex-shrink: 0; background: var(--bg-tertiary); }
-        .list-item .patch-check { flex-shrink: 0; margin-right: 0.5rem; accent-color: var(--accent); cursor: pointer; }
-        .list-item .item-badge {
-            font-size: 0.65rem;
-            color: var(--text-secondary);
-            background: var(--bg-tertiary);
-            padding: 0.1rem 0.4rem;
-            border-radius: 4px;
-            margin-left: 0.5rem;
-            flex-shrink: 0;
-        }
-        .list-item .item-actions {
-            display: none;
-            gap: 0.25rem;
-            margin-left: 0.5rem;
-        }
-        .list-item:hover .item-actions { display: flex; }
-        .list-item:hover .item-badge { display: none; }
-        .list-empty {
-            padding: 1.5rem;
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.8rem;
-        }
-
-        /* Sidebar sections */
-        .sidebar-section {
-            border-bottom: 1px solid var(--border);
-        }
-        .sidebar-section-body { max-height: none; overflow-y: visible; }
-        .sidebar-section.collapsed .sidebar-section-body { display: none; }
-        .sidebar-section-toggle {
-            padding: 0.5rem 1rem;
-            cursor: pointer;
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            font-size: 0.7rem;
+        }
+        .list-item:hover { background: var(--bg-tertiary); }
+        .list-item.active { background: var(--accent-dim); color: var(--accent); }
+        .list-item .item-thumb { width: 28px; height: 18px; object-fit: contain; border-radius: 3px; flex-shrink: 0; background: var(--bg-tertiary); }
+        .list-item .item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .list-item .item-badge {
+            font-size: 0.6rem;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .list-item .item-actions { display: none; gap: 0.2rem; }
+        .list-item:hover .item-actions { display: flex; }
+        .list-item:hover .item-badge { display: none; }
+        .list-empty { padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.8rem; }
+        .list-section-header {
+            padding: 0.4rem 0.6rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
             letter-spacing: 0.08em;
             color: var(--text-secondary);
             font-weight: 600;
-        }
-        .sidebar-section-toggle:hover { color: var(--text-primary); }
-
-        /* Action buttons */
-        .sidebar-actions {
-            padding: 0.75rem 1rem;
-            border-top: 1px solid var(--border);
+            cursor: pointer;
             display: flex;
-            flex-direction: column;
-            gap: 0.4rem;
-        }
-
-        /* Buttons */
-        .btn {
-            display: inline-flex;
             align-items: center;
             gap: 0.4rem;
-            padding: 0.4rem 0.75rem;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            font-family: inherit;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.15s;
-            white-space: nowrap;
+            user-select: none;
         }
-        .btn:hover { background: var(--border); }
-        .btn-primary {
-            background: var(--accent);
-            color: var(--bg-primary);
-            border-color: var(--accent);
-            font-weight: 600;
-        }
-        .btn-primary:hover { opacity: 0.85; }
-        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
-        .btn-icon { padding: 0.25rem; width: 24px; height: 24px; justify-content: center; }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .list-section-header:hover { color: var(--text-primary); }
+        .list-section-header .arrow { transition: transform 0.15s; font-size: 0.5rem; }
+        .list-section-header.collapsed .arrow { transform: rotate(-90deg); }
+        .list-section-body { padding-left: 0.5rem; }
+        .list-section-body.hidden { display: none; }
 
-        /* Main content */
+        /* Main content — single scroll container */
         .main-content {
             display: flex;
             flex-direction: column;
@@ -240,211 +196,220 @@
             justify-content: space-between;
             align-items: center;
         }
-        .panel-title {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
+        .panel-title { font-size: 0.85rem; font-weight: 600; }
         .panel-body { padding: 1rem; }
-        .params-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-            gap: 0.75rem;
-        }
 
-        /* Param controls */
-        .param-control {
+        /* Model grid */
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .model-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            text-align: center;
+        }
+        .model-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+        .model-card.active { border-color: var(--accent); background: var(--accent-dim); }
+        .model-card .card-thumb { width: 100%; max-width: 140px; height: 80px; object-fit: contain; border-radius: 4px; }
+        .model-card .card-name { font-weight: 600; font-size: 0.85rem; }
+        .model-card .card-meta { font-size: 0.7rem; color: var(--text-secondary); }
+        .model-card .card-badges { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
+
+        /* Bank grid */
+        .bank-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1rem;
+        }
+        .bank-card {
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s;
             display: flex;
             flex-direction: column;
-            align-items: center;
             gap: 0.4rem;
-            transition: border-color 0.15s;
         }
-        .param-control:hover { border-color: var(--accent); }
-        .param-label {
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-            text-align: center;
-            font-weight: 500;
-        }
-        .param-value {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--accent);
-        }
-
-        /* Rotary knob */
-        .rotary-knob {
-            width: 64px; height: 64px;
-            background: conic-gradient(from -135deg, var(--bg-primary) 0%, var(--accent) 50%, var(--bg-primary) 100%);
-            border-radius: 50%;
-            border: 3px solid var(--border);
-            position: relative;
-            cursor: grab;
-            transition: transform 0.03s linear;
-        }
-        .rotary-knob::before {
-            content: '';
-            position: absolute;
-            top: 50%; left: 50%;
-            width: 3px; height: 16px;
-            background: var(--accent);
-            transform: translate(-50%, -100%);
-            transform-origin: center bottom;
-            border-radius: 2px;
-        }
-        .rotary-knob.dragging { cursor: grabbing; }
-
-        /* Choice select */
-        .param-select {
-            width: 100%;
-            padding: 0.4rem;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 0.8rem;
-        }
-
-        /* Boolean toggle */
-        .toggle-label {
+        .bank-card:hover { border-color: var(--accent); }
+        .bank-card.active { border-color: var(--accent); background: var(--accent-dim); }
+        .bank-card .bank-thumb { width: 100%; height: 60px; object-fit: contain; border-radius: 4px; background: var(--bg-primary); }
+        .bank-card .bank-name { font-weight: 600; font-size: 0.8rem; }
+        .bank-card .bank-meta { font-size: 0.65rem; color: var(--text-secondary); }
+        .bank-card-new {
+            border-style: dashed;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-            font-size: 0.8rem;
+            justify-content: center;
+            min-height: 100px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
         }
-        .toggle-input { display: none; }
-        .toggle-slider {
-            width: 36px; height: 20px;
-            background: var(--bg-primary);
-            border: 2px solid var(--border);
-            border-radius: 10px;
-            position: relative;
-            transition: all 0.2s;
+        .bank-card-new:hover { color: var(--accent); border-color: var(--accent); }
+
+        /* Manufacturer header */
+        .manufacturer-header {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1rem 0;
         }
-        .toggle-slider::after {
-            content: '';
-            position: absolute;
-            top: 2px; left: 2px;
-            width: 12px; height: 12px;
-            background: var(--text-secondary);
-            border-radius: 50%;
-            transition: all 0.2s;
+        .manufacturer-logo { max-height: 80px; max-width: 200px; object-fit: contain; }
+
+        /* Hardware header */
+        .hardware-header {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
         }
-        .toggle-input:checked + .toggle-slider {
-            background: var(--accent-dim);
-            border-color: var(--accent);
+        .hardware-logo { max-height: 60px; max-width: 120px; object-fit: contain; }
+        .hardware-thumb { max-height: 100px; max-width: 160px; object-fit: contain; border-radius: 6px; }
+        .hardware-info { flex: 1; }
+        .hardware-info h2 { font-size: 1.2rem; margin-bottom: 0.3rem; }
+        .hardware-info .hw-meta { font-size: 0.8rem; color: var(--text-secondary); }
+        .hardware-info .hw-badges { display: flex; gap: 0.4rem; margin-top: 0.4rem; flex-wrap: wrap; }
+
+        /* Bank header */
+        .bank-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 0.75rem;
         }
-        .toggle-input:checked + .toggle-slider::after {
-            left: 18px;
-            background: var(--accent);
+        .bank-header .bank-thumb-lg { height: 80px; object-fit: contain; border-radius: 6px; }
+        .bank-header .bank-info h2 { font-size: 1rem; }
+        .bank-header .bank-info .bk-meta { font-size: 0.75rem; color: var(--text-secondary); }
+
+        /* Action bar */
+        .action-bar {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding: 0.5rem 0;
         }
 
-        /* Patch info */
-        .patch-info {
+        /* Patch list in content */
+        .patch-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem;
         }
-        .patch-info-field { display: flex; flex-direction: column; gap: 0.25rem; }
-        .patch-info-label {
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: var(--text-secondary);
+        .patch-chip {
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            transition: all 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
         }
+        .patch-chip:hover { border-color: var(--accent); }
+        .patch-chip.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+        .patch-chip .patch-cat { font-size: 0.55rem; color: var(--text-secondary); margin-left: auto; }
+
+        /* Patch detail */
+        .patch-detail { padding: 1rem 0; }
+        .patch-info { display: flex; flex-direction: column; gap: 0.6rem; }
+        .patch-info-field { display: flex; flex-direction: column; gap: 0.2rem; }
+        .patch-info-label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
         .patch-info-input {
             padding: 0.4rem 0.6rem;
             background: var(--bg-primary);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 4px;
             color: var(--text-primary);
             font-family: inherit;
             font-size: 0.85rem;
         }
         .patch-info-input:focus { outline: none; border-color: var(--accent); }
+        .param-select {
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+
+        /* Interpreted parameters */
         .interpreted-parameters { margin-top: 1rem; }
-        .parameter-table-wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+        .parameter-table-wrap { overflow-x: auto; }
         .parameter-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
-        .parameter-table th, .parameter-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
-        .parameter-table th { position: sticky; top: 0; background: var(--bg-secondary); color: var(--text-secondary); font-size: 0.65rem; text-transform: uppercase; }
-        .parameter-table td:nth-child(2), .parameter-table td:nth-child(3) { font-family: 'JetBrains Mono', monospace; }
-        .parameter-table .parameter-value { color: var(--accent); font-weight: 600; }
+        .parameter-table th { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-weight: 600; }
+        .parameter-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); }
+        .parameter-value { font-family: 'JetBrains Mono', monospace; color: var(--accent); }
 
         /* SysEx viewer */
-        .sysex-viewer { margin-top: 1rem; }
-        .hex-toolbar {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.5rem;
-            margin: 0.6rem 0;
-        }
-        .hex-toolbar .spacer { flex: 1; }
-        .hex-toggle.active {
-            background: var(--accent);
-            color: #0b0f1c;
-            font-weight: 600;
-        }
-        .hexdump {
-            background: #0a0d16;
+        .sysex-viewer { margin-top: 0.75rem; }
+        .sysex-controls { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
+        .sysex-hex {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            background: var(--bg-primary);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 0.7rem;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.72rem;
-            line-height: 1.5;
-            color: #b8d4e8;
-            overflow-x: auto;
+            padding: 0.75rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
             overflow-y: auto;
-            max-height: 340px;
-            white-space: pre;
+            line-height: 1.5;
+            color: var(--text-secondary);
         }
-        .hexdump .hex-offset { color: #5b6b7a; user-select: none; }
-        .hexdump .hex-ascii { color: #7ee787; }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .btn:hover { background: var(--border); }
+        .btn-primary { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); font-weight: 600; }
+        .btn-primary:hover { opacity: 0.85; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
+        .btn-icon { padding: 0.25rem; width: 24px; height: 24px; justify-content: center; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
         /* Toast */
-        .toast-container {
-            position: fixed;
-            bottom: 1rem;
-            right: 1rem;
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        .toast {
-            padding: 0.6rem 1rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            animation: slideIn 0.2s ease-out;
-            max-width: 360px;
-        }
-        .toast.success { background: #3fb95022; border: 1px solid var(--success); color: var(--success); }
-        .toast.error { background: #f8514922; border: 1px solid var(--error); color: var(--error); }
-        .toast.info { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); }
+        #toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 1000; display: flex; flex-direction: column; gap: 0.5rem; }
+        .toast { padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.8rem; animation: slideIn 0.3s; max-width: 350px; }
+        .toast.success { background: rgba(63,185,80,0.9); color: #fff; }
+        .toast.error { background: rgba(248,81,73,0.9); color: #fff; }
+        .toast.info { background: rgba(0,212,255,0.9); color: #000; }
+        .toast.warning { background: rgba(210,153,34,0.9); color: #000; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* Footer */
-        .footer {
-            padding: 0.5rem 1.5rem;
-            border-top: 1px solid var(--border);
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.65rem;
-            background: var(--bg-secondary);
-        }
-
-        /* Modal overlay */
+        /* Modal */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -466,9 +431,14 @@
         .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
         .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 
+        /* Welcome state */
+        .welcome { text-align: center; padding: 3rem 1rem; color: var(--text-secondary); }
+        .welcome h2 { font-size: 1.2rem; margin-bottom: 0.5rem; color: var(--text-primary); }
+        .welcome p { font-size: 0.85rem; max-width: 400px; margin: 0 auto; }
+
         @media (max-width: 900px) {
             .main-grid { grid-template-columns: 1fr; }
-            .sidebar { max-height: 40vh; }
+            .sidebar { max-height: 35vh; }
         }
     </style>
 </head>
@@ -476,137 +446,37 @@
     <header class="header">
         <h1>ABD Bank Manager</h1>
         <div class="header-actions">
+            <div class="midi-status" id="midi-status" title="Conectar MIDI">
+                <span class="midi-dot"></span>
+                <span class="midi-label" id="midi-label">MIDI</span>
+            </div>
             <span id="version" class="version-badge">v0.1.0</span>
         </div>
     </header>
 
-    <div class="status-bar">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Inicializando...</span>
-        <span style="margin-left:auto; color:var(--text-secondary); font-size:0.75rem;" id="db-stats"></span>
-    </div>
-
     <div class="main-grid">
         <aside class="sidebar">
-            <div class="sidebar-section">
-                <div class="sidebar-section-toggle" onclick="toggleSection(this)">
-                    <span>&#9660;</span> Bancos
-                </div>
-                <div class="sidebar-section-body">
-                    <ul class="sidebar-list" id="bank-list"></ul>
-                </div>
+            <div class="sidebar-search">
+                <input type="search" id="global-search" placeholder="Buscar...">
             </div>
-
-            <div class="sidebar-section">
-                <div class="sidebar-section-toggle" onclick="toggleSection(this)">
-                    <span>&#9660;</span> Patches
-                </div>
-                <div class="sidebar-section-body" style="max-height:50vh;">
-                    <div class="search-bar" style="padding:0.5rem;border-bottom:1px solid var(--border);">
-                        <input type="search" id="patch-search" placeholder="Buscar patches…" style="width:100%;padding:0.4rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:0.8rem;">
-                    </div>
-                    <ul class="sidebar-list" id="patch-list"></ul>
-                </div>
-            </div>
-
-            <div class="sidebar-actions">
-                <button class="btn btn-primary" id="btn-new-bank">+ Nuevo Banco</button>
-                <button class="btn" id="btn-import">Importar</button>
-                <button class="btn" id="btn-export">Exportar</button>
-                <button class="btn" id="btn-export-library">Exportar Librería</button>
-                <button class="btn" id="btn-midi-connect">Conectar MIDI</button>
-                <button class="btn" id="btn-midi-fetch">Fetch</button>
-                <button class="btn" id="btn-midi-send-patch">Enviar patch</button>
-                <button class="btn" id="btn-midi-send-bank">Enviar banco</button>
-                <button class="btn" id="btn-bulk-rename">Renombrar</button>
-                <button class="btn" id="btn-export-csv">Exportar nombres CSV</button>
-                <button class="btn" id="btn-import-csv">Importar nombres CSV</button>
-            </div>
+            <ul class="sidebar-list" id="nav-list"></ul>
         </aside>
 
         <main class="main-content" id="main-content">
-            <div class="panel" id="panel-patch-info" style="display:none;">
-                <div class="panel-header">
-                    <span class="panel-title">Parche Activo</span>
-                    <div style="display:flex;gap:0.4rem;">
-                        <button class="btn btn-sm" id="btn-fav">&#9734; Favorito</button>
-                        <button class="btn btn-sm" style="color:var(--error);" id="btn-delete-patch">Borrar</button>
-                    </div>
-                </div>
-                <div class="panel-body">
-                    <div class="patch-info">
-                        <div class="patch-info-field">
-                            <span class="patch-info-label">Nombre</span>
-                            <input class="patch-info-input" id="patch-name" type="text" maxlength="64">
-                        </div>
-                        <div class="patch-info-field">
-                            <span class="patch-info-label">Categoria</span>
-                            <select class="param-select" id="patch-category">
-                                <option>Bass</option><option>Lead</option><option>Pad</option>
-                                <option>Keys</option><option>FX</option><option>Perc</option>
-                                <option>Synth</option><option>Other</option>
-                            </select>
-                        </div>
-                        <div class="patch-info-field">
-                            <span class="patch-info-label">Autor</span>
-                            <input class="patch-info-input" id="patch-author" type="text" maxlength="64">
-                        </div>
-                        <div class="patch-info-field">
-                            <span class="patch-info-label">Notas</span>
-                            <input class="patch-info-input" id="patch-notes" type="text">
-                        </div>
-                    </div>
-                    <section id="interpreted-parameters" class="interpreted-parameters" hidden>
-                        <div class="panel-header" style="padding-left:0;padding-right:0;">
-                            <span class="panel-title">Parámetros interpretados</span>
-                            <span id="parameter-format" class="item-badge"></span>
-                        </div>
-                        <div class="parameter-table-wrap">
-                            <table class="parameter-table">
-                                <thead><tr><th>Parámetro</th><th>Valor</th><th>Offset</th><th>Descripción</th></tr></thead>
-                                <tbody id="parameter-table-body"></tbody>
-                            </table>
-                        </div>
-                    </section>
-                    <section id="sysex-viewer" class="sysex-viewer" hidden>
-                        <div class="panel-header" style="padding-left:0;padding-right:0;">
-                            <span class="panel-title">Datos SysEx</span>
-                            <span id="sysex-meta" class="item-badge"></span>
-                        </div>
-                        <div class="hex-toolbar">
-                            <div class="btn-group">
-                                <button class="btn btn-sm hex-toggle active" id="btn-hex-decoded">Blob</button>
-                                <button class="btn btn-sm hex-toggle" id="btn-hex-message" hidden>Mensaje F0…F7</button>
-                            </div>
-                            <span class="spacer"></span>
-                            <button class="btn btn-sm" id="btn-copy-hex">Copiar hex</button>
-                            <button class="btn btn-sm" id="btn-download-syx">Descargar .syx</button>
-                        </div>
-                        <pre class="hexdump" id="sysex-hex"></pre>
-                    </section>
-                </div>
+            <div class="welcome" id="panel-welcome">
+                <h2>ABD Universal Bank Manager</h2>
+                <p>Selecciona un fabricante en la barra lateral para empezar, o conecta un hardware MIDI.</p>
             </div>
-
-            <div id="panel-empty" style="display:flex;justify-content:center;align-items:center;height:200px;color:var(--text-secondary);">
-                Selecciona un banco y parche, o importa un archivo para comenzar
-            </div>
+            <div id="panel-content" style="display:none;"></div>
         </main>
     </div>
 
-    <footer class="footer">
-        ABD Universal Bank Manager v0.1.0 — Dexie.js · Zod · JSZip · JUCE 8
-    </footer>
+    <div id="toast-container"></div>
 
     <div class="modal-overlay" id="modal-overlay">
         <div class="modal" id="modal-content"></div>
     </div>
 
-    <div class="toast-container" id="toast-container"></div>
-
-    <input type="file" id="file-input" accept=".abdbank,.abdlibrary,.json,.syx" style="display:none">
-    <input type="file" id="csv-input" accept=".csv" style="display:none">
-    <div id="midi-status" style="display:none"></div>
-
-    <script type="module" src="src/app.js"></script>
+    <script type="module" src="./src/app.js"></script>
 </body>
 </html>
