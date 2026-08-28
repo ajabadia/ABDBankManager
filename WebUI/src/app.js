@@ -646,7 +646,7 @@ function connectMidiDevice(output, input, modelId) {
 
   const displayName = getModelDisplayName(modelId);
   setStatus('connected', `${displayName} conectado: ${output?.name || 'MIDI'}`);
-  toast(`${displayName} conectado${input ? '' : ' (solo envío)'}`, 'success');
+  toast(`${displayName} conectado${input ? ' (input + output)' : ' (solo envío)'}`, 'success');
 }
 
 async function handleMidiFetch() {
