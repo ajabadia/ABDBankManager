@@ -32,12 +32,14 @@ describe('DX7 MIDI Transport', () => {
     rawData[121] = 0x54; // T
 
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
-    expect(sysex.length).toBe(6 + 128 + 2); // header + data + checksum + F7
+    // VCED format: 6 header + 155 data + 1 checksum + 1 F7 = 163 bytes
+    expect(sysex.length).toBe(6 + 155 + 2);
     expect(sysex[0]).toBe(0xF0);
     expect(sysex[1]).toBe(0x43);
-    expect(sysex[3]).toBe(0x09);
-    expect(sysex[4]).toBe(0x20);
-    expect(sysex[5]).toBe(0x00);
+    // DX7 VCED single voice header: 00 01 1B
+    expect(sysex[3]).toBe(0x00);
+    expect(sysex[4]).toBe(0x01);
+    expect(sysex[5]).toBe(0x1B);
     expect(sysex[sysex.length - 1]).toBe(0xF7);
   });
 

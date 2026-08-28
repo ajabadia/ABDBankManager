@@ -980,6 +980,83 @@ function dx7Checksum(bytes) {
   for (const b of bytes) sum += b;
   return 128 - sum % 128 & 127;
 }
+function unpackProgram(ved, vmem) {
+  const bulk = vmem;
+  for (let op = 0; op < 6; op++) {
+    for (let i = 0; i < 11; i++) {
+      ved[op * 21 + i] = bulk[op * 17 + i] & 127;
+    }
+    const curves = bulk[op * 17 + 11] & 15;
+    ved[op * 21 + 11] = curves & 3;
+    ved[op * 21 + 12] = curves >> 2 & 3;
+    const detuneRs = bulk[op * 17 + 12] & 127;
+    ved[op * 21 + 13] = detuneRs & 7;
+    const kvsAms = bulk[op * 17 + 13] & 31;
+    ved[op * 21 + 14] = kvsAms & 3;
+    ved[op * 21 + 15] = kvsAms >> 2 & 7;
+    ved[op * 21 + 16] = bulk[op * 17 + 14] & 127;
+    const fcoarseMode = bulk[op * 17 + 15] & 63;
+    ved[op * 21 + 17] = fcoarseMode & 1;
+    ved[op * 21 + 18] = fcoarseMode >> 1 & 31;
+    ved[op * 21 + 19] = bulk[op * 17 + 16] & 127;
+    ved[op * 21 + 20] = detuneRs >> 3 & 127;
+  }
+  for (let i = 0; i < 8; i++) {
+    ved[126 + i] = bulk[102 + i] & 127;
+  }
+  ved[134] = bulk[110] & 31;
+  const oksFb = bulk[111] & 15;
+  ved[135] = oksFb & 7;
+  ved[136] = oksFb >> 3;
+  ved[137] = bulk[112] & 127;
+  ved[138] = bulk[113] & 127;
+  ved[139] = bulk[114] & 127;
+  ved[140] = bulk[115] & 127;
+  const lpmsLfwLks = bulk[116] & 127;
+  ved[141] = lpmsLfwLks & 1;
+  ved[142] = lpmsLfwLks >> 1 & 7;
+  ved[143] = lpmsLfwLks >> 4;
+  ved[144] = bulk[117] & 127;
+  for (let i = 0; i < 10; i++) {
+    ved[145 + i] = bulk[118 + i] & 127;
+  }
+}
+function packProgram(vmem, ved) {
+  for (let op = 0; op < 6; op++) {
+    for (let i = 0; i < 11; i++) {
+      vmem[op * 17 + i] = ved[op * 21 + i] & 127;
+    }
+    vmem[op * 17 + 11] = ved[op * 21 + 11] & 3 | (ved[op * 21 + 12] & 3) << 2;
+    vmem[op * 17 + 12] = ved[op * 21 + 13] & 7 | (ved[op * 21 + 20] & 127) << 3;
+    vmem[op * 17 + 13] = ved[op * 21 + 14] & 3 | (ved[op * 21 + 15] & 7) << 2;
+    vmem[op * 17 + 14] = ved[op * 21 + 16] & 127;
+    vmem[op * 17 + 15] = ved[op * 21 + 17] & 1 | (ved[op * 21 + 18] & 31) << 1;
+    vmem[op * 17 + 16] = ved[op * 21 + 19] & 127;
+  }
+  for (let i = 0; i < 8; i++) {
+    vmem[102 + i] = ved[126 + i] & 127;
+  }
+  vmem[110] = ved[134] & 31;
+  vmem[111] = ved[135] & 7 | (ved[136] & 1) << 3;
+  vmem[112] = ved[137] & 127;
+  vmem[113] = ved[138] & 127;
+  vmem[114] = ved[139] & 127;
+  vmem[115] = ved[140] & 127;
+  vmem[116] = ved[141] & 1 | (ved[142] & 7) << 1 | (ved[143] & 7) << 4;
+  vmem[117] = ved[144] & 127;
+  for (let i = 0; i < 10; i++) {
+    vmem[118 + i] = ved[145 + i] & 127;
+  }
+}
+function buildDx7VoiceSysEx(ved, channel) {
+  const header = new Uint8Array([240, 67, 16 | channel & 15, 0, 1, 27]);
+  const result = new Uint8Array(6 + 155 + 2);
+  result.set(header, 0);
+  result.set(ved.subarray(0, 155), 6);
+  result[6 + 155] = dx7Checksum(ved.subarray(0, 155));
+  result[6 + 155 + 1] = 247;
+  return result;
+}
 function splitSysex6(raw) {
   const msgs = [];
   let inSysex = false;
@@ -1002,6 +1079,7 @@ function dx7HeaderLen(msg) {
 }
 function isDx7Voice(msg, modelByte) {
   if (msg[0] !== 240 || msg[1] !== 67 || msg[msg.length - 1] !== 247) return false;
+  if (msg.length === 163 && msg[3] === 0 && msg[4] === 1 && msg[5] === 27) return true;
   const hdr = dx7HeaderLen(msg);
   if (hdr === 6) {
     return msg.length === hdr + DX7_PATCH_DATA_SIZE + 2;
@@ -1079,28 +1157,30 @@ var yamahaDx7Contract = {
     if (sysex.length < 8) return false;
     if (sysex[0] !== 240 || sysex[1] !== 67) return false;
     if (sysex[sysex.length - 1] !== 247) return false;
+    if (sysex.length === 163 && sysex[3] === 0 && sysex[4] === 1 && sysex[5] === 27) {
+      const payload2 = sysex.slice(6, sysex.length - 2);
+      return sysex[sysex.length - 2] === dx7Checksum(payload2);
+    }
     const hdr = dx7HeaderLen(sysex);
     if (hdr === 0) return false;
     const payload = sysex.slice(hdr, sysex.length - 2);
     return sysex[sysex.length - 2] === dx7Checksum(payload);
   },
   buildPatchSysEx(rawData, _slot, channel) {
-    const data = rawData.slice(0, DX7_PATCH_DATA_SIZE);
-    const padded = new Uint8Array(DX7_PATCH_DATA_SIZE);
-    padded.set(data);
-    const header = new Uint8Array([240, 67, 16 | channel & 15, CMD_BULK, SUB_SINGLE, 0]);
-    const payload = new Uint8Array(header.length + DX7_PATCH_DATA_SIZE);
-    payload.set(header, 0);
-    payload.set(padded, header.length);
-    const checksum = dx7Checksum(payload.slice(6));
-    const result = new Uint8Array(payload.length + 2);
-    result.set(payload, 0);
-    result[payload.length] = checksum;
-    result[result.length - 1] = 247;
-    return result;
+    const ved = new Uint8Array(155);
+    const paddedVmem = new Uint8Array(DX7_PATCH_DATA_SIZE);
+    paddedVmem.set(rawData.slice(0, DX7_PATCH_DATA_SIZE));
+    unpackProgram(ved, paddedVmem);
+    return buildDx7VoiceSysEx(ved, channel);
   },
   parsePatchSysEx(sysex) {
     if (!isDx7Voice(sysex, 0)) return null;
+    if (sysex.length === 163 && sysex[3] === 0 && sysex[4] === 1 && sysex[5] === 27) {
+      const ved = new Uint8Array(sysex.slice(6, 6 + 155));
+      const vmem = new Uint8Array(DX7_PATCH_DATA_SIZE);
+      packProgram(vmem, ved);
+      return { rawData: vmem, slot: 0 };
+    }
     const hdr = dx7HeaderLen(sysex);
     return { rawData: new Uint8Array(sysex.slice(hdr, hdr + DX7_PATCH_DATA_SIZE)), slot: 0 };
   },

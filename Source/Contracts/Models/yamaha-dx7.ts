@@ -40,6 +40,129 @@ function dx7Checksum(bytes: Uint8Array): number {
   return (128 - (sum % 128)) & 0x7F;
 }
 
+/**
+ * Unpack a DX7 VMEM (128 bytes, compressed) to VCED (155 bytes, uncompressed).
+ * VMEM is the format used in 32-voice bulk dumps.
+ * VCED is the format used for single voice SysEx messages.
+ * Reference: Dexed unpackProgram() and Yamaha DX7 MIDI SysEx spec.
+ */
+function unpackProgram(ved: Uint8Array, vmem: Uint8Array): void {
+  const bulk = vmem;
+  for (let op = 0; op < 6; op++) {
+    // EG rate and level, break point, depth, scaling (11 bytes)
+    for (let i = 0; i < 11; i++) {
+      ved[op * 21 + i] = bulk[op * 17 + i] & 0x7F;
+    }
+    // Left/right curves
+    const curves = bulk[op * 17 + 11] & 0x0F;
+    ved[op * 21 + 11] = curves & 3;
+    ved[op * 21 + 12] = (curves >> 2) & 3;
+    // Detune/RS
+    const detuneRs = bulk[op * 17 + 12] & 0x7F;
+    ved[op * 21 + 13] = detuneRs & 7;
+    // KVS/AMS
+    const kvsAms = bulk[op * 17 + 13] & 0x1F;
+    ved[op * 21 + 14] = kvsAms & 3;
+    ved[op * 21 + 15] = (kvsAms >> 2) & 7;
+    // Output level
+    ved[op * 21 + 16] = bulk[op * 17 + 14] & 0x7F;
+    // FCoarse/Mode
+    const fcoarseMode = bulk[op * 17 + 15] & 0x3F;
+    ved[op * 21 + 17] = fcoarseMode & 1;
+    ved[op * 21 + 18] = (fcoarseMode >> 1) & 0x1F;
+    // Fine frequency
+    ved[op * 21 + 19] = bulk[op * 17 + 16] & 0x7F;
+    // Detune (upper bits)
+    ved[op * 21 + 20] = (detuneRs >> 3) & 0x7F;
+  }
+  // Pitch EG rates and levels (8 bytes)
+  for (let i = 0; i < 8; i++) {
+    ved[126 + i] = bulk[102 + i] & 0x7F;
+  }
+  // Algorithm
+  ved[134] = bulk[110] & 0x1F;
+  // Feedback/OscSync
+  const oksFb = bulk[111] & 0x0F;
+  ved[135] = oksFb & 7;
+  ved[136] = oksFb >> 3;
+  // LFO Speed, Delay, PMD, AMD
+  ved[137] = bulk[112] & 0x7F;
+  ved[138] = bulk[113] & 0x7F;
+  ved[139] = bulk[114] & 0x7F;
+  ved[140] = bulk[115] & 0x7F;
+  // LFO Waveform/PMS/LKS
+  const lpmsLfwLks = bulk[116] & 0x7F;
+  ved[141] = lpmsLfwLks & 1;
+  ved[142] = (lpmsLfwLks >> 1) & 7;
+  ved[143] = lpmsLfwLks >> 4;
+  // Transpose
+  ved[144] = bulk[117] & 0x7F;
+  // Name (10 bytes)
+  for (let i = 0; i < 10; i++) {
+    ved[145 + i] = bulk[118 + i] & 0x7F;
+  }
+}
+
+/**
+ * Pack a DX7 VCED (155 bytes, uncompressed) to VMEM (128 bytes, compressed).
+ * Reverse of unpackProgram().
+ */
+function packProgram(vmem: Uint8Array, ved: Uint8Array): void {
+  for (let op = 0; op < 6; op++) {
+    // EG rate and level, break point, depth, scaling (11 bytes)
+    for (let i = 0; i < 11; i++) {
+      vmem[op * 17 + i] = ved[op * 21 + i] & 0x7F;
+    }
+    // Left/right curves
+    vmem[op * 17 + 11] = (ved[op * 21 + 11] & 0x03) | ((ved[op * 21 + 12] & 0x03) << 2);
+    // Detune/RS
+    vmem[op * 17 + 12] = (ved[op * 21 + 13] & 0x07) | ((ved[op * 21 + 20] & 0x7F) << 3);
+    // KVS/AMS
+    vmem[op * 17 + 13] = (ved[op * 21 + 14] & 0x03) | ((ved[op * 21 + 15] & 0x07) << 2);
+    // Output level
+    vmem[op * 17 + 14] = ved[op * 21 + 16] & 0x7F;
+    // FCoarse/Mode
+    vmem[op * 17 + 15] = (ved[op * 21 + 17] & 0x01) | ((ved[op * 21 + 18] & 0x1F) << 1);
+    // Fine frequency
+    vmem[op * 17 + 16] = ved[op * 21 + 19] & 0x7F;
+  }
+  // Pitch EG rates and levels (8 bytes)
+  for (let i = 0; i < 8; i++) {
+    vmem[102 + i] = ved[126 + i] & 0x7F;
+  }
+  // Algorithm
+  vmem[110] = ved[134] & 0x1F;
+  // Feedback/OscSync
+  vmem[111] = (ved[135] & 0x07) | ((ved[136] & 0x01) << 3);
+  // LFO Speed, Delay, PMD, AMD
+  vmem[112] = ved[137] & 0x7F;
+  vmem[113] = ved[138] & 0x7F;
+  vmem[114] = ved[139] & 0x7F;
+  vmem[115] = ved[140] & 0x7F;
+  // LFO Waveform/PMS/LKS
+  vmem[116] = (ved[141] & 0x01) | ((ved[142] & 0x07) << 1) | ((ved[143] & 0x07) << 4);
+  // Transpose
+  vmem[117] = ved[144] & 0x7F;
+  // Name (10 bytes)
+  for (let i = 0; i < 10; i++) {
+    vmem[118 + i] = ved[145 + i] & 0x7F;
+  }
+}
+
+/**
+ * Build a standard DX7 single voice SysEx (VCED format, 163 bytes).
+ * Header: F0 43 gg 00 01 1B  [155B VCED]  checksum  F7
+ */
+function buildDx7VoiceSysEx(ved: Uint8Array, channel: number): Uint8Array {
+  const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), 0x00, 0x01, 0x1B]);
+  const result = new Uint8Array(6 + 155 + 2); // 163 bytes
+  result.set(header, 0);
+  result.set(ved.subarray(0, 155), 6);
+  result[6 + 155] = dx7Checksum(ved.subarray(0, 155));
+  result[6 + 155 + 1] = 0xF7;
+  return result;
+}
+
 function splitSysex(raw: Uint8Array): Uint8Array[] {
   const msgs: Uint8Array[] = [];
   let inSysex = false;
@@ -67,6 +190,8 @@ function dx7HeaderLen(msg: Uint8Array): number {
 
 function isDx7Voice(msg: Uint8Array, modelByte: number): boolean {
   if (msg[0] !== 0xF0 || msg[1] !== 0x43 || msg[msg.length - 1] !== 0xF7) return false;
+  // VCED single voice: F0 43 gg 00 01 1B [155B] chk F7 = 163 bytes
+  if (msg.length === 163 && msg[3] === 0x00 && msg[4] === 0x01 && msg[5] === 0x1B) return true;
   const hdr = dx7HeaderLen(msg);
   if (hdr === 6) {
     // Standard 6-byte: F0 43 gg 09 20 00 [128B] chk F7 = 6+128+2 = 136
@@ -165,7 +290,12 @@ const yamahaDx7Contract: ModelContract = {
     if (sysex.length < 8) return false;
     if (sysex[0] !== 0xF0 || sysex[1] !== 0x43) return false;
     if (sysex[sysex.length - 1] !== 0xF7) return false;
-    // DX7 checksum covers bytes after the 6-byte header until checksum byte
+    // VCED single voice: 163 bytes, header F0 43 gg 00 01 1B
+    if (sysex.length === 163 && sysex[3] === 0x00 && sysex[4] === 0x01 && sysex[5] === 0x1B) {
+      const payload = sysex.slice(6, sysex.length - 2);
+      return sysex[sysex.length - 2] === dx7Checksum(payload);
+    }
+    // VMEM format: checksum covers bytes after the header until checksum byte
     const hdr = dx7HeaderLen(sysex);
     if (hdr === 0) return false;
     const payload = sysex.slice(hdr, sysex.length - 2);
@@ -173,25 +303,24 @@ const yamahaDx7Contract: ModelContract = {
   },
 
   buildPatchSysEx(rawData: Uint8Array, _slot: number, channel: number): Uint8Array {
-    const data = rawData.slice(0, DX7_PATCH_DATA_SIZE);
-    const padded = new Uint8Array(DX7_PATCH_DATA_SIZE);
-    padded.set(data);
-    // Standard DX7 6-byte header: F0 43 gg 09 20 00
-    const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), CMD_BULK, SUB_SINGLE, 0x00]);
-    const payload = new Uint8Array(header.length + DX7_PATCH_DATA_SIZE);
-    payload.set(header, 0);
-    payload.set(padded, header.length);
-    // Checksum covers data after the 6-byte header (verified against real ROM dumps)
-    const checksum = dx7Checksum(payload.slice(6));
-    const result = new Uint8Array(payload.length + 2);
-    result.set(payload, 0);
-    result[payload.length] = checksum;
-    result[result.length - 1] = 0xF7;
-    return result;
+    // rawData is VMEM (128 bytes). Unpack to VCED (155 bytes) for single voice SysEx.
+    const ved = new Uint8Array(155);
+    const paddedVmem = new Uint8Array(DX7_PATCH_DATA_SIZE);
+    paddedVmem.set(rawData.slice(0, DX7_PATCH_DATA_SIZE));
+    unpackProgram(ved, paddedVmem);
+    return buildDx7VoiceSysEx(ved, channel);
   },
 
   parsePatchSysEx(sysex: Uint8Array): { rawData: Uint8Array; slot: number } | null {
     if (!isDx7Voice(sysex, 0x00)) return null;
+    // VCED single voice (163 bytes): F0 43 gg 00 01 1B [155B] chk F7
+    if (sysex.length === 163 && sysex[3] === 0x00 && sysex[4] === 0x01 && sysex[5] === 0x1B) {
+      const ved = new Uint8Array(sysex.slice(6, 6 + 155));
+      const vmem = new Uint8Array(DX7_PATCH_DATA_SIZE);
+      packProgram(vmem, ved);
+      return { rawData: vmem, slot: 0 };
+    }
+    // VMEM single voice (136 bytes): F0 43 gg 09 20 00 [128B] chk F7
     const hdr = dx7HeaderLen(sysex);
     return { rawData: new Uint8Array(sysex.slice(hdr, hdr + DX7_PATCH_DATA_SIZE)), slot: 0 };
   },

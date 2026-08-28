@@ -62,12 +62,16 @@ describe('DX7 Contract', () => {
     expect(req[6]).toBe(0xF7);
   });
 
-  it('should build single voice SysEx (136 bytes)', () => {
+  it('should build single voice SysEx (VCED 163 bytes)', () => {
     const rawData = new Uint8Array(128);
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
-    expect(sysex.length).toBe(136); // 6 header + 128 data + 1 checksum + 1 F7
+    // VCED format: 6 header + 155 data + 1 checksum + 1 F7 = 163 bytes
+    expect(sysex.length).toBe(163);
     expect(sysex[0]).toBe(0xF0);
     expect(sysex[1]).toBe(0x43);
+    expect(sysex[3]).toBe(0x00);
+    expect(sysex[4]).toBe(0x01);
+    expect(sysex[5]).toBe(0x1B);
     expect(sysex[sysex.length - 1]).toBe(0xF7);
   });
 
@@ -293,7 +297,7 @@ describe('DX7 MIDI Transport (mock)', () => {
     expect(sentData).not.toBeNull();
     expect(sentData[0]).toBe(0xF0);
     expect(sentData[1]).toBe(0x43);
-    expect(sentData.length).toBe(136);
+    expect(sentData.length).toBe(163); // VCED format
 
     const contract = getModelContract('yamaha-dx7');
     expect(contract.verifyChecksum(sentData)).toBe(true);
