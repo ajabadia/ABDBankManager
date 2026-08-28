@@ -18,6 +18,7 @@ import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getMod
 import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
+import { undoHistory } from './core/undoHistory.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -548,6 +549,15 @@ async function renderBankContent(el) {
   }
 }
 
+async function recordPatchUpdate(patchId, field, oldValue, newValue) {
+  await updatePatch(patchId, { [field]: newValue });
+  undoHistory.record({
+    label: `Cambiar ${field} del patch`,
+    undo: async () => { await updatePatch(patchId, { [field]: oldValue }); },
+    redo: async () => { await updatePatch(patchId, { [field]: newValue }); }
+  });
+}
+
 async function renderPatchDetail(container) {
   const patch = await getPatch(selectedPatchId);
   if (!patch) { container.innerHTML = ''; return; }
@@ -625,10 +635,10 @@ async function renderPatchDetail(container) {
     </div>`;
 
   // Patch detail event handlers
-  document.getElementById('patch-name').onchange = (e) => updatePatch(patch.id, { name: e.target.value });
-  document.getElementById('patch-category').onchange = (e) => updatePatch(patch.id, { category: e.target.value });
-  document.getElementById('patch-author').onchange = (e) => updatePatch(patch.id, { author: e.target.value });
-  document.getElementById('patch-notes').onchange = (e) => updatePatch(patch.id, { notes: e.target.value });
+  document.getElementById('patch-name').onchange = (e) => recordPatchUpdate(patch.id, 'name', patch.name, e.target.value);
+  document.getElementById('patch-category').onchange = (e) => recordPatchUpdate(patch.id, 'category', patch.category, e.target.value);
+  document.getElementById('patch-author').onchange = (e) => recordPatchUpdate(patch.id, 'author', patch.author || '', e.target.value);
+  document.getElementById('patch-notes').onchange = (e) => recordPatchUpdate(patch.id, 'notes', patch.notes || '', e.target.value);
   document.getElementById('btn-fav').onclick = async () => {
     await updatePatch(patch.id, { isFavorite: !patch.isFavorite });
     await selectPatch(patch.id);
@@ -654,6 +664,27 @@ function findMatchingInput(outputName, inputs) {
 
 const ALL_MODELS = getAllModels().map(m => ({ id: m.id, name: m.name }));
 const detectModelFromName = detectModelFromPortName;
+
+// ─── MF.13 Undo/Redo ───
+async function handleUndo() {
+  const result = await undoHistory.undo();
+  if (result.success) {
+    await renderNav(); await renderContent();
+    toast(`Deshacer: ${result.label}`, 'info');
+  } else {
+    toast('Nada que deshacer', 'info');
+  }
+}
+
+async function handleRedo() {
+  const result = await undoHistory.redo();
+  if (result.success) {
+    await renderNav(); await renderContent();
+    toast(`Rehacer: ${result.label}`, 'info');
+  } else {
+    toast('Nada que rehacer', 'info');
+  }
+}
 
 async function handleMidiConnect() {
   try {
@@ -859,6 +890,11 @@ function promptNewBank(modelId) {
     const name = document.getElementById('modal-bank-name').value.trim() || 'Nuevo Banco';
     const contract = getModelContract(modelId);
     const bank = await createBank({ name, modelId, manufacturer: contract?.manufacturer || '' });
+    undoHistory.record({
+      label: `Crear banco "${name}"`,
+      undo: async () => { await deleteBank(bank.id); },
+      redo: async () => { await createBank({ id: bank.id, name, modelId, manufacturer: contract?.manufacturer || '' }); }
+    });
     selectedBankId = bank.id;
     navLevel = 'patches';
     await renderNav();
@@ -878,8 +914,18 @@ function promptRenameBank(bank) {
       <button class="btn btn-primary" id="modal-confirm">Aceptar</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
-    const name = document.getElementById('modal-input').value.trim();
-    if (name) { await updateBank(bank.id, { name }); await renderNav(); toast('Banco renombrado', 'success'); }
+    const newName = document.getElementById('modal-input').value.trim();
+    if (newName && newName !== bank.name) {
+      const oldName = bank.name;
+      await updateBank(bank.id, { name: newName });
+      undoHistory.record({
+        label: `Renombrar banco "${oldName}" → "${newName}"`,
+        undo: async () => { await updateBank(bank.id, { name: oldName }); },
+        redo: async () => { await updateBank(bank.id, { name: newName }); }
+      });
+      await renderNav();
+      toast('Banco renombrado', 'success');
+    }
     hideModal();
   };
 }
@@ -894,7 +940,21 @@ async function confirmDeleteBank(bank) {
       <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Eliminar</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
+    // Save bank data for undo
+    const patches = await getPatchesForBank(bank.id);
+    const bankData = { ...bank };
+    const patchesData = patches.map(p => ({ ...p }));
     await deleteBank(bank.id);
+    undoHistory.record({
+      label: `Eliminar banco "${bank.name}"`,
+      undo: async () => {
+        await createBank({ id: bankData.id, name: bankData.name, modelId: bankData.modelId, manufacturer: bankData.manufacturer, isFactory: bankData.isFactory });
+        for (const p of patchesData) {
+          await createPatch(bankData.id, { index: p.index, rawData: p.rawData, name: p.name, category: p.category, author: p.author, notes: p.notes, isFavorite: p.isFavorite });
+        }
+      },
+      redo: async () => { await deleteBank(bankData.id); }
+    });
     selectedBankId = null; selectedPatchId = null;
     navLevel = 'banks';
     await renderNav(); await renderContent();
@@ -992,8 +1052,8 @@ function handleKeyboard(e) {
     else if (e.key === 'e' && !e.shiftKey) { e.preventDefault(); handleExport(); }
     else if (e.key === 'e' && e.shiftKey) { e.preventDefault(); handleExportLibrary(); }
     else if (e.key === 's') { e.preventDefault(); toast('Guardado', 'success'); }
-    else if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); toast('Deshacer (próximamente)', 'info'); }
-    else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); toast('Rehacer (próximamente)', 'info'); }
+    else if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+    else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
     else if (e.key === 'm') { e.preventDefault(); handleMidiConnect(); }
     else if (e.key === 'f') { e.preventDefault(); document.getElementById('global-search')?.focus(); }
     return;
@@ -1047,7 +1107,16 @@ function confirmDeletePatch() {
       <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Eliminar</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
+    const patch = await getPatch(selectedPatchId);
+    const patchData = { ...patch };
     await deletePatch(selectedPatchId);
+    undoHistory.record({
+      label: `Eliminar patch "${patchData.name}"`,
+      undo: async () => {
+        await createPatch(patchData.bankId, { index: patchData.index, rawData: patchData.rawData, name: patchData.name, category: patchData.category, author: patchData.author, notes: patchData.notes, isFavorite: patchData.isFavorite, id: patchData.id });
+      },
+      redo: async () => { await deletePatch(patchData.id); }
+    });
     selectedPatchId = null;
     renderNav(); renderContent();
     toast('Patch eliminado', 'success');
