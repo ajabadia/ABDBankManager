@@ -54,7 +54,7 @@ function isUserPreferenceOnly(keys) {
   return keys.every((k) => USER_PREFERENCE_KEYS.has(k));
 }
 function assertBankHasCapacity(currentCount, maxPatches) {
-  if (maxPatches != null && currentCount >= maxPatches) {
+  if (maxPatches && currentCount >= maxPatches) {
     fail(ERR_BANK_FULL, currentCount, maxPatches);
   }
 }
@@ -131,12 +131,18 @@ function addBank(library, bank) {
   }
   if (library.banks.some((b) => b.id === bank.id)) fail(ERR_DUPLICATE_BANK_ID, bank.id);
   const patches = (bank.patches || []).map((p) => ({ ...p, bankId: bank.id }));
+  const existingIds = /* @__PURE__ */ new Set();
+  for (const b of library.banks) {
+    for (const bp of b.patches || []) existingIds.add(bp.id);
+  }
   const used = /* @__PURE__ */ new Set();
   for (const p of patches) {
-    assertUniquePatchId(patches, p.id);
+    if (existingIds.has(p.id)) fail(ERR_DUPLICATE_PATCH_ID, p.id);
+    if (used.has(p.id)) fail(ERR_DUPLICATE_PATCH_ID, p.id);
+    used.add(p.id);
     if (p.index !== void 0) {
-      if (used.has(p.index)) fail(ERR_INDEX_CONFLICT, p.index);
-      used.add(p.index);
+      if (used.has(`idx:${p.index}`)) fail(ERR_INDEX_CONFLICT, p.index);
+      used.add(`idx:${p.index}`);
     }
     assertCrossBankCompatible(p, bank);
   }
@@ -380,6 +386,7 @@ export {
   assertBankHasCapacity,
   copyPatchBetweenBanks,
   duplicateBank,
+  freshPatchId,
   isLibrary,
   isUserPreferenceOnly,
   mergeBank,

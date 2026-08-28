@@ -183,12 +183,21 @@ export function addBank(library, bank) {
   if (library.banks.some((b) => b.id === bank.id)) fail(ERR_DUPLICATE_BANK_ID, bank.id);
 
   const patches = (bank.patches || []).map((p) => ({ ...p, bankId: bank.id }));
+
+  // Check uniqueness: new bank patches must not collide with existing library patches
+  // or with each other.
+  const existingIds = new Set();
+  for (const b of library.banks) {
+    for (const bp of (b.patches || [])) existingIds.add(bp.id);
+  }
   const used = new Set();
   for (const p of patches) {
-    assertUniquePatchId(patches, p.id);
+    if (existingIds.has(p.id)) fail(ERR_DUPLICATE_PATCH_ID, p.id);
+    if (used.has(p.id)) fail(ERR_DUPLICATE_PATCH_ID, p.id);
+    used.add(p.id);
     if (p.index !== undefined) {
-      if (used.has(p.index)) fail(ERR_INDEX_CONFLICT, p.index);
-      used.add(p.index);
+      if (used.has(`idx:${p.index}`)) fail(ERR_INDEX_CONFLICT, p.index);
+      used.add(`idx:${p.index}`);
     }
     assertCrossBankCompatible(p, bank);
   }
