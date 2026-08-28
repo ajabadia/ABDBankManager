@@ -1006,9 +1006,112 @@ csvInput.style.display = 'none';
 csvInput.onchange = handleImportCsv;
 document.body.appendChild(csvInput);
 
+// ─── MF.9 Drag & Drop ───
+let dragCounter = 0;
+function setupDragDrop() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+
+  // Create drop overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'drop-overlay';
+  overlay.innerHTML = '<div class="drop-overlay-content">📂 Soltar archivo aquí<br><small>.syx · .sysex · .abdlibrary</small></div>';
+  overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,212,255,0.1);border:3px dashed var(--accent);z-index:999;justify-content:center;align-items:center;pointer-events:none;';
+  document.body.appendChild(overlay);
+
+  document.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragCounter++;
+    if (dragCounter === 1) overlay.style.display = 'flex';
+  });
+
+  document.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter === 0) overlay.style.display = 'none';
+  });
+
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  });
+
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.style.display = 'none';
+
+    const files = Array.from(e.dataTransfer.files);
+    const syxFiles = files.filter(f => f.name.endsWith('.syx') || f.name.endsWith('.sysex'));
+    const libFiles = files.filter(f => f.name.endsWith('.abdlibrary'));
+
+    if (syxFiles.length === 0 && libFiles.length === 0) {
+      toast('Formato no soportado. Usa .syx, .sysex o .abdlibrary', 'error');
+      return;
+    }
+
+    // Process library files
+    for (const file of libFiles) {
+      try {
+        setStatus('connecting', `Importando ${file.name}...`);
+        const result = await importFile(file);
+        if (!result.success) { toast(result.error, 'error'); continue; }
+        let total = 0;
+        if (result.banks) {
+          for (const { bank, patches } of result.banks) {
+            const r = await importBank(bank, patches, { deduplication: 'skip' });
+            total += r.importedCount;
+          }
+        } else {
+          const r = await importBank(result.bank, result.patches, { deduplication: 'skip' });
+          total = r.importedCount;
+        }
+        await renderNav(); await renderContent();
+        toast(`${file.name}: ${total} patches importados`, 'success');
+      } catch (err) { toast(`Error: ${err.message}`, 'error'); }
+    }
+
+    // Process .syx files
+    for (const file of syxFiles) {
+      try {
+        setStatus('connecting', `Importando ${file.name}...`);
+        const result = await importFile(file);
+        if (!result.success) { toast(result.error, 'error'); continue; }
+        let total = 0;
+        let firstBankId = null;
+        if (result.banks) {
+          for (const { bank, patches } of result.banks) {
+            const r = await importBank(bank, patches, { deduplication: 'skip' });
+            total += r.importedCount;
+            if (!firstBankId) firstBankId = r.bankId;
+          }
+        } else {
+          const r = await importBank(result.bank, result.patches, { deduplication: 'skip' });
+          total = r.importedCount;
+          firstBankId = r.bankId;
+        }
+        // Navigate to first imported bank
+        if (firstBankId) {
+          const bank = await getBank(firstBankId);
+          if (bank) {
+            selectedManufacturer = getManufacturer(bank.modelId);
+            selectedModelId = bank.modelId;
+            selectedBankId = bank.id;
+            navLevel = 'patches';
+          }
+        }
+        await renderNav(); await renderContent();
+        toast(`${file.name}: ${total} patches importados`, 'success');
+      } catch (err) { toast(`Error: ${err.message}`, 'error'); }
+    }
+
+    setStatus('connected', 'Listo');
+  });
+}
+
 // ─── Start ───
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
 }
+setupDragDrop();
