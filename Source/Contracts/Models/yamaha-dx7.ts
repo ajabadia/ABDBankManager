@@ -152,15 +152,16 @@ function packProgram(vmem: Uint8Array, ved: Uint8Array): void {
 /**
  * Build a standard DX7 single voice SysEx (VCED format, 163 bytes).
  * Header: F0 43 gg 00 01 1B  [155B VCED]  checksum  F7
+ * Checksum covers: VCED data bytes only (standard DX7 spec).
  */
 function buildDx7VoiceSysEx(ved: Uint8Array, channel: number): Uint8Array {
   // MIDI channel 1-16 → SysEx byte 0-15 (0-based)
   const ch = (channel - 1) & 0x0F;
-  const header = new Uint8Array([0xF0, 0x43, ch, 0x00, 0x01, 0x1B]);
+  const checksum = dx7Checksum(ved.subarray(0, 155));
   const result = new Uint8Array(6 + 155 + 2); // 163 bytes
-  result.set(header, 0);
+  result.set([0xF0, 0x43, ch, 0x00, 0x01, 0x1B], 0);
   result.set(ved.subarray(0, 155), 6);
-  result[6 + 155] = dx7Checksum(ved.subarray(0, 155));
+  result[6 + 155] = checksum;
   result[6 + 155 + 1] = 0xF7;
   return result;
 }
@@ -283,7 +284,7 @@ const yamahaDx7Contract: ModelContract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 5000,
-  maxSysExMessageSize: 2048, // Split bulk dumps into chunks to prevent buffer overflow on FM-1
+  maxSysExMessageSize: 0, // DX7 bulk dumps must NOT be split — FM-1 expects single 4104-byte message
 
   computeChecksum(data: Uint8Array): number {
     return dx7Checksum(data);
@@ -317,6 +318,7 @@ const yamahaDx7Contract: ModelContract = {
   buildBulkSysEx(patches: { rawData: Uint8Array; slot: number }[], channel: number): Uint8Array {
     // Standard DX7 bulk dump: F0 43 gg 09 20 00 [32×128B VMEM] checksum F7 = 4104 bytes
     // Patches must be in VMEM format (128 bytes each)
+    // Checksum covers: VMEM data bytes only (standard DX7 spec)
     const ch = (channel - 1) & 0x0F;
     const header = new Uint8Array([0xF0, 0x43, ch, CMD_BULK, SUB_SINGLE, 0x00]);
     const bankSize = 32 * DX7_PATCH_DATA_SIZE; // 4096 bytes

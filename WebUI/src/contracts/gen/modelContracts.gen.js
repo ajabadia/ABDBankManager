@@ -1050,11 +1050,11 @@ function packProgram(vmem, ved) {
 }
 function buildDx7VoiceSysEx(ved, channel) {
   const ch = channel - 1 & 15;
-  const header = new Uint8Array([240, 67, ch, 0, 1, 27]);
+  const checksum = dx7Checksum(ved.subarray(0, 155));
   const result = new Uint8Array(6 + 155 + 2);
-  result.set(header, 0);
+  result.set([240, 67, ch, 0, 1, 27], 0);
   result.set(ved.subarray(0, 155), 6);
-  result[6 + 155] = dx7Checksum(ved.subarray(0, 155));
+  result[6 + 155] = checksum;
   result[6 + 155 + 1] = 247;
   return result;
 }
@@ -1151,8 +1151,8 @@ var yamahaDx7Contract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 5e3,
-  maxSysExMessageSize: 2048,
-  // Split bulk dumps into chunks to prevent buffer overflow on FM-1
+  maxSysExMessageSize: 0,
+  // DX7 bulk dumps must NOT be split — FM-1 expects single 4104-byte message
   computeChecksum(data) {
     return dx7Checksum(data);
   },

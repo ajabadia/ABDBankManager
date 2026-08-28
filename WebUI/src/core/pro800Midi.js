@@ -144,9 +144,9 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
       const msg = contract.buildBulkSysEx(patches, channel);
       const delay = contract.interMessageDelayMs || 50;
       
-      // Split if message exceeds device buffer size
+      // Split if message exceeds device buffer size (maxSysExMessageSize > 0)
       const maxSize = contract.maxSysExMessageSize;
-      if (maxSize && msg.length > maxSize) {
+      if (maxSize > 0 && msg.length > maxSize) {
         const chunks = splitSysExMessage(msg, maxSize);
         // Send chunks with delay between each
         for (let i = 0; i < chunks.length; i++) {
