@@ -17,7 +17,7 @@ import {
   applyRenameTemplate, validateRenameTemplate,
   patchesToCsv, parseNamesCsv
 } from './core/patchBulk.js';
-import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getAllModels, getManufacturer } from './core/modelRegistry.js';
+import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getAllModels, getManufacturer } from './core/modelRegistry.js';
 import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
@@ -104,7 +104,10 @@ async function refreshBankList() {
     const li = document.createElement('li');
     li.className = 'list-item' + (bank.id === activeBankId ? ' active' : '');
     const factoryBadge = bank.isFactory ? ' <span class="item-badge" style="color:var(--warning);border-color:var(--warning);">🔒 Fábrica</span>' : '';
+    const thumbUrl = getModelThumbnail(bank.modelId);
+    const thumbHtml = thumbUrl ? `<img class="item-thumb" src="${thumbUrl}" alt="" loading="lazy">` : '';
     li.innerHTML = `
+      ${thumbHtml}
       <span class="item-name">${escHtml(bank.name)}${factoryBadge}</span>
       <span class="item-badge">${bank.modelId}</span>
       <span class="item-actions">
