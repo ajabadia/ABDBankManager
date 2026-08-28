@@ -5,6 +5,7 @@
  */
 
 import Dexie from 'dexie';
+import { getFilteredPatches } from '../../../packages/core/src/search/searchPatches.js';
 
 import {
   isLibrary,
@@ -317,4 +318,4 @@ export async function getDatabaseStats() {
   return { bankCount, patchCount, favCount };
 }
 
-export { db };
+export { db, getFilteredPatches };

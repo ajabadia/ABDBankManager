@@ -154,7 +154,9 @@ function packProgram(vmem: Uint8Array, ved: Uint8Array): void {
  * Header: F0 43 gg 00 01 1B  [155B VCED]  checksum  F7
  */
 function buildDx7VoiceSysEx(ved: Uint8Array, channel: number): Uint8Array {
-  const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), 0x00, 0x01, 0x1B]);
+  // MIDI channel 1-16 → SysEx byte 0-15 (0-based)
+  const ch = (channel - 1) & 0x0F;
+  const header = new Uint8Array([0xF0, 0x43, ch, 0x00, 0x01, 0x1B]);
   const result = new Uint8Array(6 + 155 + 2); // 163 bytes
   result.set(header, 0);
   result.set(ved.subarray(0, 155), 6);
@@ -314,7 +316,8 @@ const yamahaDx7Contract: ModelContract = {
   buildBulkSysEx(patches: { rawData: Uint8Array; slot: number }[], channel: number): Uint8Array {
     // Standard DX7 bulk dump: F0 43 gg 09 20 00 [32×128B VMEM] checksum F7 = 4104 bytes
     // Patches must be in VMEM format (128 bytes each)
-    const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), CMD_BULK, SUB_SINGLE, 0x00]);
+    const ch = (channel - 1) & 0x0F;
+    const header = new Uint8Array([0xF0, 0x43, ch, CMD_BULK, SUB_SINGLE, 0x00]);
     const bankSize = 32 * DX7_PATCH_DATA_SIZE; // 4096 bytes
     const result = new Uint8Array(header.length + bankSize + 2); // 4104 bytes
     result.set(header, 0);
@@ -346,7 +349,8 @@ const yamahaDx7Contract: ModelContract = {
 
   buildDumpRequest(_slot: number | 'all', channel: number): Uint8Array {
     // Standard DX7 dump request: F0 43 gg 09 20 00 F7 (8 bytes)
-    return new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), CMD_BULK, SUB_SINGLE, 0x00, 0xF7]);
+    const ch = (channel - 1) & 0x0F;
+    return new Uint8Array([0xF0, 0x43, ch, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]);
   },
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
@@ -372,7 +376,7 @@ const yamahaDx7Contract: ModelContract = {
 
   legacySysEx: {
     modelIdByte: 0x00,
-    buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x43, 0x10 | (ch & 0x0F), 0x00, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]),
+    buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x43, (ch - 1) & 0x0F, 0x00, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]),
     validateSysEx: (bytes) => bytes.length >= 6 && bytes[0] === 0xF0 && bytes[1] === 0x43 && bytes[3] === 0x00
   }
 };
@@ -418,7 +422,8 @@ export const yamahaDx7iiContract: ModelContract = {
     const data = rawData.slice(0, DX7II_PATCH_DATA_SIZE);
     const padded = new Uint8Array(DX7II_PATCH_DATA_SIZE);
     padded.set(data);
-    const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), 0x01, CMD_BULK, SUB_SINGLE, 0x00]);
+    const ch = (channel - 1) & 0x0F;
+    const header = new Uint8Array([0xF0, 0x43, ch, 0x01, CMD_BULK, SUB_SINGLE, 0x00]);
     const payload = new Uint8Array(header.length + DX7II_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
@@ -445,7 +450,7 @@ export const yamahaDx7iiContract: ModelContract = {
 
   legacySysEx: {
     modelIdByte: 0x01,
-    buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x43, 0x10 | (ch & 0x0F), 0x01, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]),
+    buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x43, (ch - 1) & 0x0F, 0x01, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]),
     validateSysEx: (bytes) => bytes.length >= 6 && bytes[0] === 0xF0 && bytes[1] === 0x43 && bytes[3] === 0x01
   }
 };

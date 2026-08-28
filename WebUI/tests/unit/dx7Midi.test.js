@@ -14,10 +14,10 @@ describe('DX7 MIDI Transport', () => {
     const request = contract.buildDumpRequest(0, 1);
     expect(request).toBeInstanceOf(Uint8Array);
     expect(request.length).toBe(7);
-    // Standard DX7: F0 43 11 09 20 00 F7 (channel 1 = 0x11)
+    // Standard DX7: F0 43 00 09 20 00 F7 (channel 1 = 0x00, 0-based)
     expect(request[0]).toBe(0xF0);
     expect(request[1]).toBe(0x43); // Yamaha
-    expect(request[2]).toBe(0x11); // channel 1
+    expect(request[2]).toBe(0x00); // channel 1 (0-based in SysEx)
     expect(request[3]).toBe(0x09); // CMD_BULK
     expect(request[4]).toBe(0x20); // SUB_SINGLE
     expect(request[5]).toBe(0x00); // address low

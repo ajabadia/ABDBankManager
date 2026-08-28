@@ -8,7 +8,7 @@ import {
   createBank, getBank, getAllBanks, updateBank, deleteBank,
   createPatch, getPatchesForBank, getPatch, updatePatch, deletePatch,
   importBank, exportBank, getDatabaseStats, getAllPatches,
-  runPreMigrationBackup, searchPatches, getFilteredPatches
+  runPreMigrationBackup, getFilteredPatches
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
@@ -31,7 +31,6 @@ let activeBankId = null;
 let activePatchId = null;
 let selectedPatchIds = new Set();
 let patchSearchQuery = '';
-let patchSearchResults = null;
 
 // ─── Init ───
 async function init() {
@@ -43,6 +42,15 @@ async function init() {
   await runPreMigrationBackup();
   await refreshBankList();
   await updateStats();
+
+  // Search input
+  const searchInput = document.getElementById('patch-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      patchSearchQuery = e.target.value.trim();
+      refreshPatchList();
+    });
+  }
 
   setStatus('connected', 'Listo');
   console.log('[ABD Bank Manager] Ready');
@@ -178,7 +186,23 @@ async function refreshPatchList() {
     return;
   }
 
-  for (const patch of patches) {
+  let filteredPatches = patches;
+  if (patchSearchQuery) {
+    // Use core search: build a temp library with just this bank
+    const tempLib = { banks: [{ id: activeBankId, name: '', modelId: '', patches }] };
+    const results = getFilteredPatches(tempLib, {
+      text: patchSearchQuery,
+      // no model/category/favorites filters for now — text search across name/author/tags/notes
+    });
+    filteredPatches = results;
+  }
+
+  if (filteredPatches.length === 0) {
+    list.innerHTML = '<li class="list-empty">Sin coincidencias</li>';
+    return;
+  }
+
+  for (const patch of filteredPatches) {
     const li = document.createElement('li');
     li.className = 'list-item' + (patch.id === activePatchId ? ' active' : '');
     const checked = selectedPatchIds.has(patch.id) ? ' checked' : '';
