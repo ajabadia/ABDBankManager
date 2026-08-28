@@ -701,8 +701,8 @@ async function handleMidiFetch() {
 async function handleMidiSendPatch() {
   const transport = activeMidiTransport;
   if (!transport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
-  if (!selectedPatchId) { toast('Selecciona un patch para enviar', 'error'); return; }
-  const patch = await getPatch(selectedPatchId);
+  if (!activePatchId) { toast('Selecciona un patch para enviar', 'error'); return; }
+  const patch = await getPatch(activePatchId);
   if (!patch) { toast('Patch no encontrado', 'error'); return; }
   const bank = await getBank(patch.bankId);
   if (!bank) { toast('Banco no encontrado', 'error'); return; }
