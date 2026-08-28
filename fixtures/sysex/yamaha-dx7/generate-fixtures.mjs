@@ -67,20 +67,17 @@ function buildDx7Bulk(voices, channel = 0) {
 function createVoice(name, algo = 0, lfoSpeed = 50) {
   const data = new Uint8Array(DX7_SIZE);
 
-  // OP6 parameters (offset 0–17)
+  // VMEM layout: 6 ops × 17 bytes = 102 bytes, globals at 102-127
+  // OP6 parameters (offset 0–16)
   data[0] = 99;   // OP6 EG Rate 1
-  data[8] = 80;   // OP6 Output Level
+  data[14] = 80;  // OP6 Output Level (VMEM offset 14)
 
-  // OP1 parameters (offset 90–107)
-  data[90 + 8] = 75;   // OP1 Output Level
-  data[90 + 13] = 1;   // OP1 On
-  data[90 + 14] = 0;   // OP1 Freq Mode (Ratio)
-  data[90 + 15] = 1;   // OP1 Freq Coarse
-  data[90 + 16] = 0;   // OP1 Freq Fine
+  // OP1 parameters (offset 85–101)
+  data[85 + 14] = 75;   // OP1 Output Level (VMEM offset 99)
 
   // Global parameters — write BEFORE name (name occupies 118-127)
-  data[108] = 50;       // Pitch EG Rate 1
-  data[116] = algo;     // Algorithm (within safe range < 118)
+  data[102] = 50;       // Pitch EG Rate 1 (VMEM offset 102)
+  data[110] = algo;     // Algorithm (VMEM offset 110)
 
   // Patch name at bytes 118–127 (ASCII) — written LAST to avoid overwrites
   for (let i = 0; i < Math.min(name.length, 10); i++) {
