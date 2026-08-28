@@ -11,48 +11,40 @@ import { decodePro800Parameters, getPro800ParametersForFormat } from './pro800Pa
 import { decodeDeepMindParameters } from './deepMindParameters.js';
 import { decodeDx7Parameters, getDx7TableParameters } from './dx7Parameters.js';
 
-// ─── Parameter schema registry ───
-// Maps modelId → { decode(rawData), getTable(rawData), formatLabel(rawData) }
+// ─── Parameter schema registry (built from contracts, no hardcodes) ───
+// Each model declares parameterSchemaKey in its contract.
+// Schema functions are mapped by key, then assigned to contracts that reference them.
 
-const PARAMETER_SCHEMAS = {
-  'behringer-pro800': {
-    decode: decodePro800Parameters,
-    getTable: decodePro800Parameters,
-    formatLabel: rawData => {
-      const version = rawData?.[4] || 111;
-      return `Pro-800 · Formato v${version}`;
-    },
-  },
-  'behringer-deepmind12': {
-    decode: decodeDeepMindParameters,
-    getTable: decodeDeepMindParameters,
-    formatLabel: () => 'DeepMind 12 · 242 bytes',
-  },
-  'behringer-dm12': {
-    decode: decodeDeepMindParameters,
-    getTable: decodeDeepMindParameters,
-    formatLabel: () => 'DeepMind 12 · 242 bytes',
-  },
-  'yamaha-dx7': {
-    decode: decodeDx7Parameters,
-    getTable: getDx7TableParameters,
-    formatLabel: () => 'Yamaha DX7 · VCED 128 bytes',
-  },
-  'yamaha-dx7ii': {
-    decode: decodeDx7Parameters,
-    getTable: getDx7TableParameters,
-    formatLabel: () => 'Yamaha DX7II · VCED 128 bytes',
-  },
+const SCHEMA_DECODE_MAP = {
+  'behringer-pro800': { decode: decodePro800Parameters, getTable: decodePro800Parameters },
+  'behringer-deepmind12': { decode: decodeDeepMindParameters, getTable: decodeDeepMindParameters },
+  'behringer-dm12': { decode: decodeDeepMindParameters, getTable: decodeDeepMindParameters },
+  'yamaha-dx7': { decode: decodeDx7Parameters, getTable: getDx7TableParameters },
+  'yamaha-dx7ii': { decode: decodeDx7Parameters, getTable: getDx7TableParameters },
 };
 
-// ─── MIDI detection patterns ───
-// Maps regex → modelId for auto-detection from port name
+const PARAMETER_SCHEMAS = {};
+for (const contract of MODEL_CONTRACTS) {
+  const key = contract.parameterSchemaKey;
+  if (key && SCHEMA_DECODE_MAP[key]) {
+    const { decode, getTable } = SCHEMA_DECODE_MAP[key];
+    PARAMETER_SCHEMAS[contract.modelId] = {
+      decode,
+      getTable,
+      formatLabel: rawData => `${contract.displayName} · ${contract.patchDataSize} bytes`,
+    };
+  }
+}
 
-const MIDI_DETECT_PATTERNS = [
-  { pattern: /dx.?7|fm.?1|m.?wave|cuvave/i, modelId: 'yamaha-dx7', displayName: 'DX7' },
-  { pattern: /pro.?800/i, modelId: 'behringer-pro800', displayName: 'Pro-800' },
-  { pattern: /deep.?mind|dm.?12/i, modelId: 'behringer-deepmind12', displayName: 'DeepMind 12' },
-];
+// ─── MIDI detection patterns (built from contracts, no hardcodes) ───
+
+const MIDI_DETECT_PATTERNS = MODEL_CONTRACTS
+  .filter(c => c.midiDetection)
+  .map(c => ({
+    pattern: c.midiDetection.portPattern,
+    modelId: c.modelId,
+    displayName: c.midiDetection.displayName,
+  }));
 
 // ─── Cached lookups (built once at load) ───
 

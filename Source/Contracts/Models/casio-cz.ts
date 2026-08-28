@@ -20,7 +20,7 @@ const PATCH_NAME_MAX_LENGTH = 0;
 
 const CATEGORIES = ['Bass', 'Lead', 'Pad', 'FX', 'Keys', 'Perc', 'Synth', 'Other'];
 const DEFAULT_CATEGORY = 'Other';
-const SYSEX_MANUFACTURER_ID = [0x44, 0x00, 0x00];
+const SYSEX_MANUFACTURER_ID = [0x44];
 const FORMAT_VERSION = 1;
 
 const CMD_DUMP    = 0x10;
@@ -119,6 +119,8 @@ const casioCzContract: ModelContract = {
 
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+  sysexModelId: { offset: 4, values: [0x12] },
+  midiDetection: { portPattern: /casio|cz.?101/i, displayName: 'Casio CZ-101' },
 
   midi: { defaultChannel: 1, defaultDeviceId: 0x10 },
 

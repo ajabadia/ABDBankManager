@@ -31,18 +31,16 @@ describe('extractPatchName — extracción según el contrato', () => {
     expect(dm12.extractPatchName(data.slice(0, 200))).toBe(''); // too short
   });
 
-  it('Yamaha DX7: name at 0x09, 10 chars (DX7 6-bit charset)', () => {
+  it('Yamaha DX7: name at offset 118, 10 chars ASCII', () => {
     const dx7 = getModelContract('yamaha-dx7');
-    const data = new Uint8Array(0x13);
-    // DX7 6-bit charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols
-    // E=5, .=50, P=16, I=9, A=1, N=14, O=15, space=0, 1=28
-    const dx7Encode = { E:5, '.':50, P:16, I:9, A:1, N:14, O:15, ' ':0, '1':28 };
+    const data = new Uint8Array(128);
+    // DX7 voice name is ASCII at bytes 118-127
     const name = 'E.PIANO 1';
     for (let i = 0; i < name.length && i < 10; i++) {
-      data[0x09 + i] = dx7Encode[name[i]] ?? 0;
+      data[118 + i] = name.charCodeAt(i);
     }
     expect(dx7.extractPatchName(data)).toBe('E.PIANO 1');
-    expect(dx7.extractPatchName(new Uint8Array(0x12))).toBe(''); // < 0x13 bytes
+    expect(dx7.extractPatchName(new Uint8Array(100))).toBe(''); // < 128 bytes
   });
 
   it('formats without names (Casio CZ, Roland Juno) always return empty', () => {

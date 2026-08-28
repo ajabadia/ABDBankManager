@@ -26,10 +26,10 @@ describe('DX7 MIDI Transport', () => {
 
   it('should build a valid single voice SysEx (136 bytes)', () => {
     const rawData = new Uint8Array(128);
-    rawData[9] = 0x54;  // T
-    rawData[10] = 0x45; // E
-    rawData[11] = 0x53; // S
-    rawData[12] = 0x54; // T
+    rawData[118] = 0x54;  // T (ASCII at name offset)
+    rawData[119] = 0x45; // E
+    rawData[120] = 0x53; // S
+    rawData[121] = 0x54; // T
 
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
     expect(sysex.length).toBe(6 + 128 + 2); // header + data + checksum + F7
@@ -43,7 +43,7 @@ describe('DX7 MIDI Transport', () => {
 
   it('should verify checksum of valid SysEx', () => {
     const rawData = new Uint8Array(128);
-    rawData[9] = 0x54;
+    rawData[118] = 0x54;  // T (ASCII at name offset)
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
     expect(contract.verifyChecksum(sysex)).toBe(true);
   });
@@ -57,51 +57,44 @@ describe('DX7 MIDI Transport', () => {
 
   it('should parse a single voice SysEx', () => {
     const rawData = new Uint8Array(128);
-    rawData[9] = 0x42;  // B
-    rawData[10] = 0x41; // A
-    rawData[11] = 0x53; // S
-    rawData[12] = 0x53; // S
+    rawData[118] = 0x42;  // B (ASCII at name offset)
+    rawData[119] = 0x41; // A
+    rawData[120] = 0x53; // S
+    rawData[121] = 0x53; // S
 
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
     const parsed = contract.parsePatchSysEx(sysex);
     expect(parsed).not.toBeNull();
     expect(parsed.rawData.length).toBe(128);
-    expect(parsed.rawData[9]).toBe(0x42);
-    expect(parsed.rawData[10]).toBe(0x41);
+    expect(parsed.rawData[118]).toBe(0x42);
+    expect(parsed.rawData[119]).toBe(0x41);
   });
 
-  it('should extract name from parsed data (DX7 charset)', () => {
-    // DX7 6-bit charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols
+  it('should extract name from parsed data (ASCII at offset 118)', () => {
+    // DX7 voice name is ASCII at bytes 118-127
     const rawData = new Uint8Array(128);
-    rawData[9] = 5;   // E (char index 5)
-    rawData[10] = 37; // ! (symbol)
-    rawData[11] = 16; // P
-    rawData[12] = 9;  // I
-    rawData[13] = 1;  // A
-    rawData[14] = 14; // N
-    rawData[15] = 15; // O
+    const name = 'E.PIANO 1';
+    for (let i = 0; i < name.length; i++) {
+      rawData[118 + i] = name.charCodeAt(i);
+    }
 
-    const name = contract.extractPatchName(rawData);
-    expect(name).toBe('E!PIANO');
+    expect(contract.extractPatchName(rawData)).toBe('E.PIANO 1');
   });
 
   it('should parse bulk dump response (32 voices)', () => {
     // Standard DX7 6-byte header
     const header = [0xF0, 0x43, 0x10, 0x09, 0x20, 0x00];
     const payload = new Uint8Array(32 * 128);
-    // Set first voice name
-    payload[9] = 0x56;  // V
-    payload[10] = 0x31; // 1
-    // Set second voice name
-    payload[128 + 9] = 0x56;   // V
-    payload[128 + 10] = 0x32;  // 2
+    // Set first voice name at offset 118 (ASCII)
+    payload[118] = 0x56;  // V
+    payload[119] = 0x31; // 1
+    // Set second voice name at offset 118 (ASCII)
+    payload[128 + 118] = 0x56;  // V
+    payload[128 + 119] = 0x32;  // 2
 
-    // Build checksum (covers bytes 3..N-2 = header[3..5] + payload)
-    const checksumPayload = new Uint8Array(3 + payload.length);
-    for (let i = 0; i < 3; i++) checksumPayload[i] = header[i + 3];
-    checksumPayload.set(payload, 3);
+    // Build checksum (covers data after 6-byte header)
     let sum = 0;
-    for (const b of checksumPayload) sum += b;
+    for (const b of payload) sum += b;
     const checksum = (128 - (sum % 128)) & 0x7F;
 
     const fullSysex = new Uint8Array(header.length + payload.length + 2);
@@ -112,10 +105,10 @@ describe('DX7 MIDI Transport', () => {
 
     const results = contract.parseDumpResponse(fullSysex);
     expect(results.length).toBe(32);
-    expect(results[0].rawData[9]).toBe(0x56);
-    expect(results[0].rawData[10]).toBe(0x31);
-    expect(results[1].rawData[9]).toBe(0x56);
-    expect(results[1].rawData[10]).toBe(0x32);
+    expect(results[0].rawData[118]).toBe(0x56);
+    expect(results[0].rawData[119]).toBe(0x31);
+    expect(results[1].rawData[118]).toBe(0x56);
+    expect(results[1].rawData[119]).toBe(0x32);
   });
 
   it('should have bankCapacity of 32', () => {

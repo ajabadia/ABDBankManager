@@ -136,7 +136,7 @@ Todo requisito importante debe tener:
 - [ ] Resolver comandos y offsets Casio.
 - [x] Revisar completamente el protocolo Behringer; Pro-800 contrastado con referencia local y DeepMind 12 alineado con los estudios y código de ABDEep.
 - [x] Corregir `isDeepMindMessage()` para aceptar device IDs y protocolos variantes (0x06/0x07, 0x00/0x7F) sin perder la identificación del modelo.
-- [x] Revisar Yamaha DX7/DX7II, single voice y bulk dump. Contrato verificado: 128 bytes VCED, 32 voices por bulk, checksum `(128-sum)%128`. Naming offsets 9–18 correctos. Bulk dump parsing validado con 32 voices.
+- [x] Revisar Yamaha DX7/DX7II, single voice y bulk dump. Contrato verificado: 128 bytes VCED, 32 voices por bulk, checksum sobre bytes después de cabecera (6B). Name at offset 118-127 (ASCII). Bulk dump parsing validado con 32 voices. 35 dumps reales verificados (ROM1-4, VRC101-112, comunidad).
 - [ ] Prohibir que la compatibilidad se deduzca solo del fabricante o del packing.
 - [ ] Hacer que todos los adapters consuman la tabla/contrato canónico.
 
@@ -159,7 +159,7 @@ Todo requisito importante debe tener:
 - [x] Añadir dumps reales de Yamaha. Fixtures DX7 creados: single-voice.syx (136B), bulk-32voices.syx (4104B), e-piano-bank.syx (4104B), multi-voice.syx (408B). Generador reproducible en `fixtures/sysex/yamaha-dx7/generate-fixtures.mjs`.
 - [x] Añadir dump real de DX7: `fixtures/sysex/yamaha-dx7/real-dumps/DX7_factory_rom1a.syx` (4104B) descargado de dxsyx/rogerallen repo. Verificado: cabecera F0 43 00 09 20 00 (6 bytes), 32 voces, checksum válido.
 - [x] Corregir bug crítico en contrato DX7: cabecera de 7 bytes (con byte extra 0x00) → formato correcto de 6 bytes. Añadido soporte dual para formato legacy (7B) y estándar (6B).
-- [x] Corregir `extractPatchName` para usar charset DX7 de 6 bits en vez de ASCII. Charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols.
+- [x] Corregir `extractPatchName`: name at offset 118-127 (ASCII, no 6-bit charset). Checksum range corregido: bytes después de cabecera de 6B (no desde byte 3). 35 dumps reales de usuario copiados a `fixtures/sysex/yamaha-dx7/user-dumps/`.
 - [x] Documentar procedencia y licencia de cada fixture; la procedencia local está registrada, pero el estado legal de redistribución sigue pendiente para Pro-800. DeepMind 12 documentado en `fixtures/sysex/behringer-deepmind12/README.md` con hashes, categorías y política de licencia. DX7 documentado en `fixtures/sysex/yamaha-dx7/README.md` con formato SysEx, layout VCED y licencia.
 - [ ] Crear tests de detección de modelo.
 - [x] Crear tests de número de patches extraídos para los fixtures Pro-800 v109/v110/v111.

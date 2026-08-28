@@ -9,9 +9,7 @@
  *   e-piano-bank.syx       — 32-voice bank with named patches
  *   multi-voice.syx        — 3 separate single-voice messages
  *
- * NOTE: The project's DX7 VCED layout places the patch name at bytes 9–17,
- * which overlaps with OP6 parameters. We write name LAST so it takes
- * precedence for testing purposes.
+ * The DX7 VCED layout places the patch name at bytes 118–127 (10 bytes ASCII).
  */
 import { writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
@@ -39,7 +37,8 @@ function buildDx7Voice(rawData, channel = 0) {
   const payload = new Uint8Array(header.length + DX7_SIZE);
   payload.set(header, 0);
   payload.set(data, header.length);
-  const checksum = dx7Checksum(payload.slice(3));
+  // Checksum covers data after the 6-byte header (verified against real ROM dumps)
+  const checksum = dx7Checksum(payload.slice(6));
   const result = new Uint8Array(payload.length + 2);
   result.set(payload, 0);
   result[payload.length] = checksum;
@@ -56,7 +55,8 @@ function buildDx7Bulk(voices, channel = 0) {
     const voice = voices[i] || new Uint8Array(DX7_SIZE);
     payload.set(voice.slice(0, DX7_SIZE), header.length + i * DX7_SIZE);
   }
-  const checksum = dx7Checksum(payload.slice(3));
+  // Checksum covers data after the 6-byte header
+  const checksum = dx7Checksum(payload.slice(6));
   const result = new Uint8Array(payload.length + 2);
   result.set(payload, 0);
   result[payload.length] = checksum;
@@ -67,10 +67,9 @@ function buildDx7Bulk(voices, channel = 0) {
 function createVoice(name, algo = 0, lfoSpeed = 50) {
   const data = new Uint8Array(DX7_SIZE);
 
-  // OP6 parameters (offset 0–17) — avoid bytes 9–17 which overlap name
+  // OP6 parameters (offset 0–17)
   data[0] = 99;   // OP6 EG Rate 1
   data[8] = 80;   // OP6 Output Level
-  // Skip bytes 9–17 (name area in project's layout)
 
   // OP1 parameters (offset 90–107)
   data[90 + 8] = 75;   // OP1 Output Level
@@ -79,17 +78,13 @@ function createVoice(name, algo = 0, lfoSpeed = 50) {
   data[90 + 15] = 1;   // OP1 Freq Coarse
   data[90 + 16] = 0;   // OP1 Freq Fine
 
-  // Global parameters (offset 108+)
-  data[116] = algo;       // Algorithm
-  data[119] = lfoSpeed;   // LFO Speed
+  // Global parameters — write BEFORE name (name occupies 118-127)
+  data[108] = 50;       // Pitch EG Rate 1
+  data[116] = algo;     // Algorithm (within safe range < 118)
 
-  // Patch name at bytes 9–18 (DX7 6-bit charset)
-  // 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols
-  const DX7_ENCODE = {};
-  const charset = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!"#$%&' + "'" + '()*+,-./:;<=>?@[\\]^_';
-  for (let c = 0; c < charset.length; c++) DX7_ENCODE[charset[c]] = c;
+  // Patch name at bytes 118–127 (ASCII) — written LAST to avoid overwrites
   for (let i = 0; i < Math.min(name.length, 10); i++) {
-    data[9 + i] = DX7_ENCODE[name[i]] !== undefined ? DX7_ENCODE[name[i]] : 0;
+    data[118 + i] = name.charCodeAt(i);
   }
 
   return data;

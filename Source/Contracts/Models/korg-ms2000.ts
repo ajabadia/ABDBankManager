@@ -149,6 +149,8 @@ const korgMs2000Contract: ModelContract = {
 
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+  sysexModelId: { offset: 3, values: [0x58] },
+  midiDetection: { portPattern: /ms.?2000|microkorg/i, displayName: 'Korg MS2000' },
 
   midi: {
     defaultChannel: 1,

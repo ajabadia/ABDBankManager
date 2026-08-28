@@ -53,76 +53,36 @@ function matchesManufacturer(msg, contract) {
 
 /**
  * Try to disambiguate between contracts sharing the same manufacturer byte.
- * Uses manufacturer-specific model ID byte positions:
- * - Korg (0x42): byte[3] = model ID (0x58=MS2000/microKORG, 0x5A=Prophecy)
- * - Yamaha (0x43): byte[3] = device byte (0x00=DX7, 0x01=DX7II)
- * - Casio (0x44): byte[4] = model ID (0x12=CZ101, 0x13=CZ1000, 0x14=CZ5000, 0x15=CZ-1)
- * - Behringer (0x00 0x20 0x32): DM12 byte[4]=0x20; Pro-800 bytes[4..6]=00 01 24
- * - Roland (0x41): no model ID in single format — falls back to canonical contract
+ * Uses each contract's sysexModelId field (offset + expected values) to match.
+ * Contract-driven: no hardcoded manufacturer-specific logic.
  */
 function disambiguateByManufacturer(msg, contracts) {
   if (contracts.length === 0) return null;
   if (contracts.length === 1) return contracts[0];
 
-  const mfrId = contracts[0].sysexManufacturerId;
-  const mfrByte = mfrId[0];
+  // First pass: find contracts whose sysexModelId matches the message
+  for (const contract of contracts) {
+    if (!contract.sysexModelId) continue;
+    const { offset, values, multiByte } = contract.sysexModelId;
+    if (msg.length <= offset) continue;
 
-  // Korg: byte[3] = model ID
-  if (mfrByte === 0x42 && msg.length > 3) {
-    const modelByte = msg[3];
-    // 0x58 = MS2000 + microKORG (identical SysEx), 0x5A = Prophecy
-    if (modelByte === 0x5A) {
-      const prophecy = contracts.find(c => c.modelId === 'korg-prophecy');
-      if (prophecy) return prophecy;
-    }
-    // 0x58 = MS2000 (canonical for microKORG too)
-    if (modelByte === 0x58) {
-      return contracts.find(c => c.modelId === 'korg-ms2000') || contracts[0];
+    if (values.includes(msg[offset])) {
+      // Check multi-byte extension if present (e.g. Pro-800: bytes[4]=0x00 + bytes[5..6]=0x01,0x24)
+      if (multiByte && msg.length > offset + multiByte.length) {
+        let match = true;
+        for (let j = 0; j < multiByte.length; j++) {
+          if (msg[offset + 1 + j] !== multiByte[j]) { match = false; break; }
+        }
+        if (match) return contract;
+      } else {
+        return contract;
+      }
     }
   }
 
-  // Yamaha: byte[3] = device byte
-  if (mfrByte === 0x43 && msg.length > 3) {
-    const deviceByte = msg[3];
-    if (deviceByte === 0x01) {
-      const dx7ii = contracts.find(c => c.modelId === 'yamaha-dx7ii');
-      if (dx7ii) return dx7ii;
-    }
-    if (deviceByte === 0x00) {
-      return contracts.find(c => c.modelId === 'yamaha-dx7') || contracts[0];
-    }
-  }
-
-  // Casio: byte[4] = model ID
-  if (mfrByte === 0x44 && msg.length > 4) {
-    const modelByte = msg[4];
-    const casioMap = {
-      0x12: 'casio-cz101',
-      0x13: 'casio-cz1000',
-      0x14: 'casio-cz5000',
-      0x15: 'casio-cz1'
-    };
-    const targetId = casioMap[modelByte];
-    if (targetId) {
-      const match = contracts.find(c => c.modelId === targetId);
-      if (match) return match;
-    }
-  }
-
-  // Behringer: DeepMind 12 → byte[4] = 0x20 (header F0 00 20 32 20 ...)
-  //            Pro-800  → bytes[4..6] = 00 01 24 (header F0 00 20 32 00 01 24 00 78 ...)
-  if (mfrByte === 0x00 && mfrId.length === 3 && msg.length > 6) {
-    if (msg[4] === 0x00 && msg[5] === 0x01 && msg[6] === 0x24) {
-      const pro800 = contracts.find(c => c.modelId === 'behringer-pro800');
-      if (pro800) return pro800;
-    }
-    if (msg[4] === 0x20) {
-      return contracts.find(c => c.modelId === 'behringer-deepmind12') || contracts[0];
-    }
-  }
-
-  // Roland: no model ID in single format — return canonical (first)
-  return contracts[0];
+  // Second pass: contracts without sysexModelId — return first one without a model ID
+  const fallback = contracts.find(c => !c.sysexModelId);
+  return fallback || contracts[0];
 }
 
 /**

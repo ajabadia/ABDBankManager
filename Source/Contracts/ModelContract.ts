@@ -36,6 +36,26 @@ export interface ModelContract {
   sysexManufacturerId: number[]; // [0x44,0x00,0x00] Casio, [0x41] Roland, [0x42] Korg
   formatVersion: number;        // Contract version for migrations
 
+  // ─── SysEx Disambiguation (when multiple models share a manufacturer byte) ───
+  /** Byte position + expected value to disambiguate models within same manufacturer.
+   *  Example: DX7 uses { offset: 3, values: [0x00] }, DX7II uses { offset: 3, values: [0x01] }
+   *           Casio CZ-101 uses { offset: 4, values: [0x12] } */
+  sysexModelId?: {
+    offset: number;       // byte offset in SysEx message (after F0)
+    values: number[];     // expected byte value(s) at this offset
+  };
+
+  // ─── MIDI Detection (auto-detect from port name) ───
+  /** Regex pattern to match against MIDI port name for auto-detection */
+  midiDetection?: {
+    portPattern: RegExp;    // e.g. /dx.?7|fm.?1/i
+    displayName: string;    // e.g. 'DX7'
+  };
+
+  // ─── Parameter Schema (reference to model-specific parameter decoder) ───
+  /** Key in the PARAMETER_SCHEMAS registry. If set, enables parameter interpretation UI. */
+  parameterSchemaKey?: string;
+
   // ─── MIDI Defaults (derived, not user-editable) ───
   midi?: {
     defaultChannel: number;   // MIDI channel 1-16 for SysEx dumps

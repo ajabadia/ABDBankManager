@@ -127,13 +127,13 @@ const yamahaDx7Contract: ModelContract = {
   patchDataSize: DX7_PATCH_DATA_SIZE,
   patchNameMaxLength: DX7_PATCH_NAME_MAX_LENGTH,
   extractPatchName(data: Uint8Array): string {
-    if (data.length < 0x13) return '';
-    // DX7 uses a custom 6-bit charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols
-    const DX7_CHARSET = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\\\]^_';
-    const nameBytes = data.slice(0x09, 0x13);
+    // DX7 voice name is 10 bytes at offset 118 in the VCED data (ASCII)
+    if (data.length < 128) return '';
+    const nameBytes = data.slice(118, 128);
     let name = '';
     for (const b of nameBytes) {
-      name += DX7_CHARSET[b] || '.';
+      if (b === 0x00) break;
+      if (b >= 0x20 && b <= 0x7E) name += String.fromCharCode(b);
     }
     return name.trimEnd();
   },
@@ -145,6 +145,11 @@ const yamahaDx7Contract: ModelContract = {
 
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+
+  // DX7 uses byte[3] = device byte (0x00=DX7, 0x01=DX7II) for disambiguation
+  sysexModelId: { offset: 3, values: [0x00] },
+  midiDetection: { portPattern: /dx.?7|fm.?1|m.?wave|cuvave/i, displayName: 'DX7' },
+  parameterSchemaKey: 'yamaha-dx7',
 
   midi: { defaultChannel: 1, defaultDeviceId: 0x10 },
 
@@ -160,8 +165,10 @@ const yamahaDx7Contract: ModelContract = {
     if (sysex.length < 8) return false;
     if (sysex[0] !== 0xF0 || sysex[1] !== 0x43) return false;
     if (sysex[sysex.length - 1] !== 0xF7) return false;
-    // Checksum covers bytes[3..N-2] (address + data, before checksum byte)
-    const payload = sysex.slice(3, sysex.length - 2);
+    // DX7 checksum covers bytes after the 6-byte header until checksum byte
+    const hdr = dx7HeaderLen(sysex);
+    if (hdr === 0) return false;
+    const payload = sysex.slice(hdr, sysex.length - 2);
     return sysex[sysex.length - 2] === dx7Checksum(payload);
   },
 
@@ -174,11 +181,12 @@ const yamahaDx7Contract: ModelContract = {
     const payload = new Uint8Array(header.length + DX7_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
-    const checksum = dx7Checksum(payload.slice(3));
+    // Checksum covers data after the 6-byte header (verified against real ROM dumps)
+    const checksum = dx7Checksum(payload.slice(6));
     const result = new Uint8Array(payload.length + 2);
     result.set(payload, 0);
     result[payload.length] = checksum;
-    result[payload.length + 1] = 0xF7;
+    result[result.length - 1] = 0xF7;
     return result;
   },
 
@@ -226,6 +234,9 @@ export const yamahaDx7iiContract: ModelContract = {
   modelId: 'yamaha-dx7ii',
   displayName: 'Yamaha DX7II',
   thumbnail: 'yamaha-dx7ii.jpg',
+  sysexModelId: { offset: 3, values: [0x01] },
+  midiDetection: { portPattern: /dx.?7ii|dx7.?ii/i, displayName: 'DX7II' },
+  parameterSchemaKey: 'yamaha-dx7ii',
   bankCapacity: 64,
   programsPerBank: 64,
   patchDataSize: DX7II_PATCH_DATA_SIZE,
@@ -244,13 +255,13 @@ export const yamahaDx7iiContract: ModelContract = {
   },
 
   extractPatchName(data: Uint8Array): string {
-    if (data.length < 0x13) return '';
-    // DX7 uses a custom 6-bit charset: 0=space, 1-26=A-Z, 27-36=0-9, 37+=symbols
-    const DX7_CHARSET = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\\\]^_';
-    const nameBytes = data.slice(0x09, 0x13);
+    // DX7II voice name is 10 bytes at offset 118 in the VCED data (ASCII)
+    if (data.length < 128) return '';
+    const nameBytes = data.slice(118, 128);
     let name = '';
     for (const b of nameBytes) {
-      name += DX7_CHARSET[b] || '.';
+      if (b === 0x00) break;
+      if (b >= 0x20 && b <= 0x7E) name += String.fromCharCode(b);
     }
     return name.trimEnd();
   },
@@ -263,11 +274,12 @@ export const yamahaDx7iiContract: ModelContract = {
     const payload = new Uint8Array(header.length + DX7II_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
-    const checksum = dx7Checksum(payload.slice(3));
+    // Checksum covers data after the 7-byte header (DX7II format)
+    const checksum = dx7Checksum(payload.slice(7));
     const result = new Uint8Array(payload.length + 2);
     result.set(payload, 0);
     result[payload.length] = checksum;
-    result[payload.length + 1] = 0xF7;
+    result[result.length - 1] = 0xF7;
     return result;
   },
 
@@ -277,7 +289,8 @@ export const yamahaDx7iiContract: ModelContract = {
     if (sysex[3] !== 0x01) return null;
     if (sysex[4] !== CMD_BULK || sysex[5] !== SUB_SINGLE || sysex[6] !== 0x00) return null;
     if (sysex[sysex.length - 1] !== 0xF7) return null;
-    const payload = sysex.slice(3, sysex.length - 2);
+    // Checksum covers data after the 7-byte header
+    const payload = sysex.slice(7, sysex.length - 2);
     if (sysex[sysex.length - 2] !== dx7Checksum(payload)) return null;
     return { rawData: new Uint8Array(sysex.slice(7, 7 + DX7II_PATCH_DATA_SIZE)), slot: 0 };
   },

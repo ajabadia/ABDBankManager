@@ -104,6 +104,7 @@ const rolandJuno106Contract: ModelContract = {
 
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+  midiDetection: { portPattern: /juno.?106|juno/i, displayName: 'Roland Juno-106' },
 
   midi: { defaultChannel: 1, defaultDeviceId: DEVICE_ID },
 

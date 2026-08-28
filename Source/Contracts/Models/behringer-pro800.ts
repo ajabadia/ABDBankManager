@@ -174,6 +174,9 @@ const behringerPro800Contract: ModelContract = {
 
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+  sysexModelId: { offset: 4, values: [0x00], multiByte: [0x01, 0x24] },
+  midiDetection: { portPattern: /pro.?800/i, displayName: 'Pro-800' },
+  parameterSchemaKey: 'behringer-pro800',
 
   midi: { defaultChannel: 1, defaultDeviceId: 0x10 },
 

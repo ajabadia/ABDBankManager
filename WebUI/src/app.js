@@ -18,14 +18,13 @@ import {
   patchesToCsv, parseNamesCsv
 } from './core/patchBulk.js';
 import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getAllModels, getManufacturer } from './core/modelRegistry.js';
-import { extractDx7Name } from './core/dx7Parameters.js';
 import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
-import { requestMidiAccess, listMidiPorts, createBehringerMidiTransport, fetchBehringerBank, createDx7MidiTransport, fetchDx7Bank } from './core/pro800Midi.js';
+import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
 
 let midiAccess = null;
-let behringerMidiTransport = null;
-let dx7MidiTransport = null;
+let activeMidiTransport = null;
+let activeMidiModelId = null;
 
 // ─── State ───
 let activeBankId = null;
@@ -610,16 +609,14 @@ function showManualSelector(outputs, inputs) {
 }
 
 function connectMidiDevice(output, input, modelId) {
-  dx7MidiTransport?.close();
-  behringerMidiTransport?.close();
-  dx7MidiTransport = null;
-  behringerMidiTransport = null;
+  // Close any previous transport
+  activeMidiTransport?.close();
+  activeMidiTransport = null;
+  activeMidiModelId = null;
 
-  if (modelId === 'yamaha-dx7') {
-    dx7MidiTransport = createDx7MidiTransport({ input, output });
-  } else {
-    behringerMidiTransport = createBehringerMidiTransport({ modelId, input, output });
-  }
+  // Create generic transport driven by contract
+  activeMidiTransport = createMidiTransport({ modelId, input, output });
+  activeMidiModelId = modelId;
 
   const displayName = getModelDisplayName(modelId);
   setStatus('connected', `${displayName} conectado: ${output?.name || 'MIDI'}`);
@@ -627,67 +624,56 @@ function connectMidiDevice(output, input, modelId) {
 }
 
 async function handleMidiFetch() {
-  // DX7 bulk dump
-  if (dx7MidiTransport) {
-    let bank = activeBankId ? await getBank(activeBankId) : null;
-    const isDx7 = id => id && (id === 'yamaha-dx7' || id === 'yamaha-dx7ii');
-    if (!bank || !isDx7(bank.modelId)) {
-      const allBanks = await getAllBanks();
-      bank = allBanks.find(b => isDx7(b.bank?.modelId || b.modelId));
-      if (!bank) {
-        const contract = getContract('yamaha-dx7');
-        bank = await createBank({ name: contract?.displayName || 'Yamaha DX7', modelId: 'yamaha-dx7', manufacturer: contract?.manufacturer || '' });
-        await refreshBankList();
-      }
-      await selectBank(bank.id);
-    }
-    const button = document.getElementById('btn-midi-fetch');
-    button.disabled = true;
-    try {
-      const controller = new AbortController();
-      const patches = await fetchDx7Bank(dx7MidiTransport, { signal: controller.signal, onProgress: ({ completed, total }) => setStatus('connecting', `Fetch DX7 ${completed}/${total}`) });
-      for (const patch of patches) {
-        const existing = (await getPatchesForBank(bank.id)).find(candidate => candidate.index === patch.slot);
-        const name = extractDx7Name(patch.rawData) || `V${String(patch.slot + 1).padStart(2, '0')}`;
-        if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name });
-        else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name });
-      }
-      await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo');    toast(`Fetch ${getModelDisplayName('yamaha-dx7')} completado — ${patches.length} voces`, 'success');
-    } catch (error) { setStatus('error', error.message); toast(error.message, 'error'); } finally { button.disabled = false; }
-    return;
-  }
+  if (!activeMidiTransport) { toast('Conecta primero un dispositivo MIDI', 'error'); return; }
+  const contract = getContract(activeMidiModelId);
+  if (!contract) { toast('Contrato no encontrado', 'error'); return; }
 
-  // Behringer (DeepMind 12 / Pro-800)
-  if (!behringerMidiTransport) { toast('Conecta primero una salida MIDI', 'error'); return; }
-  const isDeepMindModel = id => id && (id === 'behringer-deepmind12' || id === 'behringer-dm12');
+  // Find or create a bank for this model
   let bank = activeBankId ? await getBank(activeBankId) : null;
-  if (!bank || !isDeepMindModel(bank.modelId)) {
+  const isCompatibleModel = id => id && (id === activeMidiModelId || contract.compatibleModels?.includes(id));
+  if (!bank || !isCompatibleModel(bank.modelId)) {
     const allBanks = await getAllBanks();
-    bank = allBanks.find(b => isDeepMindModel(b.bank?.modelId || b.modelId));
+    bank = allBanks.find(b => isCompatibleModel(b.bank?.modelId || b.modelId));
     if (!bank) {
-      const contract = getContract('behringer-deepmind12');
-      bank = await createBank({ name: contract?.displayName || 'DeepMind 12', modelId: 'behringer-deepmind12', manufacturer: contract?.manufacturer || 'Behringer' });
+      bank = await createBank({ name: contract.displayName, modelId: activeMidiModelId, manufacturer: contract.manufacturer || '' });
       await refreshBankList();
     }
     await selectBank(bank.id);
   }
-  const controller = new AbortController();
+
   const button = document.getElementById('btn-midi-fetch');
   button.disabled = true;
   try {
-    const patches = await fetchBehringerBank(behringerMidiTransport, { count: 128, signal: controller.signal, onProgress: ({ completed, total }) => setStatus('connecting', `Fetch DeepMind 12 ${completed}/${total}`) });
+    const controller = new AbortController();
+    const displayName = contract.displayName;
+
+    // Use generic fetch: bulk dump if parseDumpResponse exists, slot-by-slot otherwise
+    let patches;
+    if (contract.parseDumpResponse) {
+      // Bulk dump: one request returns all patches
+      onProgress = ({ completed, total }) => setStatus('connecting', `Fetch ${displayName} ${completed}/${total}`);
+      patches = await activeMidiTransport.fetchAll(controller.signal);
+    } else {
+      // Slot-by-slot fetch
+      const count = contract.bankCapacity || 128;
+      patches = await fetchBank(activeMidiTransport, { count, signal: controller.signal, onProgress: ({ completed, total }) => setStatus('connecting', `Fetch ${displayName} ${completed}/${total}`) });
+    }
+
+    // Store patches in bank
     for (const patch of patches) {
       const existing = (await getPatchesForBank(bank.id)).find(candidate => candidate.index === patch.slot);
-      if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name: getModelContract(bank.modelId)?.extractPatchName?.(patch.rawData) || existing.name });
-      else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name: getModelContract(bank.modelId)?.extractPatchName?.(patch.rawData) || `P${patch.slot + 1}` });
+      const name = contract.extractPatchName?.(patch.rawData) || `P${patch.slot + 1}`;
+      if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name });
+      else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name });
     }
-    await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo');    toast(`Fetch ${getModelDisplayName('behringer-deepmind12')} completado`, 'success');
+    await refreshPatchList(); await updateStats(); setStatus('connected', 'Listo');
+    toast(`Fetch ${displayName} completado — ${patches.length} patches`, 'success');
   } catch (error) { setStatus('error', error.message); toast(error.message, 'error'); } finally { button.disabled = false; }
 }
 
 // ─── MIDI Send: send patch or bank to connected hardware ───
 async function handleMidiSendPatch() {
-  const transport = dx7MidiTransport || behringerMidiTransport;
+  const transport = activeMidiTransport;
   if (!transport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
   if (!selectedPatchId) { toast('Selecciona un patch para enviar', 'error'); return; }
   const patch = await getPatch(selectedPatchId);
@@ -708,7 +694,7 @@ async function handleMidiSendPatch() {
 }
 
 async function handleMidiSendBank() {
-  const transport = dx7MidiTransport || behringerMidiTransport;
+  const transport = activeMidiTransport;
   if (!transport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
   if (!activeBankId) { toast('Selecciona un banco para enviar', 'error'); return; }
   const bank = await getBank(activeBankId);

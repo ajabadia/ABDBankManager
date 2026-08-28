@@ -61,7 +61,7 @@ var PATCH_DATA_SIZE = 128;
 var PATCH_NAME_MAX_LENGTH = 0;
 var CATEGORIES = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
 var DEFAULT_CATEGORY = "Other";
-var SYSEX_MANUFACTURER_ID = [68, 0, 0];
+var SYSEX_MANUFACTURER_ID = [68];
 var FORMAT_VERSION = 1;
 var CMD_DUMP = 16;
 var CMD_REQUEST = 48;
@@ -144,6 +144,8 @@ var casioCzContract = {
   compatibleModels: ["casio-cz1000", "casio-cz5000", "casio-cz1"],
   sysexManufacturerId: SYSEX_MANUFACTURER_ID,
   formatVersion: FORMAT_VERSION,
+  sysexModelId: { offset: 4, values: [18] },
+  midiDetection: { portPattern: /casio|cz.?101/i, displayName: "Casio CZ-101" },
   midi: { defaultChannel: 1, defaultDeviceId: 16 },
   supportsEditBuffer: false,
   interMessageDelayMs: 30,
@@ -323,6 +325,7 @@ var rolandJuno106Contract = {
   compatibleModels: ["roland-juno60", "roland-juno6", "roland-hs60"],
   sysexManufacturerId: SYSEX_MANUFACTURER_ID2,
   formatVersion: FORMAT_VERSION2,
+  midiDetection: { portPattern: /juno.?106|juno/i, displayName: "Roland Juno-106" },
   midi: { defaultChannel: 1, defaultDeviceId: DEVICE_ID },
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
@@ -523,6 +526,8 @@ var korgMs2000Contract = {
   compatibleModels: ["korg-microkorg"],
   sysexManufacturerId: SYSEX_MANUFACTURER_ID3,
   formatVersion: FORMAT_VERSION3,
+  sysexModelId: { offset: 3, values: [88] },
+  midiDetection: { portPattern: /ms.?2000|microkorg/i, displayName: "Korg MS2000" },
   midi: {
     defaultChannel: 1,
     defaultDeviceId: 88
@@ -699,6 +704,9 @@ var behringerDm12Contract = {
   compatibleModels: [],
   sysexManufacturerId: MANUFACTURER_ID,
   formatVersion: 1,
+  sysexModelId: { offset: 4, values: [32] },
+  midiDetection: { portPattern: /deep.?mind|dm.?12/i, displayName: "DeepMind 12" },
+  parameterSchemaKey: "behringer-deepmind12",
   midi: { defaultChannel: 1, defaultDeviceId: DEVICE_ID2 },
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
@@ -869,6 +877,9 @@ var behringerPro800Contract = {
   compatibleModels: [],
   sysexManufacturerId: SYSEX_MANUFACTURER_ID4,
   formatVersion: FORMAT_VERSION4,
+  sysexModelId: { offset: 4, values: [0], multiByte: [1, 36] },
+  midiDetection: { portPattern: /pro.?800/i, displayName: "Pro-800" },
+  parameterSchemaKey: "behringer-pro800",
   midi: { defaultChannel: 1, defaultDeviceId: 16 },
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
@@ -1039,12 +1050,12 @@ var yamahaDx7Contract = {
   patchDataSize: DX7_PATCH_DATA_SIZE,
   patchNameMaxLength: DX7_PATCH_NAME_MAX_LENGTH,
   extractPatchName(data) {
-    if (data.length < 19) return "";
-    const DX7_CHARSET = ` ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!"#$%&'()*+,-./:;<=>?@[\\\\]^_`;
-    const nameBytes = data.slice(9, 19);
+    if (data.length < 128) return "";
+    const nameBytes = data.slice(118, 128);
     let name = "";
     for (const b of nameBytes) {
-      name += DX7_CHARSET[b] || ".";
+      if (b === 0) break;
+      if (b >= 32 && b <= 126) name += String.fromCharCode(b);
     }
     return name.trimEnd();
   },
@@ -1053,6 +1064,10 @@ var yamahaDx7Contract = {
   compatibleModels: ["yamaha-dx7ii"],
   sysexManufacturerId: SYSEX_MANUFACTURER_ID5,
   formatVersion: FORMAT_VERSION5,
+  // DX7 uses byte[3] = device byte (0x00=DX7, 0x01=DX7II) for disambiguation
+  sysexModelId: { offset: 3, values: [0] },
+  midiDetection: { portPattern: /dx.?7|fm.?1|m.?wave|cuvave/i, displayName: "DX7" },
+  parameterSchemaKey: "yamaha-dx7",
   midi: { defaultChannel: 1, defaultDeviceId: 16 },
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
@@ -1064,7 +1079,9 @@ var yamahaDx7Contract = {
     if (sysex.length < 8) return false;
     if (sysex[0] !== 240 || sysex[1] !== 67) return false;
     if (sysex[sysex.length - 1] !== 247) return false;
-    const payload = sysex.slice(3, sysex.length - 2);
+    const hdr = dx7HeaderLen(sysex);
+    if (hdr === 0) return false;
+    const payload = sysex.slice(hdr, sysex.length - 2);
     return sysex[sysex.length - 2] === dx7Checksum(payload);
   },
   buildPatchSysEx(rawData, _slot, channel) {
@@ -1075,11 +1092,11 @@ var yamahaDx7Contract = {
     const payload = new Uint8Array(header.length + DX7_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
-    const checksum = dx7Checksum(payload.slice(3));
+    const checksum = dx7Checksum(payload.slice(6));
     const result = new Uint8Array(payload.length + 2);
     result.set(payload, 0);
     result[payload.length] = checksum;
-    result[payload.length + 1] = 247;
+    result[result.length - 1] = 247;
     return result;
   },
   parsePatchSysEx(sysex) {
@@ -1119,6 +1136,9 @@ var yamahaDx7iiContract = {
   modelId: "yamaha-dx7ii",
   displayName: "Yamaha DX7II",
   thumbnail: "yamaha-dx7ii.jpg",
+  sysexModelId: { offset: 3, values: [1] },
+  midiDetection: { portPattern: /dx.?7ii|dx7.?ii/i, displayName: "DX7II" },
+  parameterSchemaKey: "yamaha-dx7ii",
   bankCapacity: 64,
   programsPerBank: 64,
   patchDataSize: DX7II_PATCH_DATA_SIZE,
@@ -1134,12 +1154,12 @@ var yamahaDx7iiContract = {
     return prog - 1;
   },
   extractPatchName(data) {
-    if (data.length < 19) return "";
-    const DX7_CHARSET = ` ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!"#$%&'()*+,-./:;<=>?@[\\\\]^_`;
-    const nameBytes = data.slice(9, 19);
+    if (data.length < 128) return "";
+    const nameBytes = data.slice(118, 128);
     let name = "";
     for (const b of nameBytes) {
-      name += DX7_CHARSET[b] || ".";
+      if (b === 0) break;
+      if (b >= 32 && b <= 126) name += String.fromCharCode(b);
     }
     return name.trimEnd();
   },
@@ -1151,11 +1171,11 @@ var yamahaDx7iiContract = {
     const payload = new Uint8Array(header.length + DX7II_PATCH_DATA_SIZE);
     payload.set(header, 0);
     payload.set(padded, header.length);
-    const checksum = dx7Checksum(payload.slice(3));
+    const checksum = dx7Checksum(payload.slice(7));
     const result = new Uint8Array(payload.length + 2);
     result.set(payload, 0);
     result[payload.length] = checksum;
-    result[payload.length + 1] = 247;
+    result[result.length - 1] = 247;
     return result;
   },
   parsePatchSysEx(sysex) {
@@ -1164,7 +1184,7 @@ var yamahaDx7iiContract = {
     if (sysex[3] !== 1) return null;
     if (sysex[4] !== CMD_BULK || sysex[5] !== SUB_SINGLE || sysex[6] !== 0) return null;
     if (sysex[sysex.length - 1] !== 247) return null;
-    const payload = sysex.slice(3, sysex.length - 2);
+    const payload = sysex.slice(7, sysex.length - 2);
     if (sysex[sysex.length - 2] !== dx7Checksum(payload)) return null;
     return { rawData: new Uint8Array(sysex.slice(7, 7 + DX7II_PATCH_DATA_SIZE)), slot: 0 };
   },

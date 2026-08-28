@@ -47,9 +47,9 @@ describe('DX7 Contract', () => {
 
   it('should verify checksum roundtrip', () => {
     const rawData = new Uint8Array(128);
-    rawData[9] = 5;   // E (DX7 charset index)
-    rawData[10] = 16; // P
-    rawData[11] = 9;  // I
+    rawData[118] = 0x45; // 'E' (ASCII)
+    rawData[119] = 0x2E; // '.'
+    rawData[120] = 0x50; // 'P'
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
     expect(contract.verifyChecksum(sysex)).toBe(true);
   });
@@ -73,15 +73,15 @@ describe('DX7 Contract', () => {
 
   it('should parse single voice SysEx back', () => {
     const rawData = new Uint8Array(128);
-    rawData[9] = 2;   // B (DX7 charset index)
-    rawData[10] = 1;  // A
-    rawData[11] = 19; // S
-    rawData[12] = 19; // S
+    rawData[118] = 0x42; // 'B' (ASCII)
+    rawData[119] = 0x41; // 'A'
+    rawData[120] = 0x53; // 'S'
+    rawData[121] = 0x53; // 'S'
     const sysex = contract.buildPatchSysEx(rawData, 0, 1);
     const parsed = contract.parsePatchSysEx(sysex);
     expect(parsed).not.toBeNull();
     expect(parsed.rawData.length).toBe(128);
-    expect(parsed.rawData[9]).toBe(2);
+    expect(parsed.rawData[118]).toBe(0x42);
     expect(contract.extractPatchName(parsed.rawData)).toBe('BASS');
   });
 
@@ -90,9 +90,9 @@ describe('DX7 Contract', () => {
     const header = new Uint8Array([0xF0, 0x43, 0x10, 0x09, 0x20, 0x00]);
     const payload = new Uint8Array(32 * 128);
     // Name for voice 0
-    payload[9] = 0x56; payload[10] = 0x31; // 'V1'
+    payload[118] = 0x56; payload[119] = 0x31; // 'V1' at name offset
     // Name for voice 15
-    payload[15 * 128 + 9] = 0x56; payload[15 * 128 + 10] = 0x32; // 'V2'
+    payload[15 * 128 + 118] = 0x56; payload[15 * 128 + 119] = 0x32; // 'V2'
 
     // Checksum covers header[3..5] + payload
     const checksumPayload = new Uint8Array(3 + payload.length);
@@ -110,8 +110,8 @@ describe('DX7 Contract', () => {
 
     const results = contract.parseDumpResponse(full);
     expect(results.length).toBe(32);
-    expect(results[0].rawData[9]).toBe(0x56);
-    expect(results[15].rawData[9]).toBe(0x56);
+    expect(results[0].rawData[118]).toBe(0x56);
+    expect(results[15].rawData[118]).toBe(0x56);
   });
 });
 
@@ -181,8 +181,8 @@ describe('DX7 Roundtrip (import → export → re-import)', () => {
     const parsed = contract.parsePatchSysEx(sysex);
     expect(parsed).not.toBeNull();
     expect(parsed.rawData.length).toBe(128);
-    expect(parsed.rawData[9]).toBe(rawData[9]);
-    expect(parsed.rawData[10]).toBe(rawData[10]);
+    expect(parsed.rawData[118]).toBe(rawData[118]);
+    expect(parsed.rawData[119]).toBe(rawData[119]);
     expect(contract.extractPatchName(parsed.rawData)).toBe('E.PIANO 1');
   });
 
@@ -221,10 +221,10 @@ describe('DX7 Parameter Decoding from Fixtures', () => {
     expect(algo).toBeDefined();
     expect(algo.value).toBe('6'); // algo=5 → displayed as 6
 
-    // Verify LFO Speed (offset 119)
-    const lfo = params.find(p => p.name === 'LFO Speed');
-    expect(lfo).toBeDefined();
-    expect(lfo.value).toBe(45);
+    // Verify Pitch EG Rate 1 (offset 108) — written by fixture generator
+    const pitchRate = params.find(p => p.name === 'Pitch EG Rate 1');
+    expect(pitchRate).toBeDefined();
+    expect(pitchRate.value).toBe(50);
 
     // Verify OP1 Output Level (offset 98)
     const op1 = params.find(p => p.name === 'OP1 Output Level');
@@ -284,10 +284,10 @@ describe('DX7 MIDI Transport (mock)', () => {
 
     const transport = createDx7MidiTransport({ input: mockInput, output: mockOutput });
     const rawData = new Uint8Array(128);
-    rawData[9] = 20;  // T (DX7 charset index)
-    rawData[10] = 5;  // E
-    rawData[11] = 19; // S
-    rawData[12] = 20; // T
+    rawData[118] = 0x54; // 'T' (ASCII)
+    rawData[119] = 0x45; // 'E'
+    rawData[120] = 0x53; // 'S'
+    rawData[121] = 0x54; // 'T'
 
     transport.sendPatch({ rawData }, 0, 1);
     expect(sentData).not.toBeNull();
