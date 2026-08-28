@@ -1173,6 +1173,21 @@ var yamahaDx7Contract = {
     unpackProgram(ved, paddedVmem);
     return buildDx7VoiceSysEx(ved, channel);
   },
+  buildBulkSysEx(patches, channel) {
+    const header = new Uint8Array([240, 67, 16 | channel & 15, CMD_BULK, SUB_SINGLE, 0]);
+    const bankSize = 32 * DX7_PATCH_DATA_SIZE;
+    const result = new Uint8Array(header.length + bankSize + 2);
+    result.set(header, 0);
+    for (const p of patches) {
+      const offset = header.length + p.slot * DX7_PATCH_DATA_SIZE;
+      const data = p.rawData.slice(0, DX7_PATCH_DATA_SIZE);
+      result.set(data, offset);
+    }
+    const checksum = dx7Checksum(result.slice(header.length, header.length + bankSize));
+    result[header.length + bankSize] = checksum;
+    result[result.length - 1] = 247;
+    return result;
+  },
   parsePatchSysEx(sysex) {
     if (!isDx7Voice(sysex, 0)) return null;
     if (sysex.length === 163 && sysex[3] === 0 && sysex[4] === 1 && sysex[5] === 27) {

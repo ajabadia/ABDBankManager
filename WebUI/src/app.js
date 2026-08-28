@@ -8,7 +8,7 @@ import {
   createBank, getBank, getAllBanks, updateBank, deleteBank,
   createPatch, getPatchesForBank, getPatch, updatePatch, deletePatch,
   importBank, exportBank, getDatabaseStats, getAllPatches,
-  runPreMigrationBackup
+  runPreMigrationBackup, searchPatches, getFilteredPatches
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
@@ -30,6 +30,8 @@ let activeMidiModelId = null;
 let activeBankId = null;
 let activePatchId = null;
 let selectedPatchIds = new Set();
+let patchSearchQuery = '';
+let patchSearchResults = null;
 
 // ─── Init ───
 async function init() {
@@ -706,13 +708,25 @@ async function handleMidiSendBank() {
   const button = document.getElementById('btn-midi-send-bank');
   button.disabled = true;
   try {
-    const delay = contract.interMessageDelayMs || 50;
-    for (let i = 0; i < patches.length; i++) {
-      const p = patches[i];
-      const rawData = p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData);
-      transport.sendPatch({ rawData }, p.index, contract.midi?.defaultChannel ?? 1);
-      setStatus('connecting', `Enviando ${i + 1}/${patches.length} — ${p.name}`);
-      if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
+    const channel = contract.midi?.defaultChannel ?? 1;
+    if (transport.capabilities?.bulk) {
+      // Bulk dump: send all patches in one SysEx message (e.g. DX7 4104 bytes)
+      setStatus('connecting', `Enviando bank bulk dump (${patches.length} patches)...`);
+      const bulkPatches = patches.map(p => ({
+        rawData: p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData),
+        slot: p.index,
+      }));
+      transport.sendBulk(bulkPatches, channel);
+    } else {
+      // Patch-by-patch: send each patch individually with delay
+      const delay = contract.interMessageDelayMs || 50;
+      for (let i = 0; i < patches.length; i++) {
+        const p = patches[i];
+        const rawData = p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData);
+        transport.sendPatch({ rawData }, p.index, channel);
+        setStatus('connecting', `Enviando ${i + 1}/${patches.length} — ${p.name}`);
+        if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
+      }
     }
     await refreshPatchList();
     setStatus('connected', 'Listo');
@@ -917,9 +931,19 @@ async function handleFileImport(e) {
   if (!file) return;
   e.target.value = '';
 
+  console.log('[Import] File selected:', file.name, file.size, 'bytes');
   setStatus('connecting', `Importando ${file.name}...`);
 
-  const result = await importFile(file);
+  let result;
+  try {
+    result = await importFile(file);
+  } catch (err) {
+    console.error('[Import] Error:', err);
+    setStatus('error', err.message);
+    toast(`Error importando: ${err.message}`, 'error');
+    return;
+  }
+  console.log('[Import] Result:', result.success, 'patches:', result.patches?.length);
   if (!result.success) {
     setStatus('error', result.error);
     toast(result.error, 'error');

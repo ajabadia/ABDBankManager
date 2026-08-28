@@ -311,6 +311,25 @@ const yamahaDx7Contract: ModelContract = {
     return buildDx7VoiceSysEx(ved, channel);
   },
 
+  buildBulkSysEx(patches: { rawData: Uint8Array; slot: number }[], channel: number): Uint8Array {
+    // Standard DX7 bulk dump: F0 43 gg 09 20 00 [32×128B VMEM] checksum F7 = 4104 bytes
+    // Patches must be in VMEM format (128 bytes each)
+    const header = new Uint8Array([0xF0, 0x43, 0x10 | (channel & 0x0F), CMD_BULK, SUB_SINGLE, 0x00]);
+    const bankSize = 32 * DX7_PATCH_DATA_SIZE; // 4096 bytes
+    const result = new Uint8Array(header.length + bankSize + 2); // 4104 bytes
+    result.set(header, 0);
+    for (const p of patches) {
+      const offset = header.length + (p.slot * DX7_PATCH_DATA_SIZE);
+      const data = p.rawData.slice(0, DX7_PATCH_DATA_SIZE);
+      result.set(data, offset);
+    }
+    // Checksum covers data after the 6-byte header
+    const checksum = dx7Checksum(result.slice(header.length, header.length + bankSize));
+    result[header.length + bankSize] = checksum;
+    result[result.length - 1] = 0xF7;
+    return result;
+  },
+
   parsePatchSysEx(sysex: Uint8Array): { rawData: Uint8Array; slot: number } | null {
     if (!isDx7Voice(sysex, 0x00)) return null;
     // VCED single voice (163 bytes): F0 43 gg 00 01 1B [155B] chk F7

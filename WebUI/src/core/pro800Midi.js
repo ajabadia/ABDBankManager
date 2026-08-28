@@ -96,12 +96,17 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
     capabilities: {
       fetch: !!(contract.buildDumpRequest && (contract.parsePatchSysEx || contract.parseDumpResponse)),
       send: !!contract.buildPatchSysEx,
+      bulk: !!contract.buildBulkSysEx,
     },
     fetchPatch,
     fetchAll,
     sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1) {
       if (!contract.buildPatchSysEx) throw new Error(`El contrato ${contract.displayName} no permite exportación SysEx`);
       output.send(contract.buildPatchSysEx(patch.rawData, slot, channel));
+    },
+    sendBulk(patches, channel = contract.midi?.defaultChannel ?? 1) {
+      if (!contract.buildBulkSysEx) throw new Error(`El contrato ${contract.displayName} no permite envío bulk`);
+      output.send(contract.buildBulkSysEx(patches, channel));
     },
     close() { input?.removeEventListener?.('midimessage', onMessage); pending = null; }
   };
