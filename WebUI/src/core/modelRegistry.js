@@ -146,9 +146,39 @@ export function getModelIcon(modelId) {
 /**
  * Get product thumbnail URL for a model.
  * @param {string} modelId
- * @returns {string|null} URL path or null if no thumbnail
+ * @returns {string} URL path (thumbnail or placeholder)
  */
 export function getModelThumbnail(modelId) {
   const thumb = contractMap.get(modelId)?.thumbnail;
-  return thumb ? `/images/models/thumbs/${thumb}` : null;
+  return thumb ? `/images/models/thumbs/${thumb}` : '/images/models/thumbs/placeholder-synth.svg';
+}
+
+/**
+ * Get manufacturer logo URL.
+ * @param {string} manufacturer
+ * @returns {string} URL path (logo or placeholder)
+ */
+export function getManufacturerLogo(manufacturer) {
+  const slug = (manufacturer || '').toLowerCase().replace(/\s+/g, '-');
+  return `/images/models/thumbs/logo-${slug}.svg`;
+}
+
+/**
+ * Get manufacturer logo with fallback to placeholder.
+ * @param {string} manufacturer
+ * @returns {string} URL path
+ */
+export function getManufacturerLogoOrPlaceholder(manufacturer) {
+  const slug = (manufacturer || '').toLowerCase().replace(/\s+/g, '-');
+  return `/images/models/thumbs/logo-${slug}.svg`;
+}
+
+/**
+ * Get bank image URL with fallback.
+ * @param {object} bank
+ * @returns {string} URL path
+ */
+export function getBankImage(bank) {
+  if (bank?.imageUrl) return bank.imageUrl;
+  return getModelThumbnail(bank?.modelId);
 }

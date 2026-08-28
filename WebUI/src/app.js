@@ -14,7 +14,7 @@ import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
 import { getModelContract, MODEL_CONTRACTS } from './contracts/modelContracts.js';
 import { applyRenameTemplate, validateRenameTemplate, patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
-import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getAllModels, getManufacturer } from './core/modelRegistry.js';
+import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getAllModels, getManufacturer } from './core/modelRegistry.js';
 import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
@@ -164,7 +164,7 @@ function renderModelNav(list, filter) {
     const li = document.createElement('li');
     li.className = 'list-item' + (contract.modelId === selectedModelId ? ' active' : '');
     const thumb = getModelThumbnail(contract.modelId);
-    const thumbHtml = thumb ? `<img class="item-thumb" src="${thumb}" alt="" loading="lazy">` : '';
+    const thumbHtml = `<img class="item-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">`;
     li.innerHTML = `${thumbHtml}<span class="item-name">${escHtml(contract.displayName)}</span>`;
     li.onclick = () => selectModel(contract.modelId);
     list.appendChild(li);
@@ -284,11 +284,11 @@ async function renderContent() {
 
 function renderManufacturerContent(el) {
   const mfrModels = manufacturers[selectedManufacturer] || [];
-  const logoUrl = `/images/models/thumbs/logo-${selectedManufacturer.toLowerCase()}.svg`;
+  const logoUrl = getManufacturerLogo(selectedManufacturer);
 
   el.innerHTML = `
     <div class="manufacturer-header">
-      <img class="manufacturer-logo" src="${logoUrl}" alt="${escHtml(selectedManufacturer)}" onerror="this.style.display='none'">
+      <img class="manufacturer-logo" src="${logoUrl}" alt="${escHtml(selectedManufacturer)}" onerror="this.src='/images/models/thumbs/placeholder-manufacturer.svg'">
     </div>
     <div class="model-grid" id="model-grid"></div>`;
 
@@ -317,7 +317,7 @@ async function renderModelContent(el) {
   if (!contract) { el.innerHTML = '<p>Contrato no encontrado</p>'; return; }
 
   const thumbUrl = getModelThumbnail(selectedModelId);
-  const logoUrl = `/images/models/thumbs/logo-${(contract.manufacturer || '').toLowerCase()}.svg`;
+  const logoUrl = getManufacturerLogo(contract.manufacturer);
   const caps = [];
   if (contract.buildPatchSysEx) caps.push('Send');
   if (contract.buildDumpRequest) caps.push('Fetch');
@@ -325,8 +325,8 @@ async function renderModelContent(el) {
 
   el.innerHTML = `
     <div class="hardware-header">
-      <img class="hardware-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">
-      ${thumbUrl ? `<img class="hardware-thumb" src="${thumbUrl}" alt="">` : ''}
+      <img class="hardware-logo" src="${logoUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-manufacturer.svg'">
+      <img class="hardware-thumb" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">
       <div class="hardware-info">
         <h2>${escHtml(contract.displayName)}</h2>
         <div class="hw-meta">${escHtml(contract.manufacturer)} · ${contract.bankCapacity} patches · ${contract.programsPerBank}/bank</div>
@@ -375,12 +375,12 @@ async function renderBankContent(el) {
   if (!bank) { el.innerHTML = '<p>Banco no encontrado</p>'; return; }
 
   const contract = getModelContract(bank.modelId);
-  const thumbUrl = getModelThumbnail(bank.modelId);
+  const thumbUrl = getBankImage(bank);
   const patches = await getPatchesForBank(bank.id);
 
   el.innerHTML = `
     <div class="bank-header">
-      ${thumbUrl ? `<img class="bank-thumb-lg" src="${thumbUrl}" alt="">` : ''}
+      <img class="bank-thumb-lg" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
       <div class="bank-info">
         <h2>${escHtml(bank.name)}</h2>
         <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? '🔒 Fábrica' : '👤 Usuario'}</div>
