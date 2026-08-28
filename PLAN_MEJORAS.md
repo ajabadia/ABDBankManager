@@ -594,6 +594,29 @@ Los blobs y metadatos deben conservarse.
   - Nombre + categoría + favorito.
   - Click → selecciona patch y muestra detalle.
 
+### 8.1b Panel de contenido por nivel
+
+- [ ] **Al seleccionar un fabricante** → Panel derecho muestra:
+  1. Logo/SVG del fabricante centrado en la parte superior (imagen grande, 200-300px ancho).
+  2. Grid responsive de tarjetas de hardware (cards), una por modelo del fabricante.
+  3. Cada card contiene:
+     - Thumbnail del modelo (imagen del producto, 64-120px).
+     - Nombre del modelo (ej: "Yamaha DX7").
+     - Badge con nº de bancos disponibles.
+     - Badge con capabilities MIDI (Send, Fetch, Bulk).
+     - Click en la card → selecciona el modelo y muestra sus bancos.
+  4. Grid responsive: 1 col en móvil, 2 en tablet, 3-4 en desktop.
+- [ ] **Al seleccionar un modelo** → Panel derecho muestra:
+  1. Thumbnail + nombre del modelo en cabecera.
+  2. Lista de bancos del modelo.
+  3. Botón "+ Nuevo Banco" contextual al modelo.
+- [ ] **Al seleccionar un banco** → Panel derecho muestra:
+  1. Cabecera con nombre del banco + modelo + thumbnail.
+  2. Acciones del banco (Fetch, Enviar, Importar, Exportar, etc.).
+  3. Lista de patches del banco.
+- [ ] **Al seleccionar un patch** → Panel derecho muestra:
+  1. Detalle completo del patch (nombre, params, SysEx, etc.).
+
 ### 8.2 Cabecera global
 
 - [ ] **Botón "Conectar MIDI"** en la cabecera de la app (no en el sidebar).
@@ -649,11 +672,45 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [ ] Si no hay hardware conectado, se muestra selector de modelo manual.
 - [ ] Opción de "Crear banco desde fetch" que crea banco + fetch automático.
 
-> **Flujo tíctico post-rediseño:**
+### 8.7 Logos de fabricante y assets
+
+- [ ] Crear logos SVG de fabricante en `/images/models/thumbs/`:
+  - `logo-yamaha.svg`
+  - `logo-behringer.svg`
+  - `logo-casio.svg`
+  - `logo-roland.svg`
+  - `logo-korg.svg`
+- [ ] Añadir campo `manufacturerLogo?: string` al `ModelContract`.
+- [ ] Helper `getManufacturerLogo(manufacturer)` en `modelRegistry.js`.
+- [ ] Los logos se muestran en la parte superior del panel al seleccionar un fabricante.
+- [ ] Logos estilo monocromático o transparente, max 300px ancho.
+
+### 8.8 Grid responsive de hardware cards
+
+- [ ] CSS Grid para las cards de modelo:
+  ```css
+  .model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    padding: 1.5rem;
+  }
+  ```
+- [ ] Cada model-card contiene:
+  - Thumbnail del modelo (centrado, max 120px alto)
+  - Nombre del modelo (bold)
+  - Fabricante (texto secundario)
+  - Badges: capabilities MIDI, nº bancos
+  - Borde/redondeado consistente con el design system
+- [ ] Hover: elevación + borde accent color del fabricante.
+- [ ] Estado vacío: "Este fabricante no tiene modelos registrados."
+
+> **Flujo típico post-rediseño:**
 > 1. Conectar MIDI (botón cabecera) → FM-1 detectado
-> 2. Seleccionar Yamaha DX7 en el sidebar
-> 3. "+ Nuevo Banco" → se crea banco DX7
-> 4. "Fetch" → obtiene 32 patches del FM-1
-> 5. Click en patch → detalle con nombre, params, SysEx
-> 6. "Enviar patch" → envía al FM-1
-> 7. Menú del banco → Exportar .syx
+> 2. Click en "Yamaha" en sidebar → panel derecho muestra logo Yamaha + grid con DX7 y DX7II
+> 3. Click en card DX7 → lista de bancos DX7
+> 4. "+ Nuevo Banco" → se crea banco DX7
+> 5. "Fetch" → obtiene 32 patches del FM-1
+> 6. Click en patch → detalle con nombre, params, SysEx
+> 7. "Enviar patch" → envía al FM-1
+> 8. Menú del banco → Exportar .syx
