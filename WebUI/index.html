@@ -100,7 +100,7 @@
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow-y: auto;
         }
         .sidebar-header {
             padding: 0.75rem 1rem;
@@ -163,7 +163,7 @@
         .sidebar-section {
             border-bottom: 1px solid var(--border);
         }
-        .sidebar-section-body { max-height: 40vh; overflow-y: auto; }
+        .sidebar-section-body { max-height: none; overflow-y: visible; }
         .sidebar-section.collapsed .sidebar-section-body { display: none; }
         .sidebar-section-toggle {
             padding: 0.5rem 1rem;
@@ -501,6 +501,9 @@
                     <span>&#9660;</span> Patches
                 </div>
                 <div class="sidebar-section-body" style="max-height:50vh;">
+                    <div class="search-bar" style="padding:0.5rem;border-bottom:1px solid var(--border);">
+                        <input type="search" id="patch-search" placeholder="Buscar patches…" style="width:100%;padding:0.4rem;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:0.8rem;">
+                    </div>
                     <ul class="sidebar-list" id="patch-list"></ul>
                 </div>
             </div>
