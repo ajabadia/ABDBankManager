@@ -151,9 +151,9 @@ Todo requisito importante debe tener:
 ## P0.5. Fixtures reales y pruebas de protocolo
 
 - [x] Crear `fixtures/sysex/` y mover los fixtures Pro-800 a `fixtures/sysex/behringer-pro800/`, con metadatos de procedencia.
-- [ ] Añadir dumps reales de Casio.
-- [ ] Añadir dumps reales de Roland.
-- [ ] Añadir dumps reales de Korg.
+- [x] Añadir dumps reales de Casio.
+- [x] Añadir dumps reales de Roland.
+- [x] Añadir dumps reales de Korg.
 - [x] Añadir dumps reales de Behringer; Pro-800 v1.4.4 y factory antiguo normalizados, con tests de formatos v109/v110/v111. Licencia/procedencia externa aún pendiente de confirmar.
 - [x] Añadir dumps reales de DeepMind 12; factory v1.0/v1.1.2, comunidad (Alba Ecstasy), usuarios, comerciales (5 Pin Media, Alba Ecstasy) y desconocidos. Licencia de comerciales confirmada por propietario. Fixtures en `fixtures/sysex/behringer-deepmind12/`. Tests contra 19 fixtures reales.
 - [x] Añadir dumps reales de Yamaha. Fixtures DX7 creados: single-voice.syx (136B), bulk-32voices.syx (4104B), e-piano-bank.syx (4104B), multi-voice.syx (408B). Generador reproducible en `fixtures/sysex/yamaha-dx7/generate-fixtures.mjs`.
@@ -865,3 +865,26 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [ ] Búsqueda con debounce (300ms).
 - [ ] Atajo `Ctrl+F` para enfocar la búsqueda.
 - [ ] Historial de búsquedas recientes (últimas 10).
+
+## MF.18. Bancos multi-hardware (asociación automática)
+
+> **Concepto**: Un banco puede ser compatible con múltiples hardware si comparten el mismo formato SysEx.
+> Ejemplo: Un banco DX7 funciona tanto en un DX7 real como en un M-VAVE FM-1.
+
+- [ ] Campo `compatibleModels` en el contrato (ya existe en ModelContract pero no se usa para bancos).
+- [ ] Al crear/importar un banco, asociarlo automáticamente a todos los modelos compatibles.
+- [ ] En la sidebar, un banco DX7 aparece tanto bajo "Yamaha DX7" como bajo "M-VAVE FM-1".
+- [ ] El banco es una sola entidad interna, pero visible desde múltiples modelos.
+- [ ] Al enviar desde cualquier modelo compatible, se usa el formato correcto del hardware destino.
+- [ ] Badge en el banco: "Compatible con: DX7, FM-1".
+- [ ] Al importar un .syx, detectar todos los modelos compatibles y mostrar opciones.
+- [ ] Evitar duplicados: no crear dos bancos idénticos para hardware compatible.
+- [ ] Ejemplos de compatibilidad:
+  - DX7 ↔ FM-1 (ambos aceptan SysEx DX7 estándar)
+  - DX7II ↔ DX7 (DX7II es backward compatible)
+  - DeepMind 12 ↔ DeepMind 12D (mismo formato)
+  - Pro-800 ↔ Pro-800 (mismo formato, posibles variantes firmware)
+- [ ] En el panel de "Enviar banco", mostrar dropdown con todos los hardware compatibles conectados.
+- [ ] Icono/indicador cuando un banco es multi-hardware (ej: 🔗 chain link).
+
+> **Caso de uso**: El usuario tiene un DX7 real y un FM-1. Importa un banco DX7. Lo ve listado bajo ambos modelos. Puede enviarlo a cualquiera de los dos con un click, sin tener que importarlo dos veces.
