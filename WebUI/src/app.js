@@ -77,6 +77,26 @@ function toast(message, type = 'info') {
   setTimeout(() => t.remove(), 3000);
 }
 
+// ─── MIDI Activity LED ───
+let midiActivityTimer = null;
+function flashMidiActivity({ direction, bytes, label }) {
+  const dot = document.querySelector('#midi-status .midi-dot');
+  const statusEl = document.getElementById('midi-status');
+  if (!dot || !statusEl) return;
+  // Flash color based on direction
+  dot.style.background = direction === 'out' ? 'var(--accent)' : 'var(--success)';
+  dot.style.boxShadow = direction === 'out' ? '0 0 6px var(--accent)' : '0 0 6px var(--success)';
+  // Tooltip with details
+  statusEl.title = `${direction === 'out' ? '→' : '←'} ${label} · ${bytes?.length || 0} bytes`;
+  // Reset after flash
+  clearTimeout(midiActivityTimer);
+  midiActivityTimer = setTimeout(() => {
+    dot.style.background = '';
+    dot.style.boxShadow = '';
+    statusEl.title = 'Conectar MIDI';
+  }, 400);
+}
+
 // ─── Modal ───
 function showModal(html) {
   document.getElementById('modal-content').innerHTML = html;
@@ -620,7 +640,7 @@ function showManualSelector(outputs, inputs) {
 
 function connectMidiDevice(output, input, modelId) {
   activeMidiTransport?.close();
-  activeMidiTransport = createMidiTransport({ modelId, input, output });
+  activeMidiTransport = createMidiTransport({ modelId, input, output, onActivity: flashMidiActivity });
   activeMidiModelId = modelId;
   const displayName = getModelDisplayName(modelId);
   const statusEl = document.getElementById('midi-status');

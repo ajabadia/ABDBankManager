@@ -63,16 +63,22 @@ function splitSysExMessage(msg, maxSize) {
  * @param {number} [options.timeoutMs] - Override dump timeout
  * @returns {object} Transport with fetchPatch, sendPatch, close, capabilities
  */
-export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) {
+export function createMidiTransport({ modelId, input, output, timeoutMs, onActivity } = {}) {
   if (!output?.send) throw new Error('Se requiere una salida MIDI');
   const contract = getModelContract(modelId);
   if (!contract) throw new Error(`Contrato no encontrado: ${modelId}`);
   const effectiveTimeout = timeoutMs || contract.dumpTimeoutMs || 5000;
   let pending = null;
 
+  // Activity callback: onActivity({ direction: 'in'|'out', bytes, label })
+  const notify = (direction, bytes, label) => {
+    try { onActivity?.({ direction, bytes, label }); } catch {}
+  };
+
   const onMessage = event => {
-    if (!pending) return;
     const raw = new Uint8Array(event.data);
+    notify('in', raw, `${raw.length} bytes`);
+    if (!pending) return;
     const messages = splitSysExMessages(raw);
     for (const message of messages) {
       // Try single-voice parse first, then bulk dump
@@ -106,7 +112,7 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
       const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operación cancelada', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       pending = { slot, resolve: value => { clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(value); } };
-      try { output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
+      try { notify('out', request, `Fetch slot ${slot}`); output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
     });
   }
 
@@ -119,7 +125,7 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
       const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operación cancelada', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       pending = { resolve: value => { clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(value); } };
-      try { output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
+      try { notify('out', request, `Fetch all`); output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
     });
   }
 
@@ -134,6 +140,7 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
     sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1) {
       if (!contract.buildPatchSysEx) throw new Error(`El contrato ${contract.displayName} no permite exportación SysEx`);
       const msg = contract.buildPatchSysEx(patch.rawData, slot, channel);
+      notify('out', msg, `Patch → ${output.name || 'MIDI'}`);
       output.send(msg);
       return contract.interMessageDelayMs || 0;
     },
@@ -141,6 +148,7 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
       if (!contract.buildBulkSysEx) throw new Error(`El contrato ${contract.displayName} no permite envío bulk`);
       const msg = contract.buildBulkSysEx(patches, channel);
       const delay = contract.interMessageDelayMs || 50;
+      notify('out', msg, `Bank (${patches.length} patches) → ${output.name || 'MIDI'}`);
       output.send(msg);
       return delay * 2;
     },
