@@ -352,7 +352,7 @@ Los blobs y metadatos deben conservarse.
 ## P1.4. ContractRegistry
 
 - [x] Registry declarativo con validación Zod y `createStandaloneRegistry()` (15 modelos) en `Source/Contracts/ContractRegistry.ts`.
-- [ ] Exponer el registry a la WebUI mediante una API segura (sin arrastrar Zod al grafo web).
+- [x] Exponer el registry a la WebUI mediante una API segura (sin arrastrar Zod al grafo web).
 - [ ] Consultas filtradas por modelo consumidas por la UI (selector de modelo, propia auto-configuración).
 - [ ] Registrar ImportAdapters/ExportAdapters/HardwareLinks conforme se implementen.
 - [ ] Añadir tests de registro, duplicados y modo standalone/plugin.
@@ -396,17 +396,17 @@ Los blobs y metadatos deben conservarse.
 - [x] Implementar delay post-envío en `sendPatch()` y `sendBulk()` (50ms por defecto, configurable via `contract.interMessageDelayMs`).
 - [x] Implementar fragmentación automática de mensajes SysEx grandes (`splitSysExMessage()` en `pro800Midi.js`).
 - [x] Añadir campo `maxSysExMessageSize` al contrato (`ModelContract.ts`).
-- [x] Configurar DX7 con `maxSysExMessageSize: 2048` para compatibilidad con FM-1.
+- [x] Configurar DX7 con `maxSysExMessageSize: 0` (no fragmentar — FM-1 requiere un único mensaje de 4104B).
 - [x] App `handleMidiSendBank` y `handleMidiSendPatch` esperan delay post-envío.
 
-> **FM-1**: El buffer interno del FM-1 es limitado. El bulk dump DX7 (4104B) se fragmenta en chunks de ≤2048B con delays intermedios.
+> **FM-1**: El FM-1 **NO acepta** mensajes SysEx fragmentados. El bulk dump DX7 debe enviarse como un único mensaje de 4104 bytes. Verificado con dump real ROM1A — 32 patches cargados correctamente. Tras recibir el dump, el FM-1 muestra pantalla de selección de banco (girar knob 1-4 para elegir destino A/B/C/D).
 
 ### Criterios de aceptación
 
 - El mismo transporte se usa en web y en standalone (Tauri).
 - Los tests no requieren hardware (fake transport determinista).
 - Fetch/Send funcionan con el hardware físico conectado.
-- El FM-1 recibe correctamente los patches enviados (bulk dump fragmentado).
+- El FM-1 recibe correctamente los patches enviados (bulk dump de 4104B sin fragmentar).
 
 ---
 
