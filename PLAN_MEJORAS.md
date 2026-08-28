@@ -623,9 +623,22 @@ Los blobs y metadatos deben conservarse.
      - Botón "+ Nuevo Banco" como última card o flotante.
   3. Grid responsive: 1 col móvil, 2 tablet, 3-4 desktop (mismo layout que la grid de modelos).
 - [ ] **Al seleccionar un banco** → Panel derecho muestra:
-  1. Cabecera con nombre del banco + modelo + thumbnail.
-  2. Acciones del banco (Fetch, Enviar, Importar, Exportar, etc.).
-  3. Lista de patches del banco.
+  1. **Cabecera del banco**:
+     - Thumbnail del modelo del banco (arriba, centrado, 160-200px).
+     - Nombre del banco (editable inline).
+     - Badge: modelo + fabricante.
+     - Badge: nº patches + capacidad.
+     - Badge: fábrica / usuario.
+  2. **Acciones del banco** (debajo de la cabecera):
+     - Botones: Fetch, Enviar banco, Importar, Exportar.
+     - Menú contextual: Renombrar, Renombrar patches, CSV, Eliminar.
+  3. **Lista de patches del banco**:
+     - Grid o lista con nombre + categoría + favorito.
+     - Click → selecciona patch y muestra detalle.
+  4. **Detalle del patch** (al final, cuando se selecciona uno):
+     - Nombre, categoría, autor, notas.
+     - SysEx hex (colapsable).
+     - Parámetros interpretados (al final, sin scroll propio).
 - [ ] **Al seleccionar un patch** → Panel derecho muestra:
   1. Detalle completo del patch (nombre, params, SysEx, etc.).
 
