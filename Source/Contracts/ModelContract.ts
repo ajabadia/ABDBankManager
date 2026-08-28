@@ -83,6 +83,8 @@ export interface ModelContract {
   interMessageDelayMs?: number;
   /** Timeout waiting for dump response (ms) */
   dumpTimeoutMs?: number;
+  /** Maximum SysEx message size (bytes) before splitting. If set, bulk dumps are split into chunks. */
+  maxSysExMessageSize?: number;
 
   // ─── Legacy Support (Guide §9.1 compat) ───
   legacySysEx?: {

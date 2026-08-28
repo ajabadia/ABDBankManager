@@ -710,7 +710,9 @@ async function handleMidiSendPatch() {
   if (!contract) { toast(`No hay contrato para ${bank.modelId}`, 'error'); return; }
   const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
   try {
-    transport.sendPatch({ rawData }, patch.index, contract.midi?.defaultChannel ?? 1);
+    const delay = transport.sendPatch({ rawData }, patch.index, contract.midi?.defaultChannel ?? 1);
+    // Wait for hardware to process the SysEx message
+    if (delay > 0) await new Promise(r => setTimeout(r, delay));
     setStatus('connected', `Patch "${patch.name}" enviado a MIDI`);
     toast(`Patch "${patch.name}" enviado`, 'success');
   } catch (error) {
@@ -740,7 +742,9 @@ async function handleMidiSendBank() {
         rawData: p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData),
         slot: p.index,
       }));
-      transport.sendBulk(bulkPatches, channel);
+      const bulkDelay = transport.sendBulk(bulkPatches, channel);
+      // Wait for hardware to process the bulk dump
+      if (bulkDelay > 0) await new Promise(r => setTimeout(r, bulkDelay));
     } else {
       // Patch-by-patch: send each patch individually with delay
       const delay = contract.interMessageDelayMs || 50;
@@ -749,6 +753,7 @@ async function handleMidiSendBank() {
         const rawData = p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData);
         transport.sendPatch({ rawData }, p.index, channel);
         setStatus('connecting', `Enviando ${i + 1}/${patches.length} — ${p.name}`);
+        // Wait for hardware to process before sending next patch
         if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
       }
     }

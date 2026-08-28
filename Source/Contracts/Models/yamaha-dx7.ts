@@ -283,6 +283,7 @@ const yamahaDx7Contract: ModelContract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 5000,
+  maxSysExMessageSize: 2048, // Split bulk dumps into chunks to prevent buffer overflow on FM-1
 
   computeChecksum(data: Uint8Array): number {
     return dx7Checksum(data);

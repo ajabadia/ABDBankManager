@@ -22,6 +22,37 @@ export function listMidiPorts(access) {
 }
 
 /**
+ * Split a large SysEx message into chunks that fit within maxSysExMessageSize.
+ * Each chunk is a valid SysEx message (starts with F0, ends with F7).
+ * @param {Uint8Array} msg - Original SysEx message
+ * @param {number} maxSize - Maximum chunk size in bytes
+ * @returns {Uint8Array[]} Array of smaller SysEx messages
+ */
+function splitSysExMessage(msg, maxSize) {
+  if (msg.length <= maxSize) return [msg];
+  
+  const chunks = [];
+  const header = msg.slice(0, 6); // F0 43 gg 09 20 00
+  const checksum = msg[msg.length - 2];
+  const payload = msg.slice(6, msg.length - 2); // Data between header and checksum
+  
+  // Each chunk gets its own header and checksum
+  for (let offset = 0; offset < payload.length; offset += maxSize - 8) {
+    const chunkData = payload.slice(offset, Math.min(offset + maxSize - 8, payload.length));
+    const chunk = new Uint8Array(header.length + chunkData.length + 2);
+    chunk.set(header, 0);
+    chunk.set(chunkData, header.length);
+    // Simple checksum for chunk (sum of data bytes)
+    let sum = 0;
+    for (const b of chunkData) sum += b;
+    chunk[chunk.length - 2] = (128 - (sum % 128)) & 0x7F;
+    chunk[chunk.length - 1] = 0xF7;
+    chunks.push(chunk);
+  }
+  return chunks;
+}
+
+/**
  * Create a generic MIDI transport for any model.
  * Behavior is driven by the contract's methods and fields.
  *
@@ -102,11 +133,35 @@ export function createMidiTransport({ modelId, input, output, timeoutMs } = {}) 
     fetchAll,
     sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1) {
       if (!contract.buildPatchSysEx) throw new Error(`El contrato ${contract.displayName} no permite exportación SysEx`);
-      output.send(contract.buildPatchSysEx(patch.rawData, slot, channel));
+      const msg = contract.buildPatchSysEx(patch.rawData, slot, channel);
+      output.send(msg);
+      // Post-send delay: give hardware time to process the SysEx message
+      // This prevents buffer overflow on devices like the M-VAVE FM-1
+      return contract.interMessageDelayMs || 0;
     },
     sendBulk(patches, channel = contract.midi?.defaultChannel ?? 1) {
       if (!contract.buildBulkSysEx) throw new Error(`El contrato ${contract.displayName} no permite envío bulk`);
-      output.send(contract.buildBulkSysEx(patches, channel));
+      const msg = contract.buildBulkSysEx(patches, channel);
+      const delay = contract.interMessageDelayMs || 50;
+      
+      // Split if message exceeds device buffer size
+      const maxSize = contract.maxSysExMessageSize;
+      if (maxSize && msg.length > maxSize) {
+        const chunks = splitSysExMessage(msg, maxSize);
+        // Send chunks with delay between each
+        for (let i = 0; i < chunks.length; i++) {
+          output.send(chunks[i]);
+          if (i < chunks.length - 1) {
+            // Wait between chunks
+            const start = Date.now();
+            while (Date.now() - start < delay) { /* busy wait */ }
+          }
+        }
+        return delay * chunks.length; // Total delay for all chunks
+      } else {
+        output.send(msg);
+        return delay * 2; // Double delay for single bulk message
+      }
     },
     close() { input?.removeEventListener?.('midimessage', onMessage); pending = null; }
   };
