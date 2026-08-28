@@ -607,9 +607,21 @@ Los blobs y metadatos deben conservarse.
      - Click en la card → selecciona el modelo y muestra sus bancos.
   4. Grid responsive: 1 col en móvil, 2 en tablet, 3-4 en desktop.
 - [ ] **Al seleccionar un modelo** → Panel derecho muestra:
-  1. Thumbnail + nombre del modelo en cabecera.
-  2. Lista de bancos del modelo.
-  3. Botón "+ Nuevo Banco" contextual al modelo.
+  1. **Cabecera del hardware** (ficha resumen):
+     - Logo SVG del fabricante (izquierda, 80-120px).
+     - Thumbnail del modelo (centro, 120-160px).
+     - Nombre completo del modelo (ej: "Yamaha DX7").
+     - Datos clave en una línea: polifonía, conexiones MIDI, capacidad bancos.
+     - Badges: capabilities MIDI (Send / Fetch / Bulk).
+  2. **Grid responsive de bancos del modelo**:
+     - Cada card de banco contiene:
+       - Imagen del banco (si tiene, MF.5) o thumbnail del modelo como fallback.
+       - Nombre del banco.
+       - Badge: nº patches + modelo.
+       - Badge: fábrica / usuario.
+       - Click → selecciona banco y muestra patches.
+     - Botón "+ Nuevo Banco" como última card o flotante.
+  3. Grid responsive: 1 col móvil, 2 tablet, 3-4 desktop (mismo layout que la grid de modelos).
 - [ ] **Al seleccionar un banco** → Panel derecho muestra:
   1. Cabecera con nombre del banco + modelo + thumbnail.
   2. Acciones del banco (Fetch, Enviar, Importar, Exportar, etc.).
