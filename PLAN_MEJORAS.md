@@ -572,3 +572,88 @@ Los blobs y metadatos deben conservarse.
 - [ ] Búsqueda全文 que incluya campos de la ficha (descripción, tags, notas).
 
 > **Casos de uso**: Un usuario con 50 bancos necesita identificar rápidamente cuál es "ROM 1A original de Yamaha" vs "Colección de Pads de la comunidad" vs "Mis patches editados". La ficha del banco permite esa catalogación. La ficha del hardware permite consultar rápidamente "¿cuántas voces tiene el Pro-800?" sin salir de la app.
+
+## MF.8. Rediseño de usabilidad — Navegación en cascada
+
+> **Objetivo**: Reorganizar la UI siguiendo un flujo lógico jerárquico:
+> **Fabricante → Hardware → Bancos → Patches**
+
+### 8.1 Estructura del sidebar
+
+- [ ] **Nivel 1 — Fabricantes**: Lista colapsable de fabricantes con icono/thumbnail.
+  - Cada fabricante muestra sus modelos al expandir.
+  - Ej: ▼ Yamaha → DX7, DX7II | ▼ Behringer → Pro-800, DeepMind 12
+- [ ] **Nivel 2 — Hardware/Modelo**: Bajo cada fabricante, sus modelos con thumbnail.
+  - Al seleccionar un modelo se muestran sus bancos.
+  - Badge con el número de bancos del modelo.
+- [ ] **Nivel 3 — Bancos**: Lista de bancos del modelo seleccionado.
+  - Thumbnail del modelo + nombre del banco.
+  - Badge de parches (ej: "32 patches").
+  - Click → selecciona banco y muestra patches.
+- [ ] **Nivel 4 — Patches**: Lista de patches del banco seleccionado.
+  - Nombre + categoría + favorito.
+  - Click → selecciona patch y muestra detalle.
+
+### 8.2 Cabecera global
+
+- [ ] **Botón "Conectar MIDI"** en la cabecera de la app (no en el sidebar).
+  - Muestra estado: desconectado / conectado (nombre del dispositivo).
+  - Al hacer click: selector de puertos + auto-detección.
+  - Persiste la conexión entre sesiones.
+- [ ] **Indicador de modelo conectado** en la cabecera (badge con thumbnail).
+
+### 8.3 Acciones contextuales (no botones globales)
+
+Cada acción aparece **donde tiene sentido**, no en una lista global:
+
+| Acción | Dónde aparece | Cómo se accede |
+|--------|---------------|----------------|
+| Nuevo banco | Debajo de la lista de bancos del modelo | Botón "+ Nuevo Banco" |
+| Importar (.syx) | Menú contextual del banco | Click derecho / botón ⋯ |
+| Exportar (.syx) | Menú contextual del banco | Click derecho / botón ⋯ |
+| Exportar librería | Cabecera o menú global | Botón en header |
+| Fetch (obtener del hardware) | Acción del banco | Botón "Fetch" junto al banco |
+| Enviar patch | Acción del patch | Botón "Enviar" en el detalle del patch |
+| Enviar banco | Acción del banco | Botón "Enviar banco" junto al banco |
+| Renombrar banco | Menú contextual del banco | Click derecho / botón ⋯ |
+| Renombrar patch | Editable inline en el detalle | Campo de nombre |
+| Renombrado masivo | Menú contextual del banco | "Renombrar patches..." |
+| Exportar CSV nombres | Menú contextual del banco | "Exportar nombres" |
+| Importar CSV nombres | Menú contextual del banco | "Importar nombres" |
+| Eliminar banco | Menú contextual del banco | "Eliminar" (con confirmación) |
+| Favorito | Toggle en el detalle del patch | Botón ★ |
+
+### 8.4 Detalle del patch — Reorganización
+
+- [ ] **Orden del panel de detalle** (de arriba a abajo):
+  1. Nombre (editable inline)
+  2. Categoría (select)
+  3. Autor (editable)
+  4. Notas (textarea)
+  5. Favorito (toggle)
+  6. **SysEx hex** (colapsable)
+  7. **Parámetros interpretados** (al final, colapsable)
+- [ ] El panel de detalle **NO tiene scroll propio** — usa el scroll general del main content.
+- [ ] Los parámetros interpretados se muestran como tabla completa (sin scroll interno).
+- [ ] Si hay muchos parámetros, el scroll es del contenedor principal.
+
+### 8.5 Scroll general
+
+- [ ] Un único scroll vertical en el contenido principal (no scrolls anidados).
+- [ ] El sidebar tiene su propio scroll independiente.
+- [ ] Las acciones siempre visibles (no se cortan por scroll).
+
+### 8.6 Nuevo banco desde hardware
+
+- [ ] Al pulsar "+ Nuevo Banco", se pre-selecciona el modelo del hardware conectado.
+- [ ] Si no hay hardware conectado, se muestra selector de modelo manual.
+- [ ] Opción de "Crear banco desde fetch" que crea banco + fetch automático.
+
+> **Flujo tíctico post-rediseño:**
+> 1. Conectar MIDI (botón cabecera) → FM-1 detectado
+> 2. Seleccionar Yamaha DX7 en el sidebar
+> 3. "+ Nuevo Banco" → se crea banco DX7
+> 4. "Fetch" → obtiene 32 patches del FM-1
+> 5. Click en patch → detalle con nombre, params, SysEx
+> 6. "Enviar patch" → envía al FM-1
+> 7. Menú del banco → Exportar .syx
