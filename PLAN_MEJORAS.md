@@ -33,7 +33,7 @@ No marcar una tarea como completada solo porque exista una interfaz o una clase.
 | Validación de dominio | `[~]` | P0 |
 | SysEx y fixtures reales | `[~]` | P0 |
 | Fingerprinting y backups | `[~]` | P0 |
-| Persistencia | `[~]` | P1 |
+| Persistencia | `[x]` | P1 |
 | Operaciones puras y búsqueda | `[x]` | P1 |
 | Registry y MIDI real | `[~]` | P1 |
 | Bridge JUCE | `[ ]` | P2 |
@@ -158,6 +158,7 @@ Todo requisito importante debe tener:
 - [x] Añadir dumps reales de DeepMind 12; factory v1.0/v1.1.2, comunidad (Alba Ecstasy), usuarios, comerciales (5 Pin Media, Alba Ecstasy) y desconocidos. Licencia de comerciales confirmada por propietario. Fixtures en `fixtures/sysex/behringer-deepmind12/`. Tests contra 19 fixtures reales.
 - [x] Añadir dumps reales de Yamaha. Fixtures DX7 creados: single-voice.syx (136B), bulk-32voices.syx (4104B), e-piano-bank.syx (4104B), multi-voice.syx (408B). Generador reproducible en `fixtures/sysex/yamaha-dx7/generate-fixtures.mjs`.
 - [x] Añadir dump real de DX7: `fixtures/sysex/yamaha-dx7/real-dumps/DX7_factory_rom1a.syx` (4104B) descargado de dxsyx/rogerallen repo. Verificado: cabecera F0 43 00 09 20 00 (6 bytes), 32 voces, checksum válido.
+- [x] M-Wave FM-1: documentado que NO soporta bulk dump de salida (solo recebe SysEx). 35 dumps reales de usuario verificados (ROM1-4, VRC101-112, comunidad). Librería de Benny Sparra confirma que solo envía patches al FM-1, no los obtiene.
 - [x] Corregir bug crítico en contrato DX7: cabecera de 7 bytes (con byte extra 0x00) → formato correcto de 6 bytes. Añadido soporte dual para formato legacy (7B) y estándar (6B).
 - [x] Corregir `extractPatchName`: name at offset 118-127 (ASCII, no 6-bit charset). Checksum range corregido: bytes después de cabecera de 6B (no desde byte 3). 35 dumps reales de usuario copiados a `fixtures/sysex/yamaha-dx7/user-dumps/`.
 - [x] Documentar procedencia y licencia de cada fixture; la procedencia local está registrada, pero el estado legal de redistribución sigue pendiente para Pro-800. DeepMind 12 documentado en `fixtures/sysex/behringer-deepmind12/README.md` con hashes, categorías y política de licencia. DX7 documentado en `fixtures/sysex/yamaha-dx7/README.md` con formato SysEx, layout VCED y licencia.
@@ -338,13 +339,13 @@ Los blobs y metadatos deben conservarse.
 - [x] Auto-backup antes de migraciones (`runPreMigrationBackup` + helpers en `WebUI/src/store/persistence.js`).
 - [x] Identificación de versión de esquema en los backups (`.abdlibrary` con `schemaVersion` y guard forward-compat).
 - [x] Tests reales de migración v1→v4 y rollback atómico sobre `fake-indexeddb`.
-- [ ] Reactivar la suite de persistencia completa (migraciones, settings, binario, tags M:N, transacciones abortadas).
-- [ ] Unificar `WebUI/src/store/persistence.js` con `packages/core/src/PersistenceEngine.ts` (una única implementación de backup/restore y de esquema).
+- [x] Reactivar la suite de persistencia completa (migraciones, settings, binario, tags M:N, transacciones abortadas).
+- [x] Unificar `WebUI/src/store/persistence.js` con `packages/core/src/PersistenceEngine.ts` (una única implementación de backup/restore y de esquema).
 
 ### Criterios de aceptación
 
-- No hay dos implementaciones de backup con comportamientos distintos (P0.2).
-- Toda subida de esquema queda cubierta por backup previo y por tests de rollback.
+- [x] No hay dos implementaciones de backup con comportamientos distintos (P0.2).
+- [x] Toda subida de esquema queda cubierta por backup previo y por tests de rollback.
 
 ---
 
