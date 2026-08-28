@@ -739,3 +739,129 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 > 6. Click en patch → detalle con nombre, params, SysEx
 > 7. "Enviar patch" → envía al FM-1
 > 8. Menú del banco → Exportar .syx
+
+## MF.9. Drag & drop de archivos .syx
+
+- [ ] Aceptar drag & drop de archivos `.syx` sobre la ventana principal.
+- [ ] Zona de drop visual (dashed border) que se activa al arrastrar un archivo.
+- [ ] Al soltar: importar automáticamente al banco activo del modelo correcto.
+- [ ] Si no hay banco activo o el modelo no coincide: crear banco nuevo con el modelo detectado.
+- [ ] Soporte para múltiples archivos simultáneos (un archivo = un banco).
+- [ ] Feedback visual: spinner durante importación, toast con resultado.
+- [ ] También aceptar `.abdlibrary` (ZIP de librería completa) vía drag & drop.
+- [ ] Drag & drop de imagen para banco (MF.5) sobre la cabecera del banco.
+
+## MF.10. Indicador de actividad MIDI
+
+- [ ] LED/indicador animado en la cabecera que muestre actividad MIDI.
+- [ ] Estado verde fijo: conectado sin actividad.
+- [ ] Estado verde parpadeante: enviando datos (out).
+- [ ] Estado azul parpadeante: recibiendo datos (in).
+- [ ] Estado rojo: error de conexión.
+- [ ] Estado gris: desconectado.
+- [ ] Tooltip con detalles: "Enviando a FM-1 Midi · 4104 bytes · canal 1".
+- [ ] Log de actividad MIDI accesible desde un botón (últimos 50 mensajes).
+- [ ] El indicador se actualiza en tiempo real vía eventos `midimessage`.
+
+## MF.11. Comparación lado a lado de patches
+
+- [ ] Modo comparación: seleccionar 2 patches (checkbox o Ctrl+click).
+- [ ] Panel de comparación: tabla con columnas [Parámetro | Patch A | Patch B | Diff].
+- [ ] Resaltar en rojo/verde los parámetros que difieren.
+- [ ] Si el modelo tiene schema de parámetros interpretados: usar nombres legibles.
+- [ ] Si no: comparar bytes raw del rawData con diff hexadecimal.
+- [ ] Botón "Copiar patch B → A" para clonar un parámetro.
+- [ ] Botón "Intercambiar A ↔ B".
+- [ ] Exportar comparación como CSV.
+- [ ] Accesible desde menú contextual del patch o atajo de teclado.
+
+## MF.12. Atajos de teclado
+
+- [ ] `Ctrl+I` → Importar archivo .syx.
+- [ ] `Ctrl+E` → Exportar banco activo.
+- [ ] `Ctrl+Shift+E` → Exportar librería completa.
+- [ ] `Ctrl+S` → Guardar (forzar persistencia).
+- [ ] `Ctrl+Z` → Deshacer última operación.
+- [ ] `Ctrl+Y` / `Ctrl+Shift+Z` → Rehacer.
+- [ ] `Ctrl+M` → Conectar/desconectar MIDI.
+- [ ] `↑ / ↓` → Navegar patches en la lista.
+- [ ] `Enter` → Seleccionar patch y mostrar detalle.
+- [ ] `Supr / Backspace` → Eliminar patch seleccionado (con confirmación).
+- [ ] `Ctrl+F` → Enfocar búsqueda.
+- [ ] `Escape` → Cerrar modal / deseleccionar patch.
+- [ ] `?` → Mostrar ayuda de atajos.
+- [ ] Panel de ayuda de atajos accesible desde menú o `?`.
+- [ ] Atajos compatibles con macOS (Cmd en vez de Ctrl).
+- [ ] Los atajos no se activan si el foco está en un input/textarea.
+
+## MF.13. Undo/Redo global
+
+- [ ] Historial de operaciones (máximo 50 pasos).
+- [ ] Operaciones registradas:
+  - Crear/eliminar banco
+  - Crear/eliminar patch
+  - Renombrar banco/patch
+  - Mover patch entre bancos
+  - Actualizar metadata (categoría, autor, notas, favorito)
+  - Importar patches
+  - Renombrado masivo
+- [ ] `Ctrl+Z` → Deshacer: revierte la última operación.
+- [ ] `Ctrl+Y` → Rehacer: re-aplica operación deshecha.
+- [ ] Toast informativo: "Deshacer: patch 'BRASS 1' eliminado".
+- [ ] El undo es transaccional: si se eliminaron 3 patches en lote, se deshacen los 3.
+- [ ] El historial se pierde al cerrar la pestaña (no persistente).
+- [ ] Indicador visual del estado: botones ↩/↪ habilitados/deshabilitados.
+
+## MF.14. Estadísticas del banco
+
+- [ ] Panel colapsable "Estadísticas" al seleccionar un banco.
+- [ ] Métricas mostradas:
+  - Total de patches / capacidad del modelo.
+  - Distribución por categorías (barras horizontales o pie chart).
+  - Patch más largo/corto en nombre.
+  - Patches sin nombre o con nombre genérico ("P01", "Init").
+  - Patches sin categoría.
+  - Tamaño total de rawData (KB).
+  - Porcentaje de favoritos.
+- [ ] Si el modelo tiene schema de parámetros:
+  - Rango de valores de parámetros clave (ej: "Filtro: 20-110, media 65").
+  - Parámetros más variables entre patches.
+- [ ] Exportar estadísticas como CSV o JSON.
+- [ ] Actualización en tiempo real al modificar patches.
+
+## MF.15. SysEx hex editor inline
+
+- [ ] En el detalle del patch, alternar entre "Vista interpretada" y "Vista hex".
+- [ ] Vista hex: editor de bytes con offset, hex y ASCII (como hexdump).
+- [ ] Editable: modificar un byte actualiza el rawData.
+- [ ] Validación en tiempo real: byte fuera de rango 0-127 (MIDI) → warning.
+- [ ] Resaltado de bytes modificados (diferentes al original).
+- [ ] Botón "Revertir cambios" para volver al estado original.
+- [ ] Copiar selección hex al portapapeles.
+- [ ] Pegar desde portapapeles (formato: `XX XX XX` o `0xXX, 0xXX`).
+- [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings).
+
+## MF.16. Backup automático recordatorio
+
+- [ ] Contador de patches modificados desde el último backup/exportación.
+- [ ] Si hay >10 patches sin backup: banner amarillo "Recuerda exportar tu librería".
+- [ ] Si hay >50 patches sin backup: banner naranja con botón "Exportar ahora".
+- [ ] Si hay >100 patches sin backup: toast al iniciar sesión.
+- [ ] Contador se resetea al exportar (.abdlibrary o .syx).
+- [ ] Recordatorio desactivable en settings.
+- [ ] Auto-backup a IndexedDB en cada operación (ya existe, pero recordar exportación externa).
+
+## MF.17. Búsqueda avanzada global
+
+- [ ] Búsqueda全文 que incluya: nombre patch, nombre banco, modelo, categoría, autor, notas, tags.
+- [ ] Filtros avanzados:
+  - Por modelo (checkbox multi-select).
+  - Por categoría (checkbox multi-select).
+  - Por favoritos (toggle).
+  - Por rango de fechas (última modificación).
+  - Por fuente (fábrica / importado / creado).
+- [ ] Resultados mostrados como lista mixta (banco → patches).
+- [ ] Click en resultado → navega directamente al patch.
+- [ ] Búsqueda con debounce (300ms).
+- [ ] Atajo `Ctrl+F` para enfocar la búsqueda.
+- [ ] Historial de búsquedas recientes (últimas 10).
