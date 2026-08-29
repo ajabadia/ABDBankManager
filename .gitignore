@@ -1,8 +1,34 @@
 node_modules/
 dist/
+build/
 .DS_Store
 *.log
 .env
 coverage/
 .vitest/
 packages/*/node_modules/
+
+# Debug/temp scripts
+analyze_*.mjs
+debug_*.mjs
+deep_debug.mjs
+check_names.mjs
+check_*.mjs
+try-*.mjs
+
+# Temp reference docs
+DOCS/DOCS-pro800-borrar/
+DOCS/LIBRERÍAS-dm12-borrar/
+DOCS/librerías yamaha dx7/
+
+# Screenshots/temp
+.openchamber/
+
+# Generated temp files
+*.tmp
+*.bak
+*.orig
+
+# OS files
+Thumbs.db
+Desktop.ini
