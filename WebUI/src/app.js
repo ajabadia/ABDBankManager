@@ -603,7 +603,7 @@ function renderManufacturerContent(el) {
     const card = document.createElement('div');
     card.className = 'model-card';
     const thumb = getModelThumbnail(contract.modelId);
-    const thumbHtml = thumb ? `<img class="card-thumb" src="${thumb}" alt="" loading="lazy">` : '';
+    const thumbHtml = thumb ? `<img class="card-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">` : '';
     const caps = [];
     if (contract.buildPatchSysEx) caps.push('Send');
     if (contract.buildDumpRequest) caps.push('Fetch');
