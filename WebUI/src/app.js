@@ -19,6 +19,7 @@ import { hexDump, spacedHex } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
 import { undoHistory } from './core/undoHistory.js';
+import { createHexEditor } from './core/hexEditor.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -639,20 +640,10 @@ async function renderPatchDetail(container) {
           </table>
         </div>
       </section>`;
-  }
-
-  let sysExHtml = '';
+  }  // MF.15: SysEx view info and raw data for hex editor
   const info = buildSysExViewInfo(patch, bank);
-  if (info) {
-    sysExHtml = `
-      <div class="sysex-viewer">
-        <div class="panel-header" style="padding-left:0;padding-right:0;">
-          <span class="panel-title">SysEx</span>
-          <span class="item-badge">${info.meta}</span>
-        </div>
-        <div class="sysex-hex">${hexDump(info.rawData)}</div>
-      </div>`;
-  }
+  const sysexData = info ? info.rawData : rawData;
+  const sysexMeta = info ? info.meta : `${rawData.length} bytes`;
 
   container.innerHTML = `
     <div class="patch-detail">
@@ -682,9 +673,47 @@ async function renderPatchDetail(container) {
           <input class="patch-info-input" id="patch-notes" value="${escHtml(patch.notes || '')}">
         </div>
       </div>
-      ${sysExHtml}
-      ${paramsHtml}
+      <!-- MF.15: View toggle -->
+      <div class="sysview-toggle" id="sysview-toggle">
+        <button class="sysview-tab active" data-view="hex">Hex dump</button>
+        <button class="sysview-tab" data-view="editor">Hex editor</button>
+        ${paramsHtml ? '<button class="sysview-tab" data-view="params">Parámetros</button>' : ''}
+        <span class="sysview-meta">${escHtml(sysexMeta)}</span>
+      </div>
+      <div class="sysview-content" id="sysview-content"></div>
     </div>`;
+
+  // --- View toggle logic ---
+  let hexEditorInstance = null;
+  const sysviewContent = container.querySelector('#sysview-content');
+  const toggleBtns = container.querySelectorAll('.sysview-tab');
+
+  function activateView(view) {
+    toggleBtns.forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    sysviewContent.innerHTML = '';
+    hexEditorInstance = null;
+
+    if (view === 'hex') {
+      sysviewContent.innerHTML = `<div class="sysex-hex">${hexDump(sysexData)}</div>`;
+    } else if (view === 'editor') {
+      hexEditorInstance = createHexEditor(sysexData, {
+        readOnly: false,
+        onChange: async (newData) => {
+          await updatePatch(patch.id, { rawData: newData });
+        }
+      });
+      sysviewContent.appendChild(hexEditorInstance.element);
+    } else if (view === 'params' && paramsHtml) {
+      sysviewContent.innerHTML = paramsHtml;
+    }
+  }
+
+  // Default to hex view
+  activateView('hex');
+
+  toggleBtns.forEach(btn => {
+    btn.onclick = () => activateView(btn.dataset.view);
+  });
 
   // Patch detail event handlers
   document.getElementById('patch-name').onchange = (e) => recordPatchUpdate(patch.id, 'name', patch.name, e.target.value);
@@ -698,8 +727,7 @@ async function renderPatchDetail(container) {
   document.getElementById('btn-delete-patch').onclick = async () => {
     await deletePatch(patch.id);
     selectedPatchId = null;
-    renderNav();
-    renderContent();
+    renderNav(); renderContent();
     toast('Patch eliminado', 'success');
   };
 }

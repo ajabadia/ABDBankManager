@@ -829,17 +829,18 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [ ] Exportar estadísticas como CSV o JSON.
 - [ ] Actualización en tiempo real al modificar patches.
 
-## MF.15. SysEx hex editor inline
+## MF.15. SysEx hex editor inline ✅
 
-- [ ] En el detalle del patch, alternar entre "Vista interpretada" y "Vista hex".
-- [ ] Vista hex: editor de bytes con offset, hex y ASCII (como hexdump).
-- [ ] Editable: modificar un byte actualiza el rawData.
-- [ ] Validación en tiempo real: byte fuera de rango 0-127 (MIDI) → warning.
-- [ ] Resaltado de bytes modificados (diferentes al original).
-- [ ] Botón "Revertir cambios" para volver al estado original.
-- [ ] Copiar selección hex al portapapeles.
-- [ ] Pegar desde portapapeles (formato: `XX XX XX` o `0xXX, 0xXX`).
-- [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings).
+- [x] En el detalle del patch, alternar entre "Hex dump" (solo lectura), "Hex editor" (editable) y "Parámetros" (si hay schema).
+- [x] Vista hex: editor de bytes con offset, hex y ASCII (como hexdump).
+- [x] Editable: modificar un byte actualiza el rawData directamente.
+- [x] Validación en tiempo real: byte fuera de rango 0-127 (MIDI) → highlight rojo.
+- [x] Resaltado de bytes modificados (cyan sobre fondo oscuro).
+- [x] Botón "Revertir" para volver al estado original.
+- [x] Copiar hex completo al portapapeles.
+- [x] Pegar hex desde portapapeles (formato: `XX XX XX`).
+- [x] Navegación con Tab, flechas, Enter.
+- [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings) — pendiente de MF. settings.
 
 ## MF.16. Backup automático recordatorio ✅
 

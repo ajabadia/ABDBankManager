@@ -427,6 +427,117 @@
         .backup-reminder-text { flex: 1; }
         @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+        /* MF.15 View toggle + Hex editor */
+        .sysview-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-top: 0.8rem;
+        }
+        .sysview-tab {
+            background: none;
+            border: none;
+            padding: 0.45rem 0.9rem;
+            color: var(--text-secondary);
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        .sysview-tab:hover { color: var(--text-primary); }
+        .sysview-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+            font-weight: 600;
+        }
+        .sysview-meta {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .sysview-content { padding: 0.8rem 0; }
+
+        .hex-editor-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-bottom: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .hex-editor-info {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            margin-right: auto;
+        }
+        .hex-editor-table {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            line-height: 1.6;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem;
+            overflow-x: auto;
+        }
+        .hex-editor-row {
+            display: flex;
+            white-space: nowrap;
+        }
+        .hex-editor-offset {
+            color: var(--text-secondary);
+            min-width: 7ch;
+            user-select: none;
+        }
+        .hex-editor-sep {
+            color: var(--border);
+            margin: 0 0.4rem;
+            user-select: none;
+        }
+        .hex-editor-bytes {
+            display: inline;
+        }
+        .hex-editor-byte {
+            display: inline-block;
+            min-width: 2ch;
+            text-align: center;
+            padding: 0 1px;
+            border-radius: 2px;
+            cursor: default;
+        }
+        .hex-editor-byte:focus {
+            outline: 1px solid var(--accent);
+            background: rgba(0,212,255,0.15);
+            cursor: text;
+        }
+        .hex-editor-byte.modified {
+            background: rgba(0,212,255,0.12);
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .hex-editor-byte.invalid {
+            background: rgba(248,81,73,0.15);
+            color: var(--error);
+        }
+        .hex-editor-byte.selected {
+            outline: 1px solid var(--accent);
+        }
+        .hex-editor-spacer, .hex-editor-spacer-wide {
+            user-select: none;
+        }
+        .hex-editor-spacer-wide {
+            min-width: 2ch;
+        }
+        .hex-editor-ascii {
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+            user-select: none;
+            white-space: pre;
+        }
+
         /* Modal */
         .modal-overlay {
             display: none;
@@ -471,7 +582,135 @@
             .main-grid { grid-template-columns: 1fr; }
             .sidebar { max-height: 35vh; }
         }
-    </style>
+
+        /* Model Selector Component */
+        .model-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .model-selector__filter {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .model-selector__filter label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+        .model-selector__manufacturers {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            padding: 0.5rem;
+        }
+        .model-selector__mfr {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+        }
+        .model-selector__mfr summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .model-selector__mfr-count {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 0.1rem 0.4rem;
+            border-radius: 999px;
+        }
+        .model-selector__models {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            border-top: 1px solid var(--border);
+        }
+        .model-selector__model {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .model-selector__model:hover { background: var(--bg-tertiary); }
+        .model-selector__model.selected {
+            background: var(--accent-dim);
+            color: var(--accent);
+        }
+        .model-selector__thumb {
+            width: 24px;
+            height: 16px;
+            object-fit: contain;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+        }
+        .model-selector__name { flex: 1; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .model-selector__badge {
+            font-size: 0.6rem;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 0.1rem 0.3rem;
+            border-radius: 999px;
+        }
+        .model-selector__autoconfig {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+        }
+        .model-selector__autoconfig h4 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+        .autoconfig__grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.5rem;
+        }
+        .autoconfig__item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            padding: 0.4rem;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+        .autoconfig__item label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        .autoconfig__item span {
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .model-selector__model.selected .model-selector__name { color: var(--accent); }
+        .model-selector__mfr[open] .model-selector__mfr-summary { color: var(--accent); }
+        .model-selector__mfr summary::-webkit-details-marker { display: none; }
+        .model-selector__mfr summary::marker { content: ''; }
+        .model-selector__mfr summary::before {
+            content: '▶';
+            display: inline-block;
+            transition: transform 0.15s;
+            font-size: 0.5rem;
+            margin-right: 0.5rem;
+        }
+        .model-selector__mfr[open] summary::before { transform: rotate(90deg); }
 </head>
 <body>
     <header class="header">
