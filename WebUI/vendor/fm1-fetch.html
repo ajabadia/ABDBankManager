@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>FM-1 DX7 Dump Fetch</title>
+  <style>
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+    h1 { color: #00d4ff; }
+    button { background: #00d4ff; color: #000; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; font-size: 14px; border-radius: 4px; }
+    button:hover { background: #00b8d4; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    #log { background: #0d1117; padding: 15px; margin-top: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; }
+    .ok { color: #4caf50; }
+    .err { color: #f44336; }
+    .info { color: #ff9800; }
+    select { background: #16213e; color: #e0e0e0; border: 1px solid #00d4ff; padding: 8px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <h1>🎛️ FM-1 DX7 Dump Fetch</h1>
+  <p>Intenta obtener un dump DX7 del M-Wave FM-1 vía Web MIDI.</p>
+  <p><strong>Nota:</strong> El FM-1 probablemente NO responde a bulk dump requests (es una limitación conocida).</p>
+
+  <div>
+    <button id="btnConnect">🔌 Conectar MIDI</button>
+    <select id="portSelect" disabled><option>-- seleccionar puerto --</option></select>
+    <button id="btnFetch" disabled>📥 Fetch DX7 Bulk Dump</button>
+    <button id="btnFetchSingle" disabled>📥 Fetch Single Voice</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    const log = (msg, cls = '') => {
+      const el = document.getElementById('log');
+      el.innerHTML += `<span class="${cls}">${msg}</span>\n`;
+      el.scrollTop = el.scrollHeight;
+    };
+
+    let midiAccess = null;
+    let selectedOutput = null;
+    let selectedInput = null;
+
+    // DX7 bulk dump request
+    const BULK_REQUEST = [0xF0, 0x43, 0x00, 0x09, 0x20, 0x00, 0xF7];
+
+    document.getElementById('btnConnect').onclick = async () => {
+      try {
+        midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+        log('✅ MIDI Acceso concedido', 'ok');
+
+        const sel = document.getElementById('portSelect');
+        sel.innerHTML = '';
+        sel.disabled = false;
+
+        for (const [id, port] of midiAccess.outputs) {
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = `${port.name} (${port.state})`;
+          sel.appendChild(opt);
+          log(`  Output: ${port.name} [${id}]`);
+        }
+
+        for (const [id, port] of midiAccess.inputs) {
+          log(`  Input: ${port.name} [${id}]`);
+        }
+
+        document.getElementById('btnFetch').disabled = false;
+        document.getElementById('btnFetchSingle').disabled = false;
+      } catch (e) {
+        log(`❌ Error: ${e.message}`, 'err');
+      }
+    };
+
+    document.getElementById('btnFetch').onclick = async () => {
+      const portId = document.getElementById('portSelect').value;
+      if (!portId) { log('⚠️ Selecciona un puerto', 'info'); return; }
+
+      selectedOutput = midiAccess.outputs.get(portId);
+      // Find matching input
+      for (const [id, port] of midiAccess.inputs) {
+        if (port.name.includes('M-Vave') || port.name.includes('FM') || port.name.includes('midi')) {
+          selectedInput = port;
+        }
+      }
+      if (!selectedInput) {
+        // Use first available input
+        for (const [id, port] of midiAccess.inputs) {
+          selectedInput = port;
+          break;
+        }
+      }
+
+      if (!selectedInput) {
+        log('❌ No se encontró input MIDI', 'err');
+        return;
+      }
+
+      log(`\n📤 Enviando DX7 bulk dump request a ${selectedOutput.name}...`, 'info');
+      log(`   Request: ${BULK_REQUEST.map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+
+      let received = [];
+      let timeout = null;
+
+      const onMidi = (event) => {
+        const data = Array.from(event.data);
+        if (data[0] === 0xF0) {
+          received = data;
+          log(`📥 SysEx recibido: ${data.length} bytes`, 'ok');
+        } else if (received.length > 0) {
+          received.push(...data);
+          if (data[data.length - 1] === 0xF7) {
+            log(`📥 SysEx completo: ${received.length} bytes`, 'ok');
+            log(`   Header: ${received.slice(0, 8).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+
+            if (received.length === 4104) {
+              log('✅ ¡Bulk dump DX7 completo recibido! (32 voces)', 'ok');
+              // Try to decode names
+              for (let v = 0; v < 4; v++) {
+                const base = 6 + v * 128;
+                const name = received.slice(base + 118, base + 128)
+                  .filter(b => b >= 32 && b < 127)
+                  .map(b => String.fromCharCode(b))
+                  .join('');
+                log(`   Voice ${v + 1}: ${name}`);
+              }
+              // Save as .syx file
+              const blob = new Blob([new Uint8Array(received)], { type: 'application/octet-stream' });
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = 'fm1-dump.syx';
+              a.click();
+              log('💾 Archivo fm1-dump.syx descargado', 'ok');
+            } else {
+              log(`⚠️ Tamaño inesperado: ${received.length} bytes (esperado 4104)`, 'info');
+            }
+
+            selectedInput.removeEventListener('midimessage', onMidi);
+            clearTimeout(timeout);
+          }
+        }
+      };
+
+      selectedInput.addEventListener('midimessage', onMidi);
+      selectedOutput.send(BULK_REQUEST);
+
+      timeout = setTimeout(() => {
+        selectedInput.removeEventListener('midimessage', onMidi);
+        if (received.length === 0) {
+          log('⏰ Timeout — el FM-1 NO respondió al bulk dump request', 'err');
+          log('   Esto es esperado: el FM-1 no soporta exportación SysEx', 'info');
+          log('   Usa Dexed para enviar patches AL FM-1 en su lugar', 'info');
+        }
+      }, 10000);
+    };
+
+    document.getElementById('btnFetchSingle').onclick = async () => {
+      log('ℹ️ Single voice request = mismo formato que bulk para DX7', 'info');
+      log('   El FM-1 probablemente tampoco responde', 'info');
+      document.getElementById('btnFetch').click();
+    };
+  </script>
+</body>
+</html>
