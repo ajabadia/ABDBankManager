@@ -59,6 +59,19 @@ async function readAbdzip(file, expectedFormats) {
  */
 async function parseBankEntry(zip, entry, sourceName) {
   const mb = entry.bank || {};
+  // MF.5: Restore bank image from ZIP if present
+  let imageUrl = null;
+  if (mb.imageUrl && zip.file(mb.imageUrl)) {
+    const imgFile = zip.file(mb.imageUrl);
+    const imgBuffer = await imgFile.async('arraybuffer');
+    const bytes = new Uint8Array(imgBuffer);
+    // Convert binary back to data URL (assume webp from export)
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+    imageUrl = `data:image/webp;base64,${base64}`;
+  }
+
   const bank = {
     id: mb.id || crypto.randomUUID(),
     name: mb.name || 'Sin nombre',
@@ -68,6 +81,15 @@ async function parseBankEntry(zip, entry, sourceName) {
     isFactory: mb.isFactory || false,
     isLocked: mb.isLocked || false,
     source: mb.source || sourceName,
+    imageUrl,
+    // MF.7: Restore metadata
+    description: mb.description || '',
+    bankAuthor: mb.bankAuthor || '',
+    license: mb.license || '',
+    tags: mb.tags || [],
+    bankNotes: mb.bankNotes || '',
+    firmwareCompat: mb.firmwareCompat || '',
+    knownIssues: mb.knownIssues || '',
     creationDate: mb.creationDate || new Date().toISOString()
   };
 

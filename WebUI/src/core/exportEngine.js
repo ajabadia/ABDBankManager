@@ -86,6 +86,21 @@ export async function buildLibraryZip(banks) {
       });
     }
 
+    // MF.5: Export bank image if present (extract from data URL to file)
+    let imageFile = null;
+    if (bank.imageUrl) {
+      const imgPath = `${prefix}/image.webp`;
+      // Data URL → base64 → binary
+      const base64 = bank.imageUrl.split(',')[1];
+      if (base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+        zip.file(imgPath, bytes);
+        imageFile = imgPath;
+      }
+    }
+
     manifestBanks.push({
       bank: {
         id: bank.id,
@@ -99,7 +114,16 @@ export async function buildLibraryZip(banks) {
         creationDate: bank.creationDate || new Date().toISOString(),
         modifiedDate: new Date().toISOString(),
         patchCount: patches.length,
-        source: bank.source || null
+        source: bank.source || null,
+        // MF.7: Bank metadata
+        description: bank.description || '',
+        bankAuthor: bank.bankAuthor || '',
+        license: bank.license || '',
+        tags: bank.tags || [],
+        bankNotes: bank.bankNotes || '',
+        firmwareCompat: bank.firmwareCompat || '',
+        knownIssues: bank.knownIssues || '',
+        imageUrl: imageFile || null
       },
       patches: patchEntries
     });
@@ -153,6 +177,19 @@ async function exportAbdbank(bank, patches) {
       });
     }
 
+    // MF.5: Export bank image
+    let imageFile = null;
+    if (bank.imageUrl) {
+      const base64 = bank.imageUrl.split(',')[1];
+      if (base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+        zip.file('image.webp', bytes);
+        imageFile = 'image.webp';
+      }
+    }
+
     const manifest = {
       version: 1,
       format: 'abdbank',
@@ -168,7 +205,16 @@ async function exportAbdbank(bank, patches) {
         creationDate: bank.creationDate || new Date().toISOString(),
         modifiedDate: new Date().toISOString(),
         patchCount: patches.length,
-        source: bank.source || null
+        source: bank.source || null,
+        // MF.7: Bank metadata
+        description: bank.description || '',
+        bankAuthor: bank.bankAuthor || '',
+        license: bank.license || '',
+        tags: bank.tags || [],
+        bankNotes: bank.bankNotes || '',
+        firmwareCompat: bank.firmwareCompat || '',
+        knownIssues: bank.knownIssues || '',
+        imageUrl: imageFile || null
       },
       patches: patchEntries,
       contract: {
