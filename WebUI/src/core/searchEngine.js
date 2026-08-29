@@ -88,13 +88,34 @@ export async function globalSearch(query) {
     }
   }
 
-  // 2. Search banks
+  // 2. Search banks (MF.7: include description, tags, author, notes, license)
   const allBanks = await getAllBanks();
   for (const bank of allBanks) {
     const bankName = (bank.name || '').toLowerCase();
     const contract = getModelContract(bank.modelId);
 
-    if (bankName.includes(q)) {
+    // Build searchable text from all MF.7 fields
+    const searchableFields = [
+      bank.name,
+      bank.description,
+      bank.bankAuthor,
+      bank.source,
+      bank.license,
+      bank.bankNotes,
+      bank.firmwareCompat,
+      bank.knownIssues,
+      ...(bank.tags || []),
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (searchableFields.includes(q)) {
+      // Determine which field matched
+      let matchField = 'banco';
+      if ((bank.description || '').toLowerCase().includes(q)) matchField = 'descripción';
+      else if ((bank.bankAuthor || '').toLowerCase().includes(q)) matchField = 'autor';
+      else if ((bank.tags || []).some(t => t.toLowerCase().includes(q))) matchField = 'tags';
+      else if ((bank.bankNotes || '').toLowerCase().includes(q)) matchField = 'notas';
+      else if ((bank.license || '').toLowerCase().includes(q)) matchField = 'licencia';
+
       const score = bankName === q ? SCORE_EXACT_NAME
         : bankName.startsWith(q) ? SCORE_NAME_STARTS
         : SCORE_BANK_NAME;
@@ -102,9 +123,9 @@ export async function globalSearch(query) {
         type: 'bank',
         id: bank.id,
         name: bank.name,
-        matchField: 'banco',
+        matchField,
         matchSnippet: highlightMatch(bank.name, query),
-        context: `${contract?.displayName || bank.modelId}`,
+        context: `${contract?.displayName || bank.modelId}${bank.description ? ' · ' + bank.description.slice(0, 60) : ''}`,
         score,
         nav: { level: 'patches', manufacturer: bank.manufacturer || contract?.manufacturer, modelId: bank.modelId, bankId: bank.id },
         thumbnail: getModelThumbnail(bank.modelId),

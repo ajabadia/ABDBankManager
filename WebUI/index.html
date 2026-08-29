@@ -380,6 +380,133 @@
             background: var(--bg-tertiary);
         }
 
+        /* MF.7: Bank data sheet */
+        .bank-datasheet {
+            margin-bottom: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .datasheet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0.8rem;
+            cursor: pointer;
+            background: var(--bg-tertiary);
+            transition: background 0.15s;
+        }
+        .datasheet-header:hover { background: var(--bg-secondary); }
+        .datasheet-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .datasheet-arrow {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .datasheet-body {
+            padding: 0.8rem;
+            transition: max-height 0.3s ease;
+        }
+        .datasheet-body.collapsed {
+            display: none;
+        }
+        .datasheet-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        @media (max-width: 600px) {
+            .datasheet-grid { grid-template-columns: 1fr; }
+        }
+        .datasheet-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .datasheet-section-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.2rem;
+        }
+        .datasheet-textarea {
+            resize: vertical;
+            min-height: 2.5rem;
+        }
+        .datasheet-history {
+            font-size: 0.8rem;
+        }
+        .spec-empty {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-style: italic;
+        }
+
+        /* MF.7: Tags */
+        .bank-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+            margin-bottom: 0.4rem;
+        }
+        .bank-tags-empty {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-style: italic;
+        }
+        .bank-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.2rem;
+            padding: 0.15rem 0.5rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: var(--text);
+        }
+        .bank-tag-remove {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 0;
+            line-height: 1;
+        }
+        .bank-tag-remove:hover { color: var(--error); }
+        .bank-tags-add {
+            display: flex;
+            gap: 0.3rem;
+            align-items: center;
+            margin-bottom: 0.3rem;
+        }
+        .bank-tag-suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        .bank-tag-suggestion {
+            padding: 0.1rem 0.4rem;
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 10px;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .bank-tag-suggestion:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(0,212,255,0.05);
+        }
+
         /* Action bar */
         .action-bar {
             display: flex;

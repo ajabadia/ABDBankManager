@@ -26,6 +26,7 @@ import { renderModelSelector, initModelSelector, getSelectedModelId, setSelected
 import { globalSearch, highlightMatch, countByType } from './core/searchEngine.js';
 import { processBankImage, promptBankImageUpload } from './core/bankImage.js';
 import { getHardwareSpec } from './core/hardwareSpecs.js';
+import { renderBankDataSheet, initDataSheetHandlers } from './ui/components/bankDataSheet.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -757,6 +758,22 @@ async function renderBankContent(el) {
   // MF.6: Hardware specs
   el.querySelector('#btn-hw-specs').onclick = () => showHardwareSpecs(bank.modelId);
 
+  // MF.7: Bank data sheet
+  const datasheetHtml = renderBankDataSheet(bank);
+  const patchGridEl = el.querySelector('#patch-grid');
+  patchGridEl.insertAdjacentHTML('beforebegin', datasheetHtml);
+  const dsContainer = el.querySelector('#bank-datasheet');
+  if (dsContainer) {
+    const dsUpdateFn = async (changes) => {
+      await updateBank(bank.id, { ...changes, lastModifiedDate: new Date().toISOString() });
+      bank.lastModifiedDate = new Date().toISOString();
+    };
+    initDataSheetHandlers(dsContainer, bank, dsUpdateFn);
+    dsContainer.addEventListener('tags-changed', async (e) => {
+      await updateBank(bank.id, { tags: e.detail.tags, lastModifiedDate: new Date().toISOString() });
+    });
+  }
+
   // MF.14 Statistics panel
   await renderBankStats(el, patches, contract);
 
@@ -1298,6 +1315,8 @@ async function handleMidiSendBank(targetModelId = null) {
       }
     }
     toast(`Banco enviado a ${targetName} (${patches.length} patches)`, 'success');
+    // MF.7: Track send history
+    await updateBank(selectedBankId, { lastSentDate: new Date().toISOString(), lastSentTarget: targetName });
   } catch (error) { toast(error.message, 'error'); }
 }
 

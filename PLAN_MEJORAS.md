@@ -467,9 +467,13 @@ Los blobs y metadatos deben conservarse.
 
 ## P2.2. Standalone Tauri
 
+- [x] Estructura del proyecto Tauri creada (`apps/standalone/src-tauri/`).
+- [x] `Cargo.toml` con dependencias Tauri 2 (fs, dialog, clipboard, shell).
+- [x] Backend Rust con comandos para: librería, bancos, MIDI, SysEx.
+- [x] `tauri.conf.json` configurado (permisos fs, dialog, clipboard, shell).
 - [ ] Construir la WebUI con Vite y embeberla en el shell Tauri.
 - [ ] `MidiManager` con Web MIDI API para el hardware link.
-- [ ] Librería global con IndexedDB (Dexie) persistida entre sesiones.
+- [ ] Librería global con SQLite (via `sqlx`/`rusqlite`) persistida entre sesiones.
 - [ ] Import/Export de todos los formatos soportados.
 - [ ] Vista multi-modelo con árbol de sintetizadores y thumbnails de hardware (P0.5).
 - [ ] Ctrl+V (clipboard hex) y drag & drop de ficheros SysEx.
@@ -559,17 +563,17 @@ Los blobs y metadatos deben conservarse.
 - [ ] Renderizado en UI como ficha estilo "ficha técnica" con iconos por sección.
 - [ ] Cada modelo tiene su propia ficha pre-cargada (EDITABLE por el usuario para notas personales).
 
-## MF.7. Ficha de datos del banco
+## MF.7. Ficha de datos del banco ✅
 
-- [ ] Panel de metadatos extensible por banco (junto a nombre y modelo).
-- [ ] Campos predefinidos: descripción, autor/creador, fecha de creación, fuente/procedencia, licencia.
+- [x] Panel de metadatos extensible por banco (junto a nombre y modelo).
+- [x] Campos predefinidos: descripción, autor/creador, fecha de creación, fuente/procedencia, licencia.
 - [ ] Campos de contenido: nº patches, categorías representativas, rango de patches (A01–D32), formato SysEx.
-- [ ] Campos técnicos: versión de firmware compatible, notas de compatibilidad, known issues.
-- [ ] Tags/librería de etiquetas libre (ej: "pads", "leads", "factory", "user", "community").
-- [ ] Notas libre del usuario (markdown o texto plano).
-- [ ] Historial de cambios: última importación, última modificación, último envío a hardware.
+- [x] Campos técnicos: versión de firmware compatible, notas de compatibilidad, known issues.
+- [x] Tags/librería de etiquetas libre (ej: "pads", "leads", "factory", "user", "community").
+- [x] Notas libre del usuario (markdown o texto plano).
+- [x] Historial de cambios: última importación, última modificación, último envío a hardware.
 - [ ] Exportar la ficha dentro del archivo `.abdlibrary` y en exportación CSV.
-- [ ] Búsqueda全文 que incluya campos de la ficha (descripción, tags, notas).
+- [x] Búsqueda全文 que incluya campos de la ficha (descripción, tags, notas).
 
 > **Casos de uso**: Un usuario con 50 bancos necesita identificar rápidamente cuál es "ROM 1A original de Yamaha" vs "Colección de Pads de la comunidad" vs "Mis patches editados". La ficha del banco permite esa catalogación. La ficha del hardware permite consultar rápidamente "¿cuántas voces tiene el Pro-800?" sin salir de la app.
 

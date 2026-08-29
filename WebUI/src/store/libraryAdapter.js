@@ -176,6 +176,21 @@ export async function createBank(bankData) {
     isFactory: bankData.isFactory || false,
     isLocked: bankData.isLocked || false,
     source: bankData.source || null,
+    // MF.5: Custom image
+    imageUrl: bankData.imageUrl || null,
+    // MF.7: Bank metadata / data sheet
+    description: bankData.description || '',
+    bankAuthor: bankData.bankAuthor || '',
+    license: bankData.license || '',
+    tags: bankData.tags || [],
+    bankNotes: bankData.bankNotes || '',
+    firmwareCompat: bankData.firmwareCompat || '',
+    knownIssues: bankData.knownIssues || '',
+    // MF.7: History
+    lastImportDate: bankData.lastImportDate || null,
+    lastModifiedDate: bankData.lastModifiedDate || null,
+    lastSentDate: bankData.lastSentDate || null,
+    lastSentTarget: bankData.lastSentTarget || null,
     creationDate: nowIso(),
     modifiedDate: nowIso()
   };
@@ -348,6 +363,8 @@ export async function importBank(bankData, patchesData, { deduplication = 'allow
     ...bankData,
     id: bankData.id || `bank-${crypto.randomUUID()}`,
     hardwareIds,
+    // MF.7: Track import date
+    lastImportDate: nowIso(),
     creationDate: bankData.creationDate || nowIso(),
     modifiedDate: nowIso()
   };
