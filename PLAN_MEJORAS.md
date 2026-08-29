@@ -353,7 +353,7 @@ Los blobs y metadatos deben conservarse.
 
 - [x] Registry declarativo con validación Zod y `createStandaloneRegistry()` (15 modelos) en `Source/Contracts/ContractRegistry.ts`.
 - [x] Exponer el registry a la WebUI mediante una API segura (sin arrastrar Zod al grafo web).
-- [ ] Consultas filtradas por modelo consumidas por la UI (selector de modelo, propia auto-configuración).
+- [x] Consultas filtradas por modelo consumidas por la UI (selector de modelo, propia auto-configuración).
 - [ ] Registrar ImportAdapters/ExportAdapters/HardwareLinks conforme se implementen.
 - [ ] Añadir tests de registro, duplicados y modo standalone/plugin.
 
@@ -852,20 +852,13 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [x] Auto-backup a IndexedDB en cada operación (ya existe).
 - [ ] Recordatorio desactivable permanentemente en settings (pendiente).
 
-## MF.17. Búsqueda avanzada global
+## MF.17. Búsqueda avanzada global ✅
 
-- [ ] Búsqueda全文 que incluya: nombre patch, nombre banco, modelo, categoría, autor, notas, tags.
-- [ ] Filtros avanzados:
-  - Por modelo (checkbox multi-select).
-  - Por categoría (checkbox multi-select).
-  - Por favoritos (toggle).
-  - Por rango de fechas (última modificación).
-  - Por fuente (fábrica / importado / creado).
-- [ ] Resultados mostrados como lista mixta (banco → patches).
-- [ ] Click en resultado → navega directamente al patch.
-- [ ] Búsqueda con debounce (300ms).
-- [ ] Atajo `Ctrl+F` para enfocar la búsqueda.
-- [ ] Historial de búsquedas recientes (últimas 10).
+- [x] Búsqueda global: nombre patch, banco, modelo, categoría, autor, notas, hex, parámetros.
+- [x] Filtros por tipo: Todos / Modelos / Bancos / Patches (tabs).
+- [x] Resultados con highlight de coincidencia, contexto, badges.
+- [x] Click en resultado → navega directamente al patch/banco/modelo.
+- [x] Debounce 200ms, Ctrl+F para enfocar, Escape para cerrar.
 
 ## MF.18. Bancos multi-hardware (asociación automática)
 

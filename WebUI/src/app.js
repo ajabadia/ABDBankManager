@@ -23,6 +23,7 @@ import { undoHistory } from './core/undoHistory.js';
 import { createHexEditor } from './core/hexEditor.js';
 import { computeBankStats } from './core/bankStats.js';
 import { renderModelSelector, initModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
+import { globalSearch, highlightMatch, countByType } from './core/searchEngine.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -84,6 +85,9 @@ let selectedModelId = null;
 let selectedBankId = null;
 let selectedPatchId = null;
 let compareIds = new Set(); // For MF.11 patch comparison
+let searchMode = false; // MF.17 global search active
+let searchResults = [];
+let searchFilter = 'all'; // 'all' | 'models' | 'banks' | 'patches'
 
 // Group contracts by manufacturer
 const manufacturers = {};
@@ -100,9 +104,19 @@ async function init() {
   renderNav();
   setStatus('connected', 'Listo');
 
-  // Search
-  document.getElementById('global-search').addEventListener('input', (e) => {
-    renderNav(e.target.value.trim());
+  // MF.17 Global Search
+  const searchInput = document.getElementById('global-search');
+  let searchDebounce = null;
+  searchInput.addEventListener('input', (e) => {
+    clearTimeout(searchDebounce);
+    const query = e.target.value.trim();
+    searchDebounce = setTimeout(() => performGlobalSearch(query), 200);
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      exitSearchMode();
+    }
   });
 
   // MIDI status button
@@ -419,10 +433,137 @@ async function showComparison(container) {
   };
 }
 
-// ─── Content panel rendering ───
+// ─── MF.17 Global Search ───
+
+async function performGlobalSearch(query) {
+  if (!query || query.length < 1) {
+    exitSearchMode();
+    return;
+  }
+
+  searchMode = true;
+  searchResults = await globalSearch(query);
+  searchFilter = 'all';
+  renderSearchPanel(query);
+}
+
+function exitSearchMode() {
+  searchMode = false;
+  searchResults = [];
+  searchFilter = 'all';
+  const content = document.getElementById('panel-content');
+  const welcome = document.getElementById('panel-welcome');
+  if (navLevel === 'manufacturers' || !selectedManufacturer) {
+    welcome.style.display = '';
+    content.style.display = 'none';
+  } else {
+    welcome.style.display = 'none';
+    content.style.display = '';
+    renderContent();
+  }
+}
+
+function renderSearchPanel(query) {
+  const welcome = document.getElementById('panel-welcome');
+  const content = document.getElementById('panel-content');
+  welcome.style.display = 'none';
+  content.style.display = '';
+
+  const counts = countByType(searchResults);
+  const total = searchResults.length;
+
+  const tabs = [
+    { key: 'all', label: `Todos (${total})` },
+    { key: 'models', label: `Modelos (${counts.models})` },
+    { key: 'banks', label: `Bancos (${counts.banks})` },
+    { key: 'patches', label: `Patches (${counts.patches})` },
+  ];
+
+  const filtered = searchFilter === 'all'
+    ? searchResults
+    : searchResults.filter(r => r.type === searchFilter);
+
+  const itemsHtml = filtered.length > 0
+    ? filtered.map(r => {
+        const typeIcon = r.type === 'model' ? '🎹' : r.type === 'bank' ? '📁' : '🎵';
+        const thumbHtml = r.thumbnail
+          ? `<img class="search-result-thumb" src="${r.thumbnail}" alt="" onerror="this.style.display='none'">`
+          : '';
+        return `<div class="search-result-item" data-id="${r.id}" data-type="${r.type}" data-nav='${JSON.stringify(r.nav)}'>
+          <span class="search-result-icon">${typeIcon}</span>
+          ${thumbHtml}
+          <div class="search-result-info">
+            <div class="search-result-name">${r.matchSnippet}</div>
+            <div class="search-result-context">${escHtml(r.context)}</div>
+          </div>
+          <span class="search-result-field">${escHtml(r.matchField)}</span>
+          ${r.badge ? `<span class="search-result-badge">${escHtml(r.badge)}</span>` : ''}
+        </div>`;
+      }).join('')
+    : `<div class="search-empty">Sin resultados para "${escHtml(query)}"</div>`;
+
+  content.innerHTML = `
+    <div class="search-panel">
+      <div class="search-panel-header">
+        <span class="search-panel-title">🔍 Resultados para "${escHtml(query)}"</span>
+        <span class="search-panel-count">${total} resultado${total !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="search-tabs">
+        ${tabs.map(t => `<button class="search-tab${searchFilter === t.key ? ' active' : ''}" data-filter="${t.key}">${t.label}</button>`).join('')}
+      </div>
+      <div class="search-results" id="search-results">
+        ${itemsHtml}
+      </div>
+    </div>`;
+
+  // Tab click handlers
+  content.querySelectorAll('.search-tab').forEach(tab => {
+    tab.onclick = () => {
+      searchFilter = tab.dataset.filter;
+      renderSearchPanel(query);
+    };
+  });
+
+  // Result click handlers
+  content.querySelectorAll('.search-result-item').forEach(item => {
+    item.onclick = () => {
+      const nav = JSON.parse(item.dataset.nav || '{}');
+      navigateToResult(nav);
+    };
+  });
+}
+
+async function navigateToResult(nav) {
+  if (nav.manufacturer) {
+    selectedManufacturer = nav.manufacturer;
+  }
+  if (nav.modelId) {
+    selectedModelId = nav.modelId;
+  }
+  if (nav.bankId) {
+    selectedBankId = nav.bankId;
+  }
+  if (nav.patchId) {
+    selectedPatchId = nav.patchId;
+  }
+  if (nav.level) {
+    navLevel = nav.level;
+  }
+
+  // Clear search
+  searchMode = false;
+  document.getElementById('global-search').value = '';
+
+  await renderNav();
+  await renderContent();
+  toast(`Navegando a resultado`, 'info');
+}
+
 async function renderContent() {
   const welcome = document.getElementById('panel-welcome');
   const content = document.getElementById('panel-content');
+
+  if (searchMode) return; // search panel owns content
 
   if (navLevel === 'manufacturers' || !selectedManufacturer) {
     welcome.style.display = '';
