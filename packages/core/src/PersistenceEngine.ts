@@ -14,15 +14,12 @@ import { BackupManifestSchema, assertBackupPatchData } from './backupValidation.
 import {
   addBank,
   removeBank,
-  renameBank,
   addPatch,
   removePatch,
   movePatch,
   updatePatchMetadata,
   movePatchBetweenBanks,
-  duplicateBank,
   assertBankEditable,
-  assertBankHasCapacity,
   isLibrary
 } from './operations/library.js';
 
@@ -208,7 +205,7 @@ class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
       rawData: patchData.rawData || new Uint8Array(0),
       hardwareIds: patchData.hardwareIds?.length ? patchData.hardwareIds : bank.hardwareIds || (bank.modelId ? [bank.modelId] : []),
       parameters: patchData.parameters || {},
-      fingerprint: patchData.fingerprint || await calculateFingerprint(patchData.rawData || new Uint8Array(0), { programsPerBank: maxPatches } as any),
+      fingerprint: patchData.fingerprint || await calculateFingerprint(patchData.rawData || new Uint8Array(0), { programsPerBank: maxPatches } as { programsPerBank: number }),
       isFavorite: patchData.isFavorite || false,
       rating: patchData.rating || 0,
       versionNumber: patchData.versionNumber || 1,
@@ -240,11 +237,14 @@ class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
     assertBankEditable(bank);
 
     // Separate metadata (core handles) from identity/content fields
-    const { id, index, bankId: _b, rawData, ...metadata } = changes;
+    const identityKeys = ['id', 'index', 'bankId', 'rawData'];
+    const metadata = Object.fromEntries(
+      Object.entries(changes).filter(([k]) => !identityKeys.includes(k))
+    );
     let next = updatePatchMetadata(library, bankId, patchIndex, metadata);
 
     // Handle rawData/content updates separately (core ignores them)
-    if ('rawData' in changes) {
+    if (Object.prototype.hasOwnProperty.call(changes, 'rawData')) {
       next = {
         ...next,
         banks: next.banks.map(b =>

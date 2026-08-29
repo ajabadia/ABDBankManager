@@ -361,11 +361,19 @@ export async function importBank(bankData, patchesData, { deduplication = 'allow
   })));
 
   const existingPatches = await db.patches.toArray();
-  const { accepted, duplicates } = partitionDuplicates(patches, existingPatches, deduplication);
+  const existingIds = new Set(existingPatches.map(p => p.id));
+
+  // Filter out patches with IDs that already exist in the library
+  const idFiltered = patches.filter(p => !existingIds.has(p.id));
+  const idDuplicates = patches.filter(p => existingIds.has(p.id));
+
+  const { accepted, duplicates } = partitionDuplicates(idFiltered, existingPatches, deduplication);
+  const allDuplicates = [...idDuplicates.map(p => ({ patch: p, existingPatch: existingPatches.find(e => e.id === p.id) })), ...duplicates];
+
   validateBankAgainstContract(bank, accepted, contract);
 
   const next = addBank(prev, { ...bank, patches: accepted });
   await persistLibrary(prev, next);
 
-  return { bankId: bank.id, importedCount: accepted.length, duplicateCount: duplicates.length, duplicates };
+  return { bankId: bank.id, importedCount: accepted.length, duplicateCount: allDuplicates.length, duplicates: allDuplicates };
 }

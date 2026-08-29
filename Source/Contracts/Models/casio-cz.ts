@@ -142,8 +142,9 @@ const casioCzContract: ModelContract = {
 
   buildPatchSysEx(rawData: Uint8Array, _slot: number, channel: number): Uint8Array {
     const modelId = MODEL_IDS[this.modelId] || 0x12;
-    const data = rawData.slice(0, PATCH_DATA_SIZE);
-    const padded = new Uint8Array(PATCH_DATA_SIZE);
+    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
+    const data = rawData.slice(0, dataSize);
+    const padded = new Uint8Array(dataSize);
     padded.set(data);
     const nibbles = encodeNibble(padded);
     const checksum = casioChecksum(nibbles);
@@ -166,7 +167,8 @@ const casioCzContract: ModelContract = {
     if (!isCasioSysEx(sysex, modelId)) return null;
     const nibbles = sysex.slice(7, sysex.length - 2);
     const decoded = decodeNibble(nibbles);
-    return { rawData: new Uint8Array(decoded.slice(0, PATCH_DATA_SIZE)), slot: 0 };
+    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
+    return { rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: 0 };
   },
 
   buildDumpRequest(_slot: number | 'all', channel: number): Uint8Array {
@@ -220,6 +222,7 @@ export const casioCz1Contract: ModelContract = {
   thumbnail: 'casio-cz1.webp',
   bankCapacity: 64,
   banksCount: 4,
+  patchDataSize: 288,
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x15 }
 };
 

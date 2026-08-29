@@ -21,7 +21,7 @@ import { ModelContract, validateModelContract } from '../ModelContract';
 const BANK_CAPACITY = 128;
 const BANKS_COUNT = 8;
 const PROGRAMS_PER_BANK = 16;
-const PATCH_DATA_SIZE = 128;
+const PATCH_DATA_SIZE = 288; // MS2000/microKORG raw patch data size (before 7-to-8 packing)
 const PATCH_NAME_MAX_LENGTH = 12;
 
 const CATEGORIES = ['Bass', 'Lead', 'Pad', 'FX', 'Keys', 'Perc', 'Synth', 'Other'];

@@ -1,14 +1,11 @@
 /**
- * ABD Bank Manager — Model Contracts (WebUI)
+ * ABD Bank Manager — Contracts (WebUI)
  *
- * Re-export del bundle JS generado desde la fuente canónica TypeScript
- * (Source/Contracts/Models/*.ts → WebUI/src/contracts/gen/modelContracts.gen.js).
+ * Re-export de artefactos generados desde la fuente canónica TypeScript.
  * La WebUI se sirve estática: el navegador no ejecuta TS, por eso los contratos
- * se transpilan con `npm run generate` (Scripts/build_contracts_web.js).
+ * y el registry se transpilan con `npm run generate`.
  *
- * No mantener datos duplicados aquí — editar en Source/Contracts/Models/ y
- * regenerar. ContractRegistry NO se expone desde la web: depende de Zod y es
- * para el core/standalone (ver packages/contracts/tests/ContractRegistry.test.js).
+ * No mantener datos duplicados aquí — editar en Source/Contracts/ y regenerar.
  */
 
 export {
@@ -20,3 +17,5 @@ export {
   getContractsForManufacturer,
   getMidiConfig
 } from './gen/modelContracts.gen.js';
+
+export { contractRegistryData } from './gen/contractRegistry.gen.js';

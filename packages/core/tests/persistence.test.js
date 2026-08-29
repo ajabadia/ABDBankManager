@@ -5,8 +5,9 @@ import { DexiePersistence } from '../src/PersistenceEngine.ts';
 function stubRestore(engine) {
   const transactionCalls = { count: 0 };
   const writes = { count: 0 };
-  engine.transaction = async (_mode, _banks, _patches, _library, callback) => {
+  engine.transaction = async (...args) => {
     transactionCalls.count++;
+    const callback = args[args.length - 1];
     await callback();
   };
   engine.banks = {
@@ -68,13 +69,7 @@ describe('DexiePersistence backup format', () => {
     engine.loadLibrary = async () => library;
     const backup = await engine.createBackup('test');
 
-    engine.transaction = async (_mode, _banks, _patches, _library, callback) => {
-      await callback();
-    };
-    engine.banks = { clear: async () => {}, put: async () => {} };
-    engine.patches = { clear: async () => {}, put: async () => {} };
-    engine.table = () => ({ put: async () => {} });
-    engine.isOpen = () => true;
+    const stubs = stubRestore(engine);
     expect(await engine.restoreFromBackup(backup)).toBe(true);
     restored = restored || { banks: [{ patches: [{ rawData: new Uint8Array([1, 2, 3]), fingerprint: '0'.repeat(64) }] }] };
     expect(restored.banks).toHaveLength(1);

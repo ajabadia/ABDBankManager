@@ -1,6 +1,3 @@
-// GENERATED FILE — DO NOT EDIT
-// Generator: Scripts/build_contracts_web.js
-// Fuente canónica: Source/Contracts/Models/*.ts
 // Source/Contracts/ModelContract.ts
 function validateModelContract(contract) {
   const errors = [];
@@ -76,9 +73,9 @@ function casioChecksum(bytes) {
   for (const b of bytes) sum += b;
   return sum & 127;
 }
-function encodeNibble(data) {
+function encodeNibble(data2) {
   const nibbles = [];
-  for (const byte of data) {
+  for (const byte of data2) {
     nibbles.push(byte >> 4 & 15);
     nibbles.push(byte & 15);
   }
@@ -150,8 +147,8 @@ var casioCzContract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 30,
   dumpTimeoutMs: 3e3,
-  computeChecksum(data) {
-    return casioChecksum(data);
+  computeChecksum(data2) {
+    return casioChecksum(data2);
   },
   verifyChecksum(sysex) {
     if (sysex.length < 9) return false;
@@ -162,10 +159,9 @@ var casioCzContract = {
   },
   buildPatchSysEx(rawData, _slot, channel) {
     const modelId = MODEL_IDS[this.modelId] || 18;
-    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
-    const data = rawData.slice(0, dataSize);
-    const padded = new Uint8Array(dataSize);
-    padded.set(data);
+    const data2 = rawData.slice(0, PATCH_DATA_SIZE);
+    const padded = new Uint8Array(PATCH_DATA_SIZE);
+    padded.set(data2);
     const nibbles = encodeNibble(padded);
     const checksum = casioChecksum(nibbles);
     const result = new Uint8Array(7 + nibbles.length + 2);
@@ -186,8 +182,7 @@ var casioCzContract = {
     if (!isCasioSysEx(sysex, modelId)) return null;
     const nibbles = sysex.slice(7, sysex.length - 2);
     const decoded = decodeNibble(nibbles);
-    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
-    return { rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: 0 };
+    return { rawData: new Uint8Array(decoded.slice(0, PATCH_DATA_SIZE)), slot: 0 };
   },
   buildDumpRequest(_slot, channel) {
     const modelId = MODEL_IDS[this.modelId] || 18;
@@ -235,7 +230,6 @@ var casioCz1Contract = {
   thumbnail: "casio-cz1.webp",
   bankCapacity: 64,
   banksCount: 4,
-  patchDataSize: 288,
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 21 }
 };
 var allCasioContracts = [
@@ -333,8 +327,8 @@ var rolandJuno106Contract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 3e3,
-  computeChecksum(data) {
-    return bulkChecksum(data);
+  computeChecksum(data2) {
+    return bulkChecksum(data2);
   },
   verifyChecksum(sysex) {
     if (sysex.length < 6) return false;
@@ -346,9 +340,9 @@ var rolandJuno106Contract = {
     return sysex[sysex.length - 2] === bulkChecksum(payload);
   },
   buildPatchSysEx(rawData, _slot, channel) {
-    const data = rawData.slice(0, PATCH_DATA_SIZE2);
+    const data2 = rawData.slice(0, PATCH_DATA_SIZE2);
     const padded = new Uint8Array(PATCH_DATA_SIZE2);
-    padded.set(data);
+    padded.set(data2);
     return new Uint8Array([240, 65, CMD_PATCH_DUMP, channel & 15, ...padded, 247]);
   },
   parsePatchSysEx(sysex) {
@@ -428,7 +422,7 @@ allRolandJunoContracts.forEach((c) => {
 var BANK_CAPACITY3 = 128;
 var BANKS_COUNT3 = 8;
 var PROGRAMS_PER_BANK3 = 16;
-var PATCH_DATA_SIZE3 = 288;
+var PATCH_DATA_SIZE3 = 128;
 var PATCH_NAME_MAX_LENGTH3 = 12;
 var CATEGORIES3 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
 var DEFAULT_CATEGORY3 = "Other";
@@ -451,10 +445,10 @@ function getBankLetter3(index) {
 function getProgramNumber3(index) {
   return index % 16 + 1;
 }
-function pack8to7(data) {
+function pack8to7(data2) {
   const packed = [];
-  for (let i = 0; i < data.length; i += 7) {
-    const group = data.slice(i, Math.min(i + 7, data.length));
+  for (let i = 0; i < data2.length; i += 7) {
+    const group = data2.slice(i, Math.min(i + 7, data2.length));
     let control = 0;
     for (let j = 0; j < 7; j++) {
       const byte = j < group.length ? group[j] : 0;
@@ -518,10 +512,10 @@ var korgMs2000Contract = {
   },
   patchDataSize: PATCH_DATA_SIZE3,
   patchNameMaxLength: PATCH_NAME_MAX_LENGTH3,
-  extractPatchName(data) {
+  extractPatchName(data2) {
     const nameOffset = 28;
-    if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
-    const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
+    if (data2.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
+    const nameBytes = data2.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
     return new TextDecoder().decode(nameBytes).replace(/\0/g, "").trim();
   },
   categories: CATEGORIES3,
@@ -554,9 +548,9 @@ var korgMs2000Contract = {
   buildPatchSysEx(rawData, slot, channel) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
     const size = this.patchDataSize;
-    const data = rawData.slice(0, size);
+    const data2 = rawData.slice(0, size);
     const padded = new Uint8Array(size);
-    padded.set(data);
+    padded.set(data2);
     const packed = pack8to7(padded);
     return new Uint8Array([240, 66, 48 | channel & 15, modelId, CMD_DUMP2, ...packed, 247]);
   },
@@ -604,10 +598,10 @@ var korgProphecyContract = {
   thumbnail: "korg-prophecy.webp",
   patchDataSize: 256,
   // Prophecy has a larger program data size
-  extractPatchName(data) {
+  extractPatchName(data2) {
     const nameOffset = 28;
-    if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
-    const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
+    if (data2.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
+    const nameBytes = data2.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
     return new TextDecoder().decode(nameBytes).replace(/\0/g, "").trim();
   },
   legacySysEx: {
@@ -639,36 +633,36 @@ var CMD_REQUEST3 = 1;
 var PACKED_SIZE = 278;
 var PROGRAMS_PER_BANK4 = 128;
 var CATEGORIES4 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
-function pack8to72(data) {
+function pack8to72(data2) {
   const packed = [];
-  for (let offset = 0; offset < data.length; offset += 7) {
-    const count = Math.min(7, data.length - offset);
+  for (let offset = 0; offset < data2.length; offset += 7) {
+    const count = Math.min(7, data2.length - offset);
     let control = 0;
     for (let i = 0; i < count; i++) {
-      if ((data[offset + i] & 128) !== 0) control |= 1 << i;
+      if ((data2[offset + i] & 128) !== 0) control |= 1 << i;
     }
     packed.push(control);
-    for (let i = 0; i < 7; i++) packed.push(i < count ? data[offset + i] & 127 : 0);
+    for (let i = 0; i < 7; i++) packed.push(i < count ? data2[offset + i] & 127 : 0);
   }
   return new Uint8Array(packed);
 }
-function unpack7to82(data) {
+function unpack7to82(data2) {
   const unpacked = [];
-  for (let offset = 0; offset < data.length; offset += 8) {
-    const control = data[offset];
-    for (let i = 0; i < 7 && offset + i + 1 < data.length; i++) {
-      unpacked.push(data[offset + i + 1] & 127 | (control >> i & 1) << 7);
+  for (let offset = 0; offset < data2.length; offset += 8) {
+    const control = data2[offset];
+    for (let i = 0; i < 7 && offset + i + 1 < data2.length; i++) {
+      unpacked.push(data2[offset + i + 1] & 127 | (control >> i & 1) << 7);
     }
   }
   return new Uint8Array(unpacked);
 }
-function splitSysex4(data) {
+function splitSysex4(data2) {
   const result = [];
   let start = -1;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 240 && start < 0) start = i;
-    if (data[i] === 247 && start >= 0) {
-      result.push(data.slice(start, i + 1));
+  for (let i = 0; i < data2.length; i++) {
+    if (data2[i] === 240 && start < 0) start = i;
+    if (data2[i] === 247 && start >= 0) {
+      result.push(data2.slice(start, i + 1));
       start = -1;
     }
   }
@@ -698,9 +692,9 @@ var behringerDm12Contract = {
   },
   patchDataSize: DM12_PATCH_DATA_SIZE,
   patchNameMaxLength: DM12_PATCH_NAME_MAX_LENGTH,
-  extractPatchName(data) {
-    if (data.length < 239) return "";
-    return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
+  extractPatchName(data2) {
+    if (data2.length < 239) return "";
+    return new TextDecoder().decode(data2.slice(223, 239)).replace(/\0/g, "").trim();
   },
   categories: CATEGORIES4,
   defaultCategory: "Other",
@@ -719,9 +713,9 @@ var behringerDm12Contract = {
     return isDeepMindMessage(sysex) && sysex.length === 291;
   },
   buildPatchSysEx(rawData, slot, _channel) {
-    const data = new Uint8Array(DM12_PATCH_DATA_SIZE);
-    data.set(rawData.slice(0, DM12_PATCH_DATA_SIZE));
-    const packed = pack8to72(data);
+    const data2 = new Uint8Array(DM12_PATCH_DATA_SIZE);
+    data2.set(rawData.slice(0, DM12_PATCH_DATA_SIZE));
+    const packed = pack8to72(data2);
     const padded = new Uint8Array(PACKED_SIZE);
     padded.set(packed.slice(0, PACKED_SIZE));
     const bank = Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK4)));
@@ -775,17 +769,17 @@ var FORMAT_VERSION4 = 1;
 var PRO800_CMD_REQUEST = 119;
 var PRO800_CMD_RESPONSE = 120;
 var PRO800_HEADER_BYTES = [0, 32, 50, 0, 1, 36, 0];
-function pack8to73(data) {
+function pack8to73(data2) {
   const packed = [];
   let srcIdx = 0;
-  while (srcIdx < data.length) {
-    const chunkSize = Math.min(7, data.length - srcIdx);
+  while (srcIdx < data2.length) {
+    const chunkSize = Math.min(7, data2.length - srcIdx);
     let msbCollector = 0;
     for (let i = 0; i < chunkSize; i++) {
-      if ((data[srcIdx + i] & 128) !== 0) msbCollector |= 1 << i;
+      if ((data2[srcIdx + i] & 128) !== 0) msbCollector |= 1 << i;
     }
     packed.push(msbCollector);
-    for (let i = 0; i < chunkSize; i++) packed.push(data[srcIdx + i] & 127);
+    for (let i = 0; i < chunkSize; i++) packed.push(data2[srcIdx + i] & 127);
     srcIdx += chunkSize;
   }
   return new Uint8Array(packed);
@@ -864,12 +858,12 @@ var behringerPro800Contract = {
   },
   patchDataSize: PRO800_PATCH_DATA_SIZE,
   patchNameMaxLength: PRO800_PATCH_NAME_MAX_LENGTH,
-  extractPatchName(data) {
-    if (data.length <= PRO800_NAME_OFFSET) return "";
+  extractPatchName(data2) {
+    if (data2.length <= PRO800_NAME_OFFSET) return "";
     const chars = [];
-    const end = Math.min(data.length, PRO800_NAME_OFFSET + PRO800_PATCH_NAME_MAX_LENGTH);
+    const end = Math.min(data2.length, PRO800_NAME_OFFSET + PRO800_PATCH_NAME_MAX_LENGTH);
     for (let i = PRO800_NAME_OFFSET; i < end; i++) {
-      const c = data[i];
+      const c = data2[i];
       if (c === 0) break;
       if (c >= 32 && c <= 126) chars.push(String.fromCharCode(c));
     }
@@ -900,9 +894,9 @@ var behringerPro800Contract = {
     const s = clampSlot(slot);
     const version = getFormatVersion(rawData);
     const size = version === 109 || version === 110 ? rawData.length : this.patchDataSize;
-    const data = rawData.slice(0, size);
+    const data2 = rawData.slice(0, size);
     const padded = new Uint8Array(size);
-    padded.set(data);
+    padded.set(data2);
     const packed = pack8to73(padded);
     const lsb = s % 128;
     const msb = Math.floor(s / 128);
@@ -1053,11 +1047,11 @@ function packProgram(vmem, ved) {
 }
 function buildDx7VoiceSysEx(ved, channel) {
   const ch = channel - 1 & 15;
-  const checksum = dx7Checksum(ved.subarray(0, 155));
+  const header = new Uint8Array([240, 67, ch, 0, 1, 27]);
   const result = new Uint8Array(6 + 155 + 2);
-  result.set([240, 67, ch, 0, 1, 27], 0);
+  result.set(header, 0);
   result.set(ved.subarray(0, 155), 6);
-  result[6 + 155] = checksum;
+  result[6 + 155] = dx7Checksum(ved.subarray(0, 155));
   result[6 + 155 + 1] = 247;
   return result;
 }
@@ -1131,9 +1125,9 @@ var yamahaDx7Contract = {
   },
   patchDataSize: DX7_PATCH_DATA_SIZE,
   patchNameMaxLength: DX7_PATCH_NAME_MAX_LENGTH,
-  extractPatchName(data) {
-    if (data.length < 128) return "";
-    const nameBytes = data.slice(118, 128);
+  extractPatchName(data2) {
+    if (data2.length < 128) return "";
+    const nameBytes = data2.slice(118, 128);
     let name = "";
     for (const b of nameBytes) {
       if (b === 0) break;
@@ -1154,10 +1148,10 @@ var yamahaDx7Contract = {
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 5e3,
-  maxSysExMessageSize: 0,
-  // DX7 bulk dumps must NOT be split — FM-1 expects single 4104-byte message
-  computeChecksum(data) {
-    return dx7Checksum(data);
+  maxSysExMessageSize: 2048,
+  // Split bulk dumps into chunks to prevent buffer overflow on FM-1
+  computeChecksum(data2) {
+    return dx7Checksum(data2);
   },
   verifyChecksum(sysex) {
     if (sysex.length < 8) return false;
@@ -1187,8 +1181,8 @@ var yamahaDx7Contract = {
     result.set(header, 0);
     for (const p of patches) {
       const offset = header.length + p.slot * DX7_PATCH_DATA_SIZE;
-      const data = p.rawData.slice(0, DX7_PATCH_DATA_SIZE);
-      result.set(data, offset);
+      const data2 = p.rawData.slice(0, DX7_PATCH_DATA_SIZE);
+      result.set(data2, offset);
     }
     const checksum = dx7Checksum(result.slice(header.length, header.length + bankSize));
     result[header.length + bankSize] = checksum;
@@ -1256,9 +1250,9 @@ var yamahaDx7iiContract = {
     if (prog < 1 || prog > 64) return null;
     return prog - 1;
   },
-  extractPatchName(data) {
-    if (data.length < 128) return "";
-    const nameBytes = data.slice(118, 128);
+  extractPatchName(data2) {
+    if (data2.length < 128) return "";
+    const nameBytes = data2.slice(118, 128);
     let name = "";
     for (const b of nameBytes) {
       if (b === 0) break;
@@ -1267,9 +1261,9 @@ var yamahaDx7iiContract = {
     return name.trimEnd();
   },
   buildPatchSysEx(rawData, _slot, channel) {
-    const data = rawData.slice(0, DX7II_PATCH_DATA_SIZE);
+    const data2 = rawData.slice(0, DX7II_PATCH_DATA_SIZE);
     const padded = new Uint8Array(DX7II_PATCH_DATA_SIZE);
-    padded.set(data);
+    padded.set(data2);
     const ch = channel - 1 & 15;
     const header = new Uint8Array([240, 67, ch, 1, CMD_BULK, SUB_SINGLE, 0]);
     const payload = new Uint8Array(header.length + DX7II_PATCH_DATA_SIZE);
@@ -1328,21 +1322,6 @@ var allModelContracts = [
   ...allYamahaContracts
 ];
 var modelContractMap = new Map(allModelContracts.map((c) => [c.modelId, c]));
-function getModelContract(modelId) {
-  return modelContractMap.get(modelId);
-}
-function getCompatibleModels(modelId) {
-  const contract = modelContractMap.get(modelId);
-  return contract?.compatibleModels || [];
-}
-function getHardwareIds(modelId) {
-  const contract = modelContractMap.get(modelId);
-  if (!contract) return [modelId];
-  return [modelId, ...contract.compatibleModels || []];
-}
-function getContractsForManufacturer(manufacturer) {
-  return allModelContracts.filter((c) => c.manufacturer === manufacturer);
-}
 var MANUFACTURER_TO_QUEUE_KEY = {
   Casio: "casio-cz",
   Roland: "roland-juno",
@@ -1361,27 +1340,161 @@ function getMidiConfig(modelId) {
     dumpTimeoutMs: queue?.dumpTimeoutMs ?? 3e3
   };
 }
-export {
-  allBehringerDm12Contracts,
-  allBehringerPro800Contracts,
-  allCasioContracts,
-  allKorgContracts,
-  allModelContracts,
-  allRolandJunoContracts,
-  allYamahaContracts,
-  casioCz1000Contract,
-  casioCz1Contract,
-  casioCz5000Contract,
-  getCompatibleModels,
-  getContractsForManufacturer,
-  getHardwareIds,
-  getMidiConfig,
-  getModelContract,
-  korgMicrokorgContract,
-  korgProphecyContract,
-  modelContractMap,
-  rolandHs60Contract,
-  rolandJuno60Contract,
-  rolandJuno6Contract,
-  yamahaDx7iiContract
+
+// Source/Contracts/ContractRegistry.ts
+var ContractRegistry = class {
+  models = /* @__PURE__ */ new Map();
+  importAdapters = /* @__PURE__ */ new Map();
+  exportAdapters = /* @__PURE__ */ new Map();
+  hardwareLinks = /* @__PURE__ */ new Map();
+  issues = [];
+  // ─── Registro (declarativo, validado al registrar) ───
+  registerModel(contract) {
+    const validation = validateModelContract(contract);
+    if (!validation.valid) {
+      throw new Error(
+        `ContractRegistry: ModelContract inv\xE1lido (${contract.modelId || "(sin modelId)"}): ${validation.errors.join("; ")}`
+      );
+    }
+    if (this.models.has(contract.modelId)) {
+      throw new Error(`ContractRegistry: modelId duplicado '${contract.modelId}'`);
+    }
+    this.models.set(contract.modelId, contract);
+  }
+  registerImportAdapter(adapter) {
+    if (!adapter.adapterId || typeof adapter.canParse !== "function" || typeof adapter.parse !== "function") {
+      throw new Error("ContractRegistry: ImportAdapter inv\xE1lido (adapterId, canParse y parse requeridos)");
+    }
+    if (this.importAdapters.has(adapter.adapterId)) {
+      throw new Error(`ContractRegistry: adapterId duplicado '${adapter.adapterId}'`);
+    }
+    for (const modelId of adapter.targetModelIds || []) {
+      if (!this.models.has(modelId)) {
+        this.issues.push({
+          kind: "warning",
+          message: `ImportAdapter '${adapter.adapterId}': targetModelIds '${modelId}' no tiene ModelContract registrado (formato gen\xE9rico?)`
+        });
+      }
+    }
+    this.importAdapters.set(adapter.adapterId, adapter);
+  }
+  registerExportAdapter(adapter) {
+    if (!adapter.adapterId || typeof adapter.serialize !== "function") {
+      throw new Error("ContractRegistry: ExportAdapter inv\xE1lido (adapterId y serialize requeridos)");
+    }
+    if (this.exportAdapters.has(adapter.adapterId)) {
+      throw new Error(`ContractRegistry: adapterId duplicado '${adapter.adapterId}'`);
+    }
+    this.exportAdapters.set(adapter.adapterId, adapter);
+  }
+  registerHardwareLink(link) {
+    if (!this.models.has(link.modelId)) {
+      throw new Error(
+        `ContractRegistry: HardwareLinkContract para '${link.modelId}' sin ModelContract registrado`
+      );
+    }
+    this.hardwareLinks.set(link.modelId, link);
+  }
+  // ─── Consulta — el core/UI se auto-configuran SOLO a partir de esto ───
+  /** 'standalone' si hay más de un modelo registrado; si no, 'plugin'. */
+  get mode() {
+    return this.models.size > 1 ? "standalone" : "plugin";
+  }
+  getModels() {
+    return [...this.models.values()];
+  }
+  getModel(modelId) {
+    return this.models.get(modelId);
+  }
+  getCompatibleModels(modelId) {
+    return this.models.get(modelId)?.compatibleModels || [];
+  }
+  /** Asociación multi-hardware: [canónico, ...compatibles]. */
+  getHardwareIds(modelId) {
+    const contract = this.models.get(modelId);
+    if (!contract) return [modelId];
+    return [modelId, ...contract.compatibleModels || []];
+  }
+  getImportAdapters(modelId) {
+    const all = [...this.importAdapters.values()];
+    if (!modelId) return all;
+    return all.filter((a) => a.targetModelIds.includes(modelId));
+  }
+  getExportAdapters(modelId) {
+    const all = [...this.exportAdapters.values()];
+    if (!modelId) return all;
+    return all.filter((a) => a.targetModelIds.includes(modelId));
+  }
+  getHardwareLinks(modelId) {
+    const all = [...this.hardwareLinks.values()];
+    if (!modelId) return all;
+    return all.filter((l) => l.modelId === modelId);
+  }
+  /** Canal/device + timing de la cola MIDI, derivados (no editables). */
+  getMidiConfig(modelId) {
+    return getMidiConfig(modelId);
+  }
+  isSupported(modelId) {
+    return this.models.has(modelId);
+  }
+  /** Issues (warnings/errores no fatales) acumulados durante el registro. */
+  getIssues() {
+    return [...this.issues];
+  }
 };
+function createStandaloneRegistry() {
+  const registry2 = new ContractRegistry();
+  for (const contract of allModelContracts) {
+    registry2.registerModel(contract);
+  }
+  return registry2;
+}
+
+// WebUI/src/contracts/gen/_extractRegistryData.mjs
+var registry = createStandaloneRegistry();
+var data = {
+  // Modo del registry ('standalone' | 'plugin')
+  mode: registry.mode,
+  // Issues acumulados durante el registro (warnings/errores no fatales)
+  issues: registry.getIssues(),
+  // HardwareLinks por modelo
+  hardwareLinks: {},
+  // ImportAdapters por modelo
+  importAdapters: {},
+  // ExportAdapters por modelo
+  exportAdapters: {},
+  // Lista de modelIds registrados (orden de registro)
+  registeredModelIds: registry.getModels().map((c) => c.modelId),
+  // Metadatos para UI: displayName, manufacturer, etc. por modelId
+  modelMetadata: {}
+};
+for (const modelId of data.registeredModelIds) {
+  data.hardwareLinks[modelId] = registry.getHardwareLinks(modelId);
+  data.importAdapters[modelId] = registry.getImportAdapters(modelId).map((a) => ({
+    adapterId: a.adapterId,
+    targetModelIds: a.targetModelIds,
+    displayName: a.displayName
+  }));
+  data.exportAdapters[modelId] = registry.getExportAdapters(modelId).map((a) => ({
+    adapterId: a.adapterId,
+    targetModelIds: a.targetModelIds,
+    displayName: a.displayName
+  }));
+  const model = registry.getModel(modelId);
+  if (model) {
+    data.modelMetadata[modelId] = {
+      displayName: model.displayName,
+      manufacturer: model.manufacturer,
+      bankCapacity: model.bankCapacity,
+      programsPerBank: model.programsPerBank,
+      patchDataSize: model.patchDataSize,
+      patchNameMaxLength: model.patchNameMaxLength,
+      categories: model.categories,
+      defaultCategory: model.defaultCategory,
+      sysexManufacturerId: model.sysexManufacturerId,
+      formatVersion: model.formatVersion,
+      compatibleModels: model.compatibleModels || []
+    };
+  }
+}
+console.log(JSON.stringify(data, null, 2));
