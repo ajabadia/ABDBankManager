@@ -812,22 +812,22 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [ ] El historial se pierde al cerrar la pestaña (no persistente).
 - [ ] Indicador visual del estado: botones ↩/↪ habilitados/deshabilitados.
 
-## MF.14. Estadísticas del banco
+## MF.14. Estadísticas del banco ✅
 
-- [ ] Panel colapsable "Estadísticas" al seleccionar un banco.
-- [ ] Métricas mostradas:
-  - Total de patches / capacidad del modelo.
-  - Distribución por categorías (barras horizontales o pie chart).
+- [x] Panel colapsable "📊 Estadísticas" al seleccionar un banco.
+- [x] Métricas mostradas:
+  - Total de patches / capacidad del modelo (con barra de progreso).
+  - Distribución por categorías (barras horizontales).
   - Patch más largo/corto en nombre.
   - Patches sin nombre o con nombre genérico ("P01", "Init").
   - Patches sin categoría.
   - Tamaño total de rawData (KB).
   - Porcentaje de favoritos.
-- [ ] Si el modelo tiene schema de parámetros:
-  - Rango de valores de parámetros clave (ej: "Filtro: 20-110, media 65").
-  - Parámetros más variables entre patches.
-- [ ] Exportar estadísticas como CSV o JSON.
-- [ ] Actualización en tiempo real al modificar patches.
+- [x] Si el modelo tiene schema de parámetros:
+  - Parámetros más variables entre patches (rango, promedio, valores únicos).
+- [x] Exportar estadísticas como JSON.
+- [x] Actualización en tiempo real al modificar patches.
+- [ ] Exportar como CSV (pendiente).
 
 ## MF.15. SysEx hex editor inline ✅
 

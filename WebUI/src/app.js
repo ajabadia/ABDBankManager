@@ -13,6 +13,7 @@ import {
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
 import { getModelContract, MODEL_CONTRACTS } from './contracts/modelContracts.js';
+import { contractRegistryData } from './contracts/modelContracts.js';
 import { applyRenameTemplate, validateRenameTemplate, patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
 import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getAllModels, getManufacturer } from './core/modelRegistry.js';
 import { hexDump, spacedHex } from './core/hexDump.js';
@@ -20,6 +21,8 @@ import { buildSysExViewInfo } from './core/patchSysEx.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
 import { undoHistory } from './core/undoHistory.js';
 import { createHexEditor } from './core/hexEditor.js';
+import { computeBankStats } from './core/bankStats.js';
+import { renderModelSelector, initModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -567,6 +570,9 @@ async function renderBankContent(el) {
   const delBtn = el.querySelector('#btn-delete-bank');
   if (delBtn) delBtn.onclick = () => confirmDeleteBank(bank);
 
+  // MF.14 Statistics panel
+  await renderBankStats(el, patches, contract);
+
   // Render patch grid
   const grid = el.querySelector('#patch-grid');
   for (const patch of patches) {
@@ -609,6 +615,126 @@ async function recordPatchUpdate(patchId, field, oldValue, newValue) {
     undo: async () => { await updatePatch(patchId, { [field]: oldValue }); },
     redo: async () => { await updatePatch(patchId, { [field]: newValue }); }
   });
+}
+
+// MF.14 Bank Statistics
+async function renderBankStats(el, patches, contract) {
+  const stats = computeBankStats(patches, contract);
+  if (stats.total === 0) return;
+
+  const capPct = stats.capacity ? Math.round((stats.total / stats.capacity) * 100) : 0;
+  const capBarWidth = Math.min(capPct, 100);
+
+  // Category bars
+  const catEntries = Object.entries(stats.categories).sort((a, b) => b[1] - a[1]);
+  const maxCat = catEntries.length > 0 ? catEntries[0][1] : 1;
+  const catBars = catEntries.map(([cat, count]) => {
+    const pct = Math.round((count / maxCat) * 100);
+    return `<div class="stat-bar-row">
+      <span class="stat-bar-label">${escHtml(cat)}</span>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+      <span class="stat-bar-value">${count}</span>
+    </div>`;
+  }).join('');
+
+  // Name stats
+  const nameIssues = [];
+  if (stats.noName > 0) nameIssues.push(`${stats.noName} sin nombre`);
+  if (stats.genericNames.length > 0) nameIssues.push(`${stats.genericNames.length} genéricos (${stats.genericNames.slice(0, 3).join(', ')}${stats.genericNames.length > 3 ? '…' : ''})`);
+
+  // Size
+  const sizeKB = (stats.totalDataBytes / 1024).toFixed(1);
+
+  // Parameter ranges
+  let paramHtml = '';
+  if (stats.parameterStats?.mostVariable?.length > 0) {
+    const rows = stats.parameterStats.mostVariable.map(p =>
+      `<tr><td>${escHtml(p.name)}</td><td>${p.min}–${p.max}</td><td>${p.avg}</td><td>${p.uniqueValues}</td></tr>`
+    ).join('');
+    paramHtml = `
+      <div class="stats-section">
+        <div class="stats-section-title">Parámetros más variables</div>
+        <table class="stats-mini-table">
+          <thead><tr><th>Parámetro</th><th>Rango</th><th>Promedio</th><th>Valores únicos</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  const statsHtml = `
+    <div class="bank-stats" id="bank-stats">
+      <div class="stats-header" id="stats-toggle">
+        <span class="stats-title">📊 Estadísticas</span>
+        <span class="stats-arrow">▼</span>
+      </div>
+      <div class="stats-body" id="stats-body">
+        <div class="stats-grid">
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.total}<span class="stats-card-dim">/${stats.capacity || '∞'}</span></div>
+            <div class="stats-card-label">Patches</div>
+            <div class="stat-bar-track" style="margin-top:0.3rem;"><div class="stat-bar-fill" style="width:${capBarWidth}%;background:var(--accent);"></div></div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.favorites}<span class="stats-card-dim"> (${stats.favPct}%)</span></div>
+            <div class="stats-card-label">Favoritos</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${sizeKB}<span class="stats-card-dim"> KB</span></div>
+            <div class="stats-card-label">Datos totales</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.avgNameLen}<span class="stats-card-dim"> chars</span></div>
+            <div class="stats-card-label">Nombre medio</div>
+          </div>
+        </div>
+        <div class="stats-section">
+          <div class="stats-section-title">Categorías</div>
+          ${catBars || '<span class="stats-empty">Sin categorías definidas</span>'}
+        </div>
+        ${nameIssues.length > 0 ? `<div class="stats-section">
+          <div class="stats-section-title">Problemas de nombre</div>
+          <div class="stats-issues">${nameIssues.map(i => `<span class="stats-issue">⚠️ ${escHtml(i)}</span>`).join('')}</div>
+        </div>` : ''}
+        ${stats.noCategory > 0 ? `<div class="stats-section">
+          <div class="stats-section-title">Sin categoría</div>
+          <span class="stats-issue">⚠️ ${stats.noCategory} patch${stats.noCategory > 1 ? 'es' : ''} sin categoría</span>
+        </div>` : ''}
+        ${paramHtml}
+        <div class="stats-section" style="text-align:right;">
+          <button class="btn btn-sm" id="btn-export-stats-json">📥 Exportar JSON</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Insert before patch-grid
+  const patchGrid = el.querySelector('#patch-grid');
+  if (patchGrid) {
+    patchGrid.insertAdjacentHTML('beforebegin', statsHtml);
+  }
+
+  // Toggle collapse
+  const toggle = el.querySelector('#stats-toggle');
+  const body = el.querySelector('#stats-body');
+  if (toggle && body) {
+    toggle.onclick = () => {
+      body.classList.toggle('collapsed');
+      toggle.querySelector('.stats-arrow').textContent = body.classList.contains('collapsed') ? '▶' : '▼';
+    };
+  }
+
+  // Export JSON
+  const exportBtn = el.querySelector('#btn-export-stats-json');
+  if (exportBtn) {
+    exportBtn.onclick = () => {
+      const json = JSON.stringify({ bank: bank?.name, model: contract?.displayName, stats }, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${bank?.name || 'bank'}-stats.json`;
+      a.click();
+      toast('Estadísticas exportadas', 'success');
+    };
+  }
 }
 
 async function renderPatchDetail(container) {
@@ -955,9 +1081,12 @@ async function handleMidiSendPatch() {
 }
 
 // ─── Bank operations ───
-function promptNewBank(modelId) {
+function promptNewBank(preSelectedModelId = null) {
+  let selectedModelId = preSelectedModelId || selectedModelId;
+
   showModal(`
     <h3>Nuevo Banco</h3>
+    <div id="model-selector-container" style="margin-bottom:1rem;"></div>
     <div class="patch-info-field">
       <span class="patch-info-label">Nombre</span>
       <input class="patch-info-input" id="modal-bank-name" placeholder="Mi Banco" autofocus>
@@ -966,8 +1095,23 @@ function promptNewBank(modelId) {
       <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
       <button class="btn btn-primary" id="modal-confirm">Crear</button>
     </div>`);
+
+  const container = document.getElementById('model-selector-container');
+  renderModelSelector(container, {
+    manufacturerFilter: null,
+    showAutoConfig: true,
+    onSelect: (modelId, meta) => {
+      // Update the hidden modelId for the form
+      selectedModelId = modelId;
+    }
+  });
+  if (preSelectedModelId) {
+    setSelectedModelId(preSelectedModelId);
+  }
+
   document.getElementById('modal-confirm').onclick = async () => {
     const name = document.getElementById('modal-bank-name').value.trim() || 'Nuevo Banco';
+    const modelId = getSelectedModelId() || selectedModelId;
     const contract = getModelContract(modelId);
     const bank = await createBank({ name, modelId, manufacturer: contract?.manufacturer || '' });
     undoHistory.record({

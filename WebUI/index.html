@@ -538,6 +538,130 @@
             white-space: pre;
         }
 
+        /* MF.14 Bank Statistics */
+        .bank-stats {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 0.8rem 0;
+            overflow: hidden;
+        }
+        .stats-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.55rem 0.9rem;
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .stats-header:hover { background: var(--bg-secondary); }
+        .stats-title { font-weight: 600; font-size: 0.85rem; }
+        .stats-arrow { font-size: 0.7rem; color: var(--text-secondary); }
+        .stats-body { padding: 0.7rem 0.9rem; }
+        .stats-body.collapsed { display: none; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.6rem;
+            margin-bottom: 0.7rem;
+        }
+        .stats-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.5rem 0.7rem;
+            text-align: center;
+        }
+        .stats-card-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .stats-card-dim {
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: var(--text-secondary);
+        }
+        .stats-card-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-top: 0.15rem;
+        }
+        .stats-section {
+            margin-top: 0.6rem;
+        }
+        .stats-section-title {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .stat-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-bottom: 0.2rem;
+        }
+        .stat-bar-label {
+            font-size: 0.75rem;
+            min-width: 5rem;
+            color: var(--text-primary);
+        }
+        .stat-bar-track {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .stat-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        .stat-bar-value {
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            min-width: 1.5rem;
+            text-align: right;
+        }
+        .stats-issues { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+        .stats-issue {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.5rem;
+            background: rgba(210,153,34,0.1);
+            border: 1px solid rgba(210,153,34,0.3);
+            border-radius: 4px;
+            color: var(--warning);
+        }
+        .stats-empty {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        .stats-mini-table {
+            width: 100%;
+            font-size: 0.75rem;
+            border-collapse: collapse;
+        }
+        .stats-mini-table th {
+            text-align: left;
+            padding: 0.2rem 0.4rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .stats-mini-table td {
+            padding: 0.2rem 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+        }
+
         /* Modal */
         .modal-overlay {
             display: none;
@@ -711,6 +835,7 @@
             margin-right: 0.5rem;
         }
         .model-selector__mfr[open] summary::before { transform: rotate(90deg); }
+    </style>
 </head>
 <body>
     <header class="header">
