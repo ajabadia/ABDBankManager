@@ -341,13 +341,34 @@ export async function importBank(bankData, patchesData, { deduplication = 'allow
   const contract = getModelContract(bankData?.modelId);
   if (!contract) throw new Error(`ERR_MODEL_NOT_FOUND: Unknown model '${bankData?.modelId}'`);
 
+  // MF.18: Auto-populate hardwareIds from contract if not provided
+  const hardwareIds = bankData.hardwareIds?.length ? bankData.hardwareIds : getHardwareIds(contract.modelId);
+
   const bank = {
     ...bankData,
     id: bankData.id || `bank-${crypto.randomUUID()}`,
-    hardwareIds: bankData.hardwareIds?.length ? bankData.hardwareIds : getHardwareIds(contract.modelId),
+    hardwareIds,
     creationDate: bankData.creationDate || nowIso(),
     modifiedDate: nowIso()
   };
+
+  // MF.18: Check for existing banks with compatible models (deduplication)
+  const compatibleBank = prev.banks.find(b =>
+    b.id !== bank.id &&
+    b.name === bank.name &&
+    hardwareIds.includes(b.modelId)
+  );
+  if (compatibleBank) {
+    // Bank with same name exists for a compatible model — merge hardwareIds instead of creating duplicate
+    const mergedIds = [...new Set([...(compatibleBank.hardwareIds || []), ...hardwareIds])];
+    const updated = { ...compatibleBank, hardwareIds: mergedIds, modifiedDate: nowIso() };
+    const next = {
+      ...prev,
+      banks: prev.banks.map(b => b.id === compatibleBank.id ? updated : b)
+    };
+    await persistLibrary(prev, next);
+    return { bankId: compatibleBank.id, importedCount: 0, duplicateCount: patchesData.length, merged: true };
+  }
 
   const patches = await Promise.all(patchesData.map(async (patch, index) => ({
     ...patch,

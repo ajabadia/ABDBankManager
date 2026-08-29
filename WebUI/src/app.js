@@ -12,7 +12,7 @@ import {
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
-import { getModelContract, MODEL_CONTRACTS } from './contracts/modelContracts.js';
+import { getModelContract, MODEL_CONTRACTS, getHardwareIds } from './contracts/modelContracts.js';
 import { contractRegistryData } from './contracts/modelContracts.js';
 import { applyRenameTemplate, validateRenameTemplate, patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
 import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getAllModels, getManufacturer } from './core/modelRegistry.js';
@@ -262,16 +262,18 @@ async function renderBankNav(list, filter) {
   list.appendChild(header);
 
   const banks = await getAllBanks();
-  const modelBanks = banks.filter(b => b.modelId === selectedModelId);
+  // MF.18: Show banks compatible with selected model (including multi-hardware)
+  const modelBanks = banks.filter(b => isBankCompatibleWithModel(b, selectedModelId));
   const filtered = filter ? modelBanks.filter(b => b.name.toLowerCase().includes(filter.toLowerCase())) : modelBanks;
 
   for (const bank of filtered) {
     const li = document.createElement('li');
     li.className = 'list-item' + (bank.id === selectedBankId ? ' active' : '');
     const factoryBadge = bank.isFactory ? ' 🔒' : '';
+    const multiHw = (bank.hardwareIds && bank.hardwareIds.length > 1) ? ' 🔗' : '';
     const patchCount = (await getPatchesForBank(bank.id)).length;
     li.innerHTML = `
-      <span class="item-name">${escHtml(bank.name)}${factoryBadge}</span>
+      <span class="item-name">${escHtml(bank.name)}${factoryBadge}${multiHw}</span>
       <span class="item-badge">${patchCount}</span>`;
     li.onclick = () => selectBank(bank.id);
     list.appendChild(li);
@@ -649,16 +651,22 @@ async function renderModelContent(el) {
   // Render bank grid
   const grid = el.querySelector('#bank-grid');
   const banks = await getAllBanks();
-  const modelBanks = banks.filter(b => b.modelId === selectedModelId);
+  // MF.18: Show banks compatible with selected model (including multi-hardware)
+  const modelBanks = banks.filter(b => isBankCompatibleWithModel(b, selectedModelId));
 
   for (const bank of modelBanks) {
     const card = document.createElement('div');
     card.className = 'bank-card' + (bank.id === selectedBankId ? ' active' : '');
     const patchCount = (await getPatchesForBank(bank.id)).length;
     const factoryLabel = bank.isFactory ? '🔒 Fábrica' : '👤 Usuario';
+    const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
+    const compatBadge = compatModels.length > 0
+      ? `<div class="bank-compat">🔗 ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
+      : '';
     card.innerHTML = `
       <div class="bank-name">${escHtml(bank.name)}</div>
-      <div class="bank-meta">${patchCount} patches · ${factoryLabel}</div>`;
+      <div class="bank-meta">${patchCount} patches · ${factoryLabel}</div>
+      ${compatBadge}`;
     card.onclick = () => selectBank(bank.id);
     grid.appendChild(card);
   }
@@ -679,12 +687,19 @@ async function renderBankContent(el) {
   const thumbUrl = getBankImage(bank);
   const patches = await getPatchesForBank(bank.id);
 
+  // MF.18: Show compatible models in header
+  const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
+  const compatHtml = compatModels.length > 0
+    ? `<div class="bk-compat">🔗 Compatible con: ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
+    : '';
+
   el.innerHTML = `
     <div class="bank-header">
       <img class="bank-thumb-lg" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
       <div class="bank-info">
         <h2>${escHtml(bank.name)}</h2>
         <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? '🔒 Fábrica' : '👤 Usuario'}</div>
+        ${compatHtml}
       </div>
     </div>
     <div class="action-bar">
@@ -1158,7 +1173,7 @@ async function handleMidiFetch() {
   if (!bank || !isCompatible(bank.modelId)) {
     const allBanks = await getAllBanks();
     bank = allBanks.find(b => isCompatible(b.modelId));
-    if (!bank) bank = await createBank({ name: contract.displayName, modelId: activeMidiModelId, manufacturer: contract.manufacturer || '' });
+    if (!bank) bank = await createBank({ name: contract.displayName, modelId: activeMidiModelId, hardwareIds: getHardwareIds(activeMidiModelId), manufacturer: contract.manufacturer || '' });
     selectedBankId = bank.id;
   }
 
@@ -1254,11 +1269,13 @@ function promptNewBank(preSelectedModelId = null) {
     const name = document.getElementById('modal-bank-name').value.trim() || 'Nuevo Banco';
     const modelId = getSelectedModelId() || selectedModelId;
     const contract = getModelContract(modelId);
-    const bank = await createBank({ name, modelId, manufacturer: contract?.manufacturer || '' });
+    // MF.18: Auto-populate hardwareIds from contract
+    const hardwareIds = getHardwareIds(modelId);
+    const bank = await createBank({ name, modelId, hardwareIds, manufacturer: contract?.manufacturer || '' });
     undoHistory.record({
       label: `Crear banco "${name}"`,
       undo: async () => { await deleteBank(bank.id); },
-      redo: async () => { await createBank({ id: bank.id, name, modelId, manufacturer: contract?.manufacturer || '' }); }
+      redo: async () => { await createBank({ id: bank.id, name, modelId, hardwareIds, manufacturer: contract?.manufacturer || '' }); }
     });
     selectedBankId = bank.id;
     navLevel = 'patches';
@@ -1539,6 +1556,27 @@ function showShortcutsHelp() {
 }
 
 // ─── Utils ───
+
+/** MF.18: Check if a bank is compatible with a given modelId */
+function isBankCompatibleWithModel(bank, modelId) {
+  if (bank.modelId === modelId) return true;
+  if (bank.hardwareIds && bank.hardwareIds.includes(modelId)) return true;
+  // Also check contract compatibility in both directions
+  const contract = getModelContract(modelId);
+  if (contract && contract.compatibleModels?.includes(bank.modelId)) return true;
+  return false;
+}
+
+/** MF.18: Get all compatible modelIds for a bank (from hardwareIds + contract) */
+function getBankCompatibleModels(bank) {
+  const ids = new Set(bank.hardwareIds || [bank.modelId]);
+  const contract = getModelContract(bank.modelId);
+  if (contract) {
+    for (const id of getHardwareIds(bank.modelId)) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s || '';

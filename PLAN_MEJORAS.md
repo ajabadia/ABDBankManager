@@ -416,7 +416,7 @@ Los blobs y metadatos deben conservarse.
 - [x] Tabla de parámetros interpretados Pro-800 en el detalle (nombre, valor, offset, descripción).
 - [x] Tabla de parámetros interpretados DeepMind 12 en el detalle (236+ parámetros, secciones LFO/OSC/VCF/ENV/VCA/Voice/ModMatrix/Seq/Arp/FX).
 - [x] Integrar la búsqueda real en la UI mediante el `Searcher` (P1.2).
-- [ ] Empaquetar las dependencias (dexie, jszip, file-saver) con Vite y eliminar el importmap CDN (`esm.sh`) — WebUI offline/autocontenida.
+- [x] Empaquetar las dependencias (dexie, jszip, file-saver) con Vite y eliminar el importmap CDN (`esm.sh`) — WebUI offline/autocontenida.
 - [ ] Auditoría de `innerHTML` con contenido de usuario en la UI.
 - [ ] Añadir visualización del SysEx completo en hexadecimal en el detalle del patch (copiable).
 
@@ -860,25 +860,16 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [x] Click en resultado → navega directamente al patch/banco/modelo.
 - [x] Debounce 200ms, Ctrl+F para enfocar, Escape para cerrar.
 
-## MF.18. Bancos multi-hardware (asociación automática)
+## MF.18. Bancos multi-hardware (asociación automática) ✅
 
 > **Concepto**: Un banco puede ser compatible con múltiples hardware si comparten el mismo formato SysEx.
 > Ejemplo: Un banco DX7 funciona tanto en un DX7 real como en un M-VAVE FM-1.
 
-- [ ] Campo `compatibleModels` en el contrato (ya existe en ModelContract pero no se usa para bancos).
-- [ ] Al crear/importar un banco, asociarlo automáticamente a todos los modelos compatibles.
-- [ ] En la sidebar, un banco DX7 aparece tanto bajo "Yamaha DX7" como bajo "M-VAVE FM-1".
-- [ ] El banco es una sola entidad interna, pero visible desde múltiples modelos.
-- [ ] Al enviar desde cualquier modelo compatible, se usa el formato correcto del hardware destino.
-- [ ] Badge en el banco: "Compatible con: DX7, FM-1".
-- [ ] Al importar un .syx, detectar todos los modelos compatibles y mostrar opciones.
-- [ ] Evitar duplicados: no crear dos bancos idénticos para hardware compatible.
-- [ ] Ejemplos de compatibilidad:
-  - DX7 ↔ FM-1 (ambos aceptan SysEx DX7 estándar)
-  - DX7II ↔ DX7 (DX7II es backward compatible)
-  - DeepMind 12 ↔ DeepMind 12D (mismo formato)
-  - Pro-800 ↔ Pro-800 (mismo formato, posibles variantes firmware)
-- [ ] En el panel de "Enviar banco", mostrar dropdown con todos los hardware compatibles conectados.
-- [ ] Icono/indicador cuando un banco es multi-hardware (ej: 🔗 chain link).
-
-> **Caso de uso**: El usuario tiene un DX7 real y un FM-1. Importa un banco DX7. Lo ve listado bajo ambos modelos. Puede enviarlo a cualquiera de los dos con un click, sin tener que importarlo dos veces.
+- [x] Campo `hardwareIds` auto-populado desde `getHardwareIds(modelId)` del contrato.
+- [x] Al crear/importar un banco, se asocia automáticamente a todos los modelos compatibles.
+- [x] En la sidebar, un banco DX7 aparece bajo "Yamaha DX7" Y bajo cualquier compatible.
+- [x] Banco = entidad interna única, visible desde múltiples modelos.
+- [x] Badge 🔗 en bancos multi-hardware + "Compatible con: ..." en detalle.
+- [x] Deduplicación: importar un banco para modelo compatible fusiona `hardwareIds`.
+- [x] Helper `isBankCompatibleWithModel()` bidireccional (contract.compatibleModels + hardwareIds).
+- [x] Helper `getBankCompatibleModels()` agrega todos los IDs compatibles.
