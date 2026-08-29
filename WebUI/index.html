@@ -284,10 +284,101 @@
             padding: 0.75rem 0;
             border-bottom: 1px solid var(--border);
             margin-bottom: 0.75rem;
+            transition: background 0.2s;
         }
-        .bank-header .bank-thumb-lg { height: 80px; object-fit: contain; border-radius: 6px; }
+        .bank-header.drag-over {
+            background: rgba(0, 212, 255, 0.08);
+            border: 2px dashed var(--accent);
+            border-radius: 8px;
+        }
         .bank-header .bank-info h2 { font-size: 1rem; }
         .bank-header .bank-info .bk-meta { font-size: 0.75rem; color: var(--text-secondary); }
+
+        /* MF.5: Bank image wrapper with hover overlay */
+        .bank-thumb-wrapper {
+            position: relative;
+            cursor: pointer;
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .bank-thumb-wrapper .bank-thumb-lg {
+            height: 80px;
+            width: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            display: block;
+        }
+        .bank-thumb-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-size: 0.75rem;
+            color: #fff;
+            border-radius: 8px;
+        }
+        .bank-thumb-wrapper:hover .bank-thumb-overlay {
+            opacity: 1;
+        }
+
+        /* MF.6: Hardware spec sheet */
+        .spec-sheet { max-width: 520px; }
+        .spec-section {
+            margin-bottom: 0.8rem;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .spec-section:last-of-type { border-bottom: none; }
+        .spec-section-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.4rem;
+        }
+        .spec-field {
+            display: flex;
+            gap: 0.6rem;
+            padding: 0.15rem 0;
+            font-size: 0.82rem;
+        }
+        .spec-label {
+            color: var(--text-secondary);
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+        .spec-value {
+            color: var(--text);
+        }
+        .spec-notes {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            font-style: italic;
+            line-height: 1.4;
+        }
+        .spec-links {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .spec-link {
+            font-size: 0.8rem;
+            color: var(--accent);
+            text-decoration: none;
+            padding: 0.2rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            transition: background 0.15s;
+        }
+        .spec-link:hover {
+            background: var(--bg-tertiary);
+        }
 
         /* Action bar */
         .action-bar {

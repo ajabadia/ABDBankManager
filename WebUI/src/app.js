@@ -24,6 +24,8 @@ import { createHexEditor } from './core/hexEditor.js';
 import { computeBankStats } from './core/bankStats.js';
 import { renderModelSelector, initModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
 import { globalSearch, highlightMatch, countByType } from './core/searchEngine.js';
+import { processBankImage, promptBankImageUpload } from './core/bankImage.js';
+import { getHardwareSpec } from './core/hardwareSpecs.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -684,7 +686,7 @@ async function renderBankContent(el) {
   if (!bank) { el.innerHTML = '<p>Banco no encontrado</p>'; return; }
 
   const contract = getModelContract(bank.modelId);
-  const thumbUrl = getBankImage(bank);
+  const thumbUrl = bank.imageUrl || getBankImage(bank);
   const patches = await getPatchesForBank(bank.id);
 
   // MF.18: Show compatible models in header
@@ -694,8 +696,13 @@ async function renderBankContent(el) {
     : '';
 
   el.innerHTML = `
-    <div class="bank-header">
-      <img class="bank-thumb-lg" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
+    <div class="bank-header" id="bank-header-drop">
+      <div class="bank-thumb-wrapper" id="bank-thumb-wrapper">
+        <img class="bank-thumb-lg" id="bank-thumb-img" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
+        <div class="bank-thumb-overlay" id="bank-thumb-overlay">
+          <span>📷 Cambiar imagen</span>
+        </div>
+      </div>
       <div class="bank-info">
         <h2>${escHtml(bank.name)}</h2>
         <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? '🔒 Fábrica' : '👤 Usuario'}</div>
@@ -711,6 +718,8 @@ async function renderBankContent(el) {
       <button class="btn" id="btn-import-bank">📂 Importar .syx</button>
       <button class="btn" id="btn-export-bank">💾 Exportar .syx</button>
       <button class="btn" id="btn-rename-bank">✏️ Renombrar</button>
+      <button class="btn" id="btn-change-image" title="MF.5: Imagen personalizada">📷 Imagen</button>
+      <button class="btn" id="btn-hw-specs" title="MF.6: Ficha técnica del hardware">📋 Specs</button>
       <button class="btn" id="btn-export-csv-bank">📋 CSV</button>
       <button class="btn" id="btn-import-csv-bank">📋 Importar CSV</button>
       ${!bank.isFactory ? '<button class="btn" style="color:var(--error);" id="btn-delete-bank">🗑️ Eliminar</button>' : ''}
@@ -729,6 +738,24 @@ async function renderBankContent(el) {
   el.querySelector('#btn-import-csv-bank').onclick = () => document.getElementById('csv-input').click();
   const delBtn = el.querySelector('#btn-delete-bank');
   if (delBtn) delBtn.onclick = () => confirmDeleteBank(bank);
+
+  // MF.5: Custom bank image
+  el.querySelector('#btn-change-image').onclick = () => handleChangeBankImage(bank);
+  const thumbWrapper = el.querySelector('#bank-thumb-wrapper');
+  thumbWrapper.onclick = () => handleChangeBankImage(bank);
+  // MF.5: Drag & drop image on bank header
+  const headerDrop = el.querySelector('#bank-header-drop');
+  headerDrop.addEventListener('dragover', (e) => { e.preventDefault(); headerDrop.classList.add('drag-over'); });
+  headerDrop.addEventListener('dragleave', () => headerDrop.classList.remove('drag-over'));
+  headerDrop.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    headerDrop.classList.remove('drag-over');
+    const file = e.dataTransfer.files?.[0];
+    if (file) await handleDropBankImage(bank, file);
+  });
+
+  // MF.6: Hardware specs
+  el.querySelector('#btn-hw-specs').onclick = () => showHardwareSpecs(bank.modelId);
 
   // MF.14 Statistics panel
   await renderBankStats(el, patches, contract);
@@ -1394,6 +1421,99 @@ async function confirmDeleteBank(bank) {
     toast('Banco eliminado', 'success');
     hideModal();
   };
+}
+
+// ─── MF.5: Bank custom image ───
+async function handleChangeBankImage(bank) {
+  const result = await promptBankImageUpload();
+  if (!result) return;
+  if (result.error) { toast(result.error, 'error'); return; }
+  await updateBank(bank.id, { imageUrl: result });
+  toast('Imagen del banco actualizada', 'success');
+  renderNav();
+  renderContent();
+}
+
+async function handleDropBankImage(bank, file) {
+  try {
+    const dataUrl = await processBankImage(file);
+    if (!dataUrl) return;
+    await updateBank(bank.id, { imageUrl: dataUrl });
+    toast('Imagen del banco actualizada', 'success');
+    renderNav();
+    renderContent();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ─── MF.6: Hardware specs ───
+function showHardwareSpecs(modelId) {
+  const spec = getHardwareSpec(modelId);
+  const contract = getModelContract(modelId);
+  if (!spec && !contract) { toast('Sin especificaciones para este modelo', 'info'); return; }
+
+  const s = spec || {};
+  const c = contract || {};
+  const links = s.links ? Object.entries(s.links).filter(([, v]) => v) : [];
+
+  const section = (title, content) => content ? `<div class="spec-section"><div class="spec-section-title">${title}</div>${content}</div>` : '';
+  const field = (label, value) => value ? `<div class="spec-field"><span class="spec-label">${label}</span><span class="spec-value">${escHtml(String(value))}</span></div>` : '';
+
+  const basicHtml = [
+    field('Fabricante', s.manufacturer),
+    field('Modelo', s.model),
+    field('Año', s.year),
+    field('Tipo', s.type),
+    field('Síntesis', s.synthesis),
+    field('Polifonía', s.polyphony ? `${s.polyphony} voces` : null),
+    field('Programas', s.voices ? `${s.voices} patches` : c.bankCapacity ? `${c.bankCapacity} patches` : null),
+    field('Osciladores', s.oscillators),
+  ].join('');
+
+  const keyboardHtml = [
+    field('Teclado', s.keyboard),
+    field('Display', s.display),
+  ].join('');
+
+  const connHtml = [
+    field('MIDI', s.midi),
+    field('Audio', s.audio),
+    s.connections ? `<div class="spec-field"><span class="spec-label">Conexiones</span><span class="spec-value">${s.connections.map(c => escHtml(c)).join(', ')}</span></div>` : '',
+  ].join('');
+
+  const featuresHtml = [
+    field('Efectos', s.effects),
+    field('Arpegiador', s.arpeggiator),
+    field('Secuenciador', s.sequencer),
+    field('Mod Matrix', s.modMatrix),
+  ].join('');
+
+  const physicalHtml = [
+    field('Dimensiones', s.dimensions),
+    field('Peso', s.weight),
+    field('Alimentación', s.power),
+    field('Firmware', s.firmware),
+  ].join('');
+
+  const linksHtml = links.length > 0
+    ? links.map(([name, url]) => `<a href="${url}" target="_blank" rel="noopener" class="spec-link">${escHtml(name)} ↗</a>`).join(' ')
+    : '';
+
+  showModal(`
+    <div class="spec-sheet">
+      <h3 style="margin:0 0 0.8rem;">📋 Ficha Técnica — ${escHtml(s.model || c.displayName || modelId)}</h3>
+      ${section('Información básica', basicHtml)}
+      ${section('Teclado y display', keyboardHtml)}
+      ${section('Conexiones', connHtml)}
+      ${section('Características', featuresHtml)}
+      ${section('Físico', physicalHtml)}
+      ${s.notes ? section('Notas', `<div class="spec-notes">${escHtml(s.notes)}</div>`) : ''}
+      ${linksHtml ? section('Enlaces', `<div class="spec-links">${linksHtml}</div>`) : ''}
+      <div class="modal-actions" style="margin-top:1rem;">
+        <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cerrar</button>
+      </div>
+    </div>`);
 }
 
 // ─── Import/Export ───
