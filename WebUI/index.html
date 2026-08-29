@@ -295,6 +295,48 @@
             gap: 0.4rem;
             flex-wrap: wrap;
             padding: 0.5rem 0;
+            align-items: center;
+        }
+
+        /* Send dropdown (MF.18 compatible hardware selector) */
+        .send-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .send-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 220px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 100;
+            margin-top: 4px;
+        }
+        .send-dropdown-menu.open {
+            display: block;
+        }
+        .send-dropdown-item {
+            padding: 0.5rem 0.8rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--text);
+            transition: background 0.15s;
+        }
+        .send-dropdown-item:first-child {
+            border-radius: 8px 8px 0 0;
+        }
+        .send-dropdown-item:last-child {
+            border-radius: 0 0 8px 8px;
+        }
+        .send-dropdown-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .send-dropdown-item .active-dot {
+            color: var(--success);
         }
 
         /* Patch list in content */

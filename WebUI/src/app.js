@@ -704,7 +704,10 @@ async function renderBankContent(el) {
     </div>
     <div class="action-bar">
       <button class="btn" id="btn-fetch-bank">📥 Fetch</button>
-      <button class="btn" id="btn-send-bank">📤 Enviar banco</button>
+      <div class="send-dropdown" id="send-dropdown">
+        <button class="btn btn-primary" id="btn-send-bank">📤 Enviar banco</button>
+        <div class="send-dropdown-menu" id="send-dropdown-menu"></div>
+      </div>
       <button class="btn" id="btn-import-bank">📂 Importar .syx</button>
       <button class="btn" id="btn-export-bank">💾 Exportar .syx</button>
       <button class="btn" id="btn-rename-bank">✏️ Renombrar</button>
@@ -717,7 +720,8 @@ async function renderBankContent(el) {
 
   // Action handlers
   el.querySelector('#btn-fetch-bank').onclick = () => handleMidiFetch();
-  el.querySelector('#btn-send-bank').onclick = () => handleMidiSendBank();
+  el.querySelector('#btn-send-bank').onclick = () => toggleSendDropdown(bank);
+  renderSendDropdownMenu(bank);
   el.querySelector('#btn-import-bank').onclick = () => document.getElementById('file-input').click();
   el.querySelector('#btn-export-bank').onclick = () => handleExport();
   el.querySelector('#btn-rename-bank').onclick = () => promptRenameBank(bank);
@@ -1197,14 +1201,61 @@ async function handleMidiFetch() {
   } catch (error) { toast(error.message, 'error'); }
 }
 
-async function handleMidiSendBank() {
+// ─── Send dropdown (MF.18 compatible hardware selector) ───
+function renderSendDropdownMenu(bank) {
+  const menu = document.getElementById('send-dropdown-menu');
+  if (!menu) return;
+  const compatModels = getBankCompatibleModels(bank);
+  menu.innerHTML = compatModels.map(id => {
+    const c = getModelContract(id);
+    if (!c) return '';
+    const isPrimary = id === bank.modelId;
+    const label = isPrimary ? `${c.displayName} (principal)` : c.displayName;
+    const icon = id === activeMidiModelId ? ' ●' : '';
+    return `<div class="send-dropdown-item" data-model-id="${id}">${escHtml(label)}${icon}</div>`;
+  }).join('');
+
+  menu.querySelectorAll('.send-dropdown-item').forEach(item => {
+    item.onclick = (e) => {
+      e.stopPropagation();
+      menu.classList.remove('open');
+      handleMidiSendBank(item.dataset.modelId);
+    };
+  });
+}
+
+function toggleSendDropdown(bank) {
+  const menu = document.getElementById('send-dropdown-menu');
+  if (!menu) return;
+  const compatModels = getBankCompatibleModels(bank);
+  if (compatModels.length <= 1) {
+    // Only one model — send directly
+    handleMidiSendBank(bank.modelId);
+    return;
+  }
+  menu.classList.toggle('open');
+  // Close on outside click
+  const close = (e) => {
+    if (!menu.contains(e.target) && !e.target.closest('#btn-send-bank')) {
+      menu.classList.remove('open');
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+async function handleMidiSendBank(targetModelId = null) {
   if (!activeMidiTransport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
   if (!selectedBankId) { toast('Selecciona un banco', 'error'); return; }
   const bank = await getBank(selectedBankId);
-  const contract = getModelContract(bank.modelId);
+  // MF.18: Use target model's contract if specified (compatible hardware), otherwise bank's own
+  const sendModelId = targetModelId || bank.modelId;
+  const contract = getModelContract(sendModelId);
+  if (!contract) { toast(`Contrato no encontrado para ${sendModelId}`, 'error'); return; }
   const patches = await getPatchesForBank(selectedBankId);
   if (patches.length === 0) { toast('Banco vacío', 'error'); return; }
 
+  const targetName = contract.displayName;
   try {
     const channel = contract.midi?.defaultChannel ?? 1;
     if (activeMidiTransport.capabilities?.bulk) {
@@ -1219,7 +1270,7 @@ async function handleMidiSendBank() {
         if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
       }
     }
-    toast(`Banco enviado (${patches.length} patches)`, 'success');
+    toast(`Banco enviado a ${targetName} (${patches.length} patches)`, 'success');
   } catch (error) { toast(error.message, 'error'); }
 }
 
