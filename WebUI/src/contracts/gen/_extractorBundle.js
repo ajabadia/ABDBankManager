@@ -211,14 +211,14 @@ var casioCz1000Contract = {
   ...casioCzContract,
   modelId: "casio-cz1000",
   displayName: "Casio CZ-1000",
-  thumbnail: "casio-cz1000.webp",
+  thumbnail: "casio-cz101.jpg",
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 19 }
 };
 var casioCz5000Contract = {
   ...casioCzContract,
   modelId: "casio-cz5000",
   displayName: "Casio CZ-5000",
-  thumbnail: "casio-cz5000.webp",
+  thumbnail: "casio-cz101.jpg",
   bankCapacity: 32,
   banksCount: 2,
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 20 }
@@ -227,7 +227,7 @@ var casioCz1Contract = {
   ...casioCzContract,
   modelId: "casio-cz1",
   displayName: "Casio CZ-1",
-  thumbnail: "casio-cz1.webp",
+  thumbnail: "casio-cz101.jpg",
   bankCapacity: 64,
   banksCount: 4,
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 21 }
@@ -379,7 +379,7 @@ var rolandJuno60Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-juno60",
   displayName: "Roland Juno-60",
-  thumbnail: "roland-juno60.webp",
+  thumbnail: "roland-juno106.jpg",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 61
@@ -389,7 +389,7 @@ var rolandJuno6Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-juno6",
   displayName: "Roland Juno-6",
-  thumbnail: "roland-juno6.webp",
+  thumbnail: "roland-juno106.jpg",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 60
@@ -399,7 +399,7 @@ var rolandHs60Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-hs60",
   displayName: "Roland HS-60",
-  thumbnail: "roland-hs60.webp",
+  thumbnail: "roland-juno106.jpg",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 62
@@ -595,7 +595,7 @@ var korgProphecyContract = {
   ...korgMs2000Contract,
   modelId: "korg-prophecy",
   displayName: "Korg Prophecy",
-  thumbnail: "korg-prophecy.webp",
+  thumbnail: "korg-ms2000.jpg",
   patchDataSize: 256,
   // Prophecy has a larger program data size
   extractPatchName(data2) {
@@ -676,7 +676,7 @@ var behringerDm12Contract = {
   displayName: "Behringer DeepMind 12",
   manufacturer: "Behringer",
   icon: "behringer-logo.svg",
-  thumbnail: "behringer-deepmind12.webp",
+  thumbnail: "behringer-deepmind12.svg",
   bankCapacity: 1024,
   banksCount: 8,
   programsPerBank: 128,
@@ -840,7 +840,7 @@ var behringerPro800Contract = {
   displayName: "Behringer Pro-800",
   manufacturer: "Behringer",
   icon: "behringer-logo.svg",
-  thumbnail: "behringer-pro800.webp",
+  thumbnail: "behringer-pro800.svg",
   bankCapacity: PRO800_BANK_CAPACITY,
   banksCount: PRO800_BANKS_COUNT,
   programsPerBank: PRO800_PROGRAMS_PER_BANK,

@@ -66,7 +66,7 @@ const behringerDm12Contract: ModelContract = {
   displayName: 'Behringer DeepMind 12',
   manufacturer: 'Behringer',
   icon: 'behringer-logo.svg',
-  thumbnail: 'behringer-deepmind12.webp',
+  thumbnail: 'behringer-deepmind12.svg',
   bankCapacity: 1024,
   banksCount: 8,
   programsPerBank: 128,

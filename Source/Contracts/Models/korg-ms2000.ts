@@ -235,7 +235,7 @@ export const korgProphecyContract: ModelContract = {
   ...korgMs2000Contract,
   modelId: 'korg-prophecy',
   displayName: 'Korg Prophecy',
-  thumbnail: 'korg-prophecy.webp',
+  thumbnail: 'korg-ms2000.jpg',
   patchDataSize: 256, // Prophecy has a larger program data size
   extractPatchName(data: Uint8Array): string {
     const nameOffset = 0x1C;

@@ -201,7 +201,7 @@ export const casioCz1000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1000',
   displayName: 'Casio CZ-1000',
-  thumbnail: 'casio-cz1000.webp',
+  thumbnail: 'casio-cz101.jpg',
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x13 }
 };
 
@@ -209,7 +209,7 @@ export const casioCz5000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz5000',
   displayName: 'Casio CZ-5000',
-  thumbnail: 'casio-cz5000.webp',
+  thumbnail: 'casio-cz101.jpg',
   bankCapacity: 32,
   banksCount: 2,
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x14 }
@@ -219,7 +219,7 @@ export const casioCz1Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1',
   displayName: 'Casio CZ-1',
-  thumbnail: 'casio-cz1.webp',
+  thumbnail: 'casio-cz101.jpg',
   bankCapacity: 64,
   banksCount: 4,
   patchDataSize: 288,

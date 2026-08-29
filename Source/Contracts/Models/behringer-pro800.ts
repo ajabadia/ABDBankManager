@@ -132,7 +132,7 @@ const behringerPro800Contract: ModelContract = {
   displayName: 'Behringer Pro-800',
   manufacturer: 'Behringer',
   icon: 'behringer-logo.svg',
-  thumbnail: 'behringer-pro800.webp',
+  thumbnail: 'behringer-pro800.svg',
 
   bankCapacity: PRO800_BANK_CAPACITY,
   banksCount: PRO800_BANKS_COUNT,

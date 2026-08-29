@@ -174,7 +174,7 @@ export const rolandJuno60Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-juno60',
   displayName: 'Roland Juno-60',
-  thumbnail: 'roland-juno60.webp',
+  thumbnail: 'roland-juno106.jpg',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3D
@@ -186,7 +186,7 @@ export const rolandJuno6Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-juno6',
   displayName: 'Roland Juno-6',
-  thumbnail: 'roland-juno6.webp',
+  thumbnail: 'roland-juno106.jpg',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3C
@@ -198,7 +198,7 @@ export const rolandHs60Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-hs60',
   displayName: 'Roland HS-60',
-  thumbnail: 'roland-hs60.webp',
+  thumbnail: 'roland-juno106.jpg',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3E
