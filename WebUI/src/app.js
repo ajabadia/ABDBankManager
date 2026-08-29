@@ -24,6 +24,55 @@ let midiAccess = null;
 let activeMidiTransport = null;
 let activeMidiModelId = null;
 
+// ─── MF.16 Backup Reminder ───
+const BACKUP_THRESHOLD_PATCHES = 20;  // show reminder if > N patches
+const BACKUP_THRESHOLD_DAYS = 7;       // and no export in N days
+const BACKUP_DISMISS_KEY = 'abd-backup-dismiss-ts';
+
+function getLastExportTimestamp() {
+  try { return parseInt(localStorage.getItem('abd-last-export-ts') || '0', 10); }
+  catch { return 0; }
+}
+function recordExport() {
+  localStorage.setItem('abd-last-export-ts', String(Date.now()));
+  checkBackupReminder();
+}
+function dismissBackupReminder() {
+  localStorage.setItem(BACKUP_DISMISS_KEY, String(Date.now()));
+  const el = document.getElementById('backup-reminder');
+  if (el) el.remove();
+}
+async function checkBackupReminder() {
+  const banner = document.getElementById('backup-reminder');
+  if (banner) banner.remove();
+
+  const stats = await getDatabaseStats();
+  if (stats.patchCount <= BACKUP_THRESHOLD_PATCHES) return;
+
+  const lastExport = getLastExportTimestamp();
+  const daysSince = lastExport ? (Date.now() - lastExport) / (1000 * 60 * 60 * 24) : Infinity;
+  if (daysSince < BACKUP_THRESHOLD_DAYS) return;
+
+  const dismissed = parseInt(localStorage.getItem(BACKUP_DISMISS_KEY) || '0', 10);
+  if (dismissed && (Date.now() - dismissed) < 86400000) return; // dismissed < 24h ago
+
+  const header = document.getElementById('app-header');
+  if (!header) return;
+  const daysText = lastExport ? `Hace ${Math.floor(daysSince)} días` : 'Nunca';
+  const el = document.createElement('div');
+  el.id = 'backup-reminder';
+  el.className = 'backup-reminder';
+  el.innerHTML = `
+    <span class="backup-reminder-icon">⚠️</span>
+    <span class="backup-reminder-text">Tienes <strong>${stats.patchCount} patches</strong> sin backup reciente (último: ${daysText}).</span>
+    <button class="btn btn-sm btn-primary" id="backup-reminder-export">💾 Exportar librería</button>
+    <button class="btn btn-sm" id="backup-reminder-dismiss">Ocultar 24h</button>`;
+  header.after(el);
+
+  el.querySelector('#backup-reminder-export').onclick = () => handleExportLibrary();
+  el.querySelector('#backup-reminder-dismiss').onclick = dismissBackupReminder;
+}
+
 // ─── Navigation state ───
 let navLevel = 'manufacturers'; // 'manufacturers' | 'models' | 'banks' | 'patches'
 let selectedManufacturer = null;
@@ -60,6 +109,9 @@ async function init() {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', handleKeyboard);
+
+  // MF.16 Backup reminder
+  await checkBackupReminder();
 
   console.log('[ABD Bank Manager] Ready');
 }
@@ -968,8 +1020,31 @@ async function handleExport() {
   if (!selectedBankId) { toast('Selecciona un banco', 'error'); return; }
   const { bank, patches } = await exportBank(selectedBankId);
   const result = await exportToFile(bank, patches, 'abdbank');
-  if (result.success) toast(`Exportado: ${result.filename}`, 'success');
+  if (result.success) { toast(`Exportado: ${result.filename}`, 'success'); recordExport(); }
   else toast(result.error, 'error');
+}
+
+async function handleExportLibrary() {
+  try {
+    const allBanks = await getAllBanks();
+    const banksData = [];
+    for (const bank of allBanks) {
+      const patches = await getPatchesForBank(bank.id);
+      const contract = getModelContract(bank.modelId);
+      const exportPatches = patches.map(p => ({
+        ...p,
+        rawData: p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData),
+        modelId: bank.modelId,
+        bankCapacity: contract?.bankCapacity || 32,
+        manufacturer: bank.manufacturer || contract?.manufacturer || ''
+      }));
+      banksData.push({ bank, patches: exportPatches });
+    }
+    if (banksData.length === 0) { toast('No hay bancos para exportar', 'error'); return; }
+    const result = await exportLibraryToFile(banksData);
+    if (result.success) { toast(`Librería exportada: ${result.filename} (${result.bankCount} bancos)`, 'success'); recordExport(); }
+    else toast(result.error, 'error');
+  } catch (err) { toast(`Error: ${err.message}`, 'error'); }
 }
 
 async function handleExportCsv() {

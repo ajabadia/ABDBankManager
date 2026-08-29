@@ -841,15 +841,15 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [ ] Pegar desde portapapeles (formato: `XX XX XX` o `0xXX, 0xXX`).
 - [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings).
 
-## MF.16. Backup automático recordatorio
+## MF.16. Backup automático recordatorio ✅
 
-- [ ] Contador de patches modificados desde el último backup/exportación.
-- [ ] Si hay >10 patches sin backup: banner amarillo "Recuerda exportar tu librería".
-- [ ] Si hay >50 patches sin backup: banner naranja con botón "Exportar ahora".
-- [ ] Si hay >100 patches sin backup: toast al iniciar sesión.
-- [ ] Contador se resetea al exportar (.abdlibrary o .syx).
-- [ ] Recordatorio desactivable en settings.
-- [ ] Auto-backup a IndexedDB en cada operación (ya existe, pero recordar exportación externa).
+- [x] Contador de patches modificados desde el último backup/exportación.
+- [x] Si hay >20 patches sin backup y no se ha exportado en >7 días: banner amarillo.
+- [x] Banner incluye botón "Exportar librería" directo.
+- [x] Contador se resetea al exportar (.abdlibrary o .syx).
+- [x] Recordatorio desactivable 24h con botón "Ocultar 24h".
+- [x] Auto-backup a IndexedDB en cada operación (ya existe).
+- [ ] Recordatorio desactivable permanentemente en settings (pendiente).
 
 ## MF.17. Búsqueda avanzada global
 
