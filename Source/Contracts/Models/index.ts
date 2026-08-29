@@ -38,7 +38,12 @@ export function getModelContract(modelId: string) {
 
 export function getCompatibleModels(modelId: string): string[] {
   const contract = modelContractMap.get(modelId);
-  return contract?.compatibleModels || [];
+  const compat = new Set(contract?.compatibleModels || []);
+  // Reverse: models whose compatibleModels list this modelId
+  for (const [id, c] of modelContractMap) {
+    if (id !== modelId && c.compatibleModels?.includes(modelId)) compat.add(id);
+  }
+  return Array.from(compat);
 }
 
 /**
@@ -49,7 +54,16 @@ export function getCompatibleModels(modelId: string): string[] {
 export function getHardwareIds(modelId: string): string[] {
   const contract = modelContractMap.get(modelId);
   if (!contract) return [modelId];
-  return [modelId, ...(contract.compatibleModels || [])];
+  const ids = new Set<string>([modelId]);
+  // Forward: models listed in this contract's compatibleModels
+  if (contract.compatibleModels) {
+    for (const id of contract.compatibleModels) ids.add(id);
+  }
+  // Reverse: models whose compatibleModels include this modelId
+  for (const [id, c] of modelContractMap) {
+    if (id !== modelId && c.compatibleModels?.includes(modelId)) ids.add(id);
+  }
+  return Array.from(ids);
 }
 
 export function getContractsForManufacturer(manufacturer: string) {

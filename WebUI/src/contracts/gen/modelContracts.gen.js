@@ -1333,12 +1333,26 @@ function getModelContract(modelId) {
 }
 function getCompatibleModels(modelId) {
   const contract = modelContractMap.get(modelId);
-  return contract?.compatibleModels || [];
+  const compat = new Set(contract?.compatibleModels || []);
+  // Also include models whose compatibleModels list this modelId (reverse)
+  for (const [id, c] of modelContractMap) {
+    if (id !== modelId && c.compatibleModels?.includes(modelId)) compat.add(id);
+  }
+  return Array.from(compat);
 }
 function getHardwareIds(modelId) {
   const contract = modelContractMap.get(modelId);
   if (!contract) return [modelId];
-  return [modelId, ...contract.compatibleModels || []];
+  const ids = new Set([modelId]);
+  // Forward: models listed in this contract's compatibleModels
+  if (contract.compatibleModels) {
+    for (const id of contract.compatibleModels) ids.add(id);
+  }
+  // Reverse: models whose compatibleModels include this modelId
+  for (const [id, c] of modelContractMap) {
+    if (id !== modelId && c.compatibleModels?.includes(modelId)) ids.add(id);
+  }
+  return Array.from(ids);
 }
 function getContractsForManufacturer(manufacturer) {
   return allModelContracts.filter((c) => c.manufacturer === manufacturer);
