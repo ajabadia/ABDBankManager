@@ -5,8 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# JUCE targets are available from parent scope via add_subdirectory(GITS/JUCE)
-
 # --- ABDBankManagerCore Library ---
 add_library(ABDBankManagerCore STATIC
     ABDBankManagerCore.cpp
@@ -28,14 +26,12 @@ target_link_libraries(ABDBankManagerCore PUBLIC
 )
 
 # --- Version & Registry Generation Dependencies ---
-add_dependencies(ABDBankManagerCore GenerateAll)
+if(TARGET GenerateAll)
+    add_dependencies(ABDBankManagerCore GenerateAll)
+endif()
 
-# --- Installation ---
-install(TARGETS ABDBankManagerCore
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
-)
+# Installation of this internal static target is intentionally omitted; the
+# project links it directly into the JUCE plugin and test targets.
 
 if(BUILD_TESTING)
     add_executable(ABDBankManagerCoreTests
@@ -44,8 +40,3 @@ if(BUILD_TESTING)
     target_link_libraries(ABDBankManagerCoreTests PRIVATE ABDBankManagerCore)
     add_test(NAME ABDBankManagerCoreTests COMMAND ABDBankManagerCoreTests)
 endif()
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/Source/State/ParameterRegistry.gen.h
-    DESTINATION include/ABDBankManager
-)

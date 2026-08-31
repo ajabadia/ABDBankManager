@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# JUCE is required for ABDBankManagerCore
+find_dependency(juce REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ABDBankManagerTargets.cmake")
+
+# Provide version variables
+set(ABDBankManager_VERSION @ABDBankManagerCore_VERSION@)
+set(ABDBankManagerCore_VERSION @ABDBankManagerCore_VERSION@)
