@@ -1,21 +1,26 @@
 ﻿# Guía Técnica de Integración de ABDBankManager en Sintetizadores de la Suite
 
-**Versión:** 1.0.0  
-**Fecha:** 31 de Agosto de 2026  
+**Versión:** 1.3.0  
+**Fecha:** 31 de Agosto de 2026
 **Autor:** Antigravity / DeepMind Pair Programming  
 **Repositorio Principal:** `D:\desarrollos\ABDSynths\ABDBankManager`
 
 ---
-
+ 
 ## 1. Filosofía Arquitectónica y Patrón "Zero Forks"
-
-**ABDBankManager** es la **fuente de la verdad (SSOT)** para la gestión de bancos, librerías, inspección Hex y volcados SysEx de toda la suite de sintetizadores ABD (`ABDMS2000`, `ABDCZ101`, `ABDJUNiO601`, `ABDEep`, `ABDPro008`, etc.).
-
+ 
+**ABDBankManager** es la **fuente de la verdad única (SSOT)** para la gestión de bancos, librerías, inspección Hex y volcados SysEx de toda la suite de sintetizadores ABD (`ABDMS2000`, `ABDCZ101`, `ABDJUNiO601`, `ABDEep`, `ABDPro008`, etc.).
+ 
 ### Principios Fundamentales:
-1. **100% Gobernado por Contrato (`ModelContract`):** El motor no tiene ningún valor *hardcodeado*. Toda la topología (capacidad de banco, número de bancos lógicos, tamaño de patch en bytes, longitud de nombre, categorías y algoritmos SysEx) se obtiene dinámicamente del contrato del sintetizador solicitado.
-2. **Sincronización Pre-Build (Patrón ABDKeyboard):** Los sintetizadores consumidores **no bifurcan (fork) el código**. Mantienen un script de sincronización (`npm run sync:bankmanager`) que copia los contratos y componentes limpios desde este repositorio antes de compilar.
-3. **Theming Dinámico con CSS Custom Properties:** El componente visual (`BankManagerModal`) hereda automáticamente los colores, bordes y fuentes del sintetizador anfitrión y de sus skins activas.
-
+1. **100% Gobernado por Contrato (`ModelContract`):** El motor no tiene ningún valor *hardcodeado*. Toda la topología (capacidad de banco, número de sub-bancos, tamaño de patch en bytes, longitud de nombre, categorías y algoritmos SysEx) se obtiene dinámicamente del contrato del sintetizador solicitado.
+2. **Doble Modo Operativo (Plugin Host vs Standalone Hardware):**
+   - **Modo Plugin Host (Embebido):** La UI detecta que está en un plugin (vía `?model=<modelId>` o puente `window.parent.__synthBridge`). Desactiva la necesidad de puertos Web MIDI externos, muestra el indicador verde `[ Plugin DSP ● ]`, y conecta las acciones de captura y envío directamente con la memoria RAM activa del motor C++ del plugin.
+   - **Modo Standalone (Librarian Físico):** Se comunica vía Web MIDI con hardware físico externo conectado a los puertos MIDI del ordenador.
+3. **Persistencia del Banco Activo en el DAW (36 KB Blob Base64):** El plugin anfitrión serializa el estado completo de los programas activos dentro del chunk de estado del proyecto de DAW (`APVTS`), asegurando que al mover el proyecto de equipo el sonido no dependa de librerías locales externas.
+4. **Sincronización Pre-Build Selectiva (Assets Ligeros para JUCE):** Los sintetizadores consumidores mantienen un script (`npm run sync:bankmanager`) que copia los módulos y la WebUI limpia, pero filtrando mediante `ALLOWED_IMAGES` únicamente las imágenes correspondientes a su modelo y marca (evitando engordar el binario compilado VST3/AU con imágenes de otros sintetizadores).
+5. **Theming Dinámico Universal:** La WebUI hereda automáticamente los colores, bordes y fuentes del sintetizador anfitrión y de sus skins activas mediante variables CSS estándar.
+6. **Compatibilidad de ABI (Binarios Precompilados vs Código Fuente):** En JUCE/C++20, enlazar contra binarios `.lib`/`.a` precompilados puede causar incompatibilidades de ABI/Runtime (MSVC `/MD` vs `/MT`, versiones de toolset, flags de optimización). **La integración debe soportar DOS vías**: (A) Compilación desde fuentes vía `add_subdirectory`/`FetchContent` (desarrollo local, flags idénticos al plugin) y (B) `find_package` con binarios precompilados (solo builds de CI/CD oficiales).
+ 
 ---
 
 ## 2. Matriz de Contratos Disponibles
@@ -29,197 +34,202 @@
 | `behringer-dm12` | Behringer DeepMind 12 | 1024 | 8 (A a H) | 242 B | 16 car. | 7-to-8 packing, `0x00 0x20 0x32` |
 | `behringer-pro800` | Behringer Pro-800 | 400 | 4 (0 a 3) | 100 B | 0 car. | CC-based dump, `0x00 0x20 0x32` |
 | `yamaha-dx7` | Yamaha DX7 | 32 | 1 | 128 B | 10 car. | 7-to-8 packing, `0x43` (Yamaha) |
-
+ 
 ---
-
-## 3. Receta de Integración Paso a Paso en un Sintetizador
-
-Para integrar el Bank Manager en cualquier sintetizador (`ABDCZ101`, `ABDJUNiO601`, `ABDEep`, etc.), se siguen 3 pasos estandarizados:
-
-```mermaid
-graph LR
-    subgraph Paso 1 [Paso 1: Sincronizacion]
-        Sync[sync_bankmanager.js] --> Copy[WebUI/src/components/bank/]
-    end
-
-    subgraph Paso 2 [Paso 2: C++ Bridge]
-        Cpp[BridgeActions.cpp] --> APVTS[APVTS ↔ rawData 288/128/18B]
-    end
-
-    subgraph Paso 3 [Paso 3: WebUI Frontend]
-        Index[index.html + CSS] --> Modal[BankManagerModal Instantiation]
-    end
-
-    Sync --> Cpp --> Index
+ 
+## 3. Integración CMake — Doble Vía (Fuente vs Binario Precompilado)
+ 
+**⚠️ Crítico para JUCE/C++20:** Para evitar incompatibilidades de ABI/Runtime (MSVC `/MD` vs `/MT`, toolset VS, flags de optimización), la librería **debe ofrecer dos vías de enlace**. El consumidor elige según contexto:
+ 
+### Opción A — Compilación desde Fuentes (Desarrollo Local, Recomendada)
+ 
+```cmake
+# En CMakeLists.txt del plugin consumidor
+include(FetchContent)
+FetchContent_Declare(
+  ABDBankManager
+  GIT_REPOSITORY https://github.com/ajabadia/ABDBankManager.git
+  GIT_TAG        v0.1.0-standalone   # o main para desarrollo
+)
+FetchContent_MakeAvailable(ABDBankManager)
+ 
+# Link automático con los mismos flags del plugin consumidor
+target_link_libraries(${PROJECT_NAME} PRIVATE ABDBankManager::ABDBankManagerCore)
 ```
-
+ 
+> **Ventaja:** El plugin y ABDBankManagerCore se compilan con **exactamente los mismos flags** (`/MD`, `/permissive-`, `/std:c++20`, etc.). Cero riesgo de ABI mismatch.
+ 
+### Opción B — Binario Precompilado (Solo CI/CD Oficiales)
+ 
+```cmake
+# Solo en pipelines de CI/CD donde ABDBankManager esté instalado en el sistema
+find_package(ABDBankManager 0.1 REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE ABDBankManager::ABDBankManagerCore)
+```
+ 
+> **Restricción:** Solo usar si el binario `.lib`/`.a` fue compilado con **los mismos flags** que el plugin consumidor (mismo toolset, misma CRT, misma arquitectura). En caso de duda, **usa Opción A**.
+ 
+### Headers Exportados (Comunes a ambas vías)
+ 
+```cpp
+#include <ABDBankManager/BankManagerCore.h>
+#include <ABDBankManager/ParameterRegistry.gen.h>
+#include <ABDBankManager/BuildVersion.h>
+```
+ 
 ---
-
-### PASO 1: Script de Sincronización en el Sintetizador Consumidor
-
-Crea el archivo `Scripts/sync_bankmanager.js` en el proyecto del sintetizador:
-
+ 
+## 5. Integración Paso a Paso en un Sintetizador Consumidor
+ 
+### PASO 1: Sincronización Selectiva — Script Local Obligatorio (`Scripts/sync_bankmanager.js`)
+ 
+**⚠️ Crítico:** El script **debe residir en el proyecto del sintetizador consumidor** (no usar el genérico del origen sin filtrado). Si se ejecuta el script sin filtrado, se copiarán **todas las 50+ imágenes** de todos los sintetizadores (Juno, DX7, CZ, DeepMind, MS2000), engordando innecesariamente el binario JUCE/VST3 del plugin.
+ 
+Crea `Scripts/sync_bankmanager.js` en **tu proyecto** configurando `ALLOWED_IMAGES` solo con tus assets:
+ 
 ```javascript
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
+ 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+ 
 const SOURCE_ROOT = path.resolve(__dirname, '../../ABDBankManager');
 const TARGET_DIR = path.resolve(__dirname, '../WebUI/src/components/bank');
-
-const COPY_MANIFEST = [
-  // Contratos y adaptadores
-  { src: 'Source/Contracts/ModelContract.ts', dest: 'contracts/ModelContract.ts' },
-  { src: 'Source/Contracts/Models/index.ts', dest: 'contracts/models_index.ts' },
-  { src: 'WebUI/src/contracts/modelContracts.js', dest: 'contracts/modelContracts.js' },
-  { src: 'WebUI/src/contracts/gen/modelContracts.gen.js', dest: 'contracts/gen/modelContracts.gen.js' },
-  
-  // Motores Core
-  { src: 'WebUI/src/core/libraryOperations.js', dest: 'core/libraryOperations.js' },
-  { src: 'WebUI/src/core/sysexParser.js', dest: 'core/sysexParser.js' },
-  { src: 'WebUI/src/core/hexDump.js', dest: 'core/hexDump.js' },
-  { src: 'WebUI/src/core/fingerprint.js', dest: 'core/fingerprint.js' },
-  { src: 'WebUI/src/core/exportEngine.js', dest: 'core/exportEngine.js' },
-  
-  // Componente UI
-  { src: 'WebUI/src/components/BankManagerModal.js', dest: 'BankManagerModal.js' },
-  { src: 'WebUI/src/components/BankManagerModal.css', dest: 'BankManagerModal.css' },
+ 
+// ⚠️ Configuración ESTRICTA de imágenes para ESTE sintetizador
+const ALLOWED_IMAGES = [
+  'korg-logo.svg',               // Reemplazar con el logo del fabricante del sinte
+  'korg-ms2000.webp',           // Miniatura del modelo principal
+  'korg-ms2000r.webp',          // Variantes de rack / compatibles
+  'korg-microkorg.webp',
+  'placeholder-synth.svg',      // Placeholders comunes requeridos
+  'placeholder-manufacturer.svg',
+  'placeholder-bank.svg'
 ];
-
-function sync() {
-  console.log('🔄 Sincronizando ABDBankManager...');
-  for (const item of COPY_MANIFEST) {
-    const src = path.join(SOURCE_ROOT, item.src);
-    const dest = path.join(TARGET_DIR, item.dest);
-    if (fs.existsSync(src)) {
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(src, dest);
-      console.log(`  ✓ ${item.src} -> ${item.dest}`);
+ 
+function copyRecursiveSync(src, dest, ignoreDirs = ['tests', 'node_modules', '.git']) {
+  if (!fs.existsSync(src)) return;
+  const stats = fs.statSync(src);
+  if (stats.isDirectory()) {
+    const base = path.basename(src);
+    if (ignoreDirs.includes(base)) return;
+    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+    for (const child of fs.readdirSync(src)) {
+      copyRecursiveSync(path.join(src, child), path.join(dest, child), ignoreDirs);
     }
+  } else {
+    const filename = path.basename(src);
+    const inModelsDir = src.includes('vendor') && src.includes('images') && src.includes('models');
+    if (inModelsDir && !ALLOWED_IMAGES.includes(filename) && (filename.endsWith('.webp') || filename.endsWith('.svg'))) {
+      return; // 🛑 Evita copiar imágenes de otros sintetizadores para reducir el binario JUCE
+    }
+ 
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
   }
-  console.log('✅ Sincronización completada.');
 }
-
-sync();
+ 
+export function syncBankManager() {
+  console.log('🔄 Sincronizando selectivamente ABDBankManager -> Plugin...');
+  const webUiSrc = path.join(SOURCE_ROOT, 'WebUI');
+  copyRecursiveSync(webUiSrc, TARGET_DIR);
+  console.log('✅ Sincronización finalizada.');
+}
+ 
+syncBankManager();
 ```
-
-Añade en su `package.json`:
+ 
+En tu `package.json`:
 ```json
 "scripts": {
   "sync:bankmanager": "node Scripts/sync_bankmanager.js"
 }
 ```
-
+ 
+> **Resultado:** Solo tus logos y miniaturas entran en el binario VST3/AU final.
+ 
 ---
+ 
+### PASO 2: Persistencia del Banco Completo en Estado DAW (C++)
 
-### PASO 2: Endpoints en C++ (JUCE / BridgeActions.cpp)
+Para que el proyecto del DAW mantenga los 128 (o N) patches activos sin depender del disco local:
 
-En el archivo `Source/Plugin/BridgeActions.cpp` (o equivalente del puente WebBrowser en cada sinte), implementa los dos métodos de intercambio binario:
-
+1. En `SysExManager.h`:
 ```cpp
-// 1. Extraer el sonido actual de los knobs / APVTS a un buffer binario
-else if (action == "getRawProgramData")
+std::vector<uint8_t> getAllPrograms() const;
+void setAllPrograms(const std::vector<uint8_t>& data);
+```
+
+2. En `PluginProcessor.cpp`:
+```cpp
+void AudioPluginAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::String name = message.getProperty("name", "Active Patch").toString();
-    auto rawBytes = processor_.extractPatchDataFromAPVTS(name); // Retorna std::vector<uint8_t> o std::array
-    
-    juce::MemoryBlock mb(rawBytes.data(), rawBytes.size());
-    juce::DynamicObject::Ptr resObj = new juce::DynamicObject();
-    resObj->setProperty("dataBase64", mb.toBase64Encoding());
-    resObj->setProperty("name", name);
-    resObj->setProperty("size", static_cast<int>(rawBytes.size()));
-    sendEventToJs("rawProgramDataResponse", juce::var(resObj.get()));
+    // Serializar el banco completo de memoria activa en Base64 en el APVTS
+    auto bankBytes = sysexManager.getAllPrograms();
+    juce::String bankBlobB64 = juce::Base64::toBase64(bankBytes.data(), bankBytes.size());
+    apvts.state.setProperty("bankDataBlob", bankBlobB64, nullptr);
+
+    std::unique_ptr<juce::XmlElement> xml (apvts.state.createXml());
+    copyXmlToBinary (*xml, destData);
 }
 
-// 2. Inyectar un buffer binario recibido del Bank Manager en el APVTS (Audición)
-else if (action == "setRawProgramData")
+void AudioPluginAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    auto b64 = message.getProperty("dataBase64", "").toString();
-    juce::MemoryOutputStream mem;
-    if (juce::Base64::convertFromBase64(mem, b64))
+    std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
+    if (xmlState != nullptr && xmlState->hasTagName (apvts.state.getType()))
     {
-        processor_.applyPatchDataToAPVTS(static_cast<const uint8_t*>(mem.getData()), mem.getDataSize());
-        sendFullParamSync(); // Notifica a los sliders y perillas del WebUI
+        apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+        if (apvts.state.hasProperty("bankDataBlob"))
+        {
+            juce::String b64 = apvts.state.getProperty("bankDataBlob").toString();
+            juce::MemoryOutputStream mos;
+            if (juce::Base64::convertFromBase64(mos, b64))
+            {
+                auto mb = mos.getMemoryBlock();
+                std::vector<uint8_t> blob(mb.getData(), mb.getData() + mb.getSize());
+                sysexManager.setAllPrograms(blob);
+            }
+        }
     }
 }
 ```
 
 ---
 
-### PASO 3: Integración en el WebUI del Sintetizador
+### PASO 3: Frontend y Contenedor Modal (`app.js`)
 
-#### A. En `WebUI/index.html`:
-```html
-<!-- En <head> -->
-<link rel="stylesheet" href="src/components/bank/BankManagerModal.css">
+Instancia el modal pasando la URL con el parámetro del modelo:
 
-<!-- En la barra superior / menú -->
-<button id="btn-open-bank-manager" class="nav-btn" title="Abrir Bank Manager">
-  BANK MGR
-</button>
-```
-
-#### B. En `WebUI/src/app.js`:
 ```javascript
-import { BankManagerModal } from './components/bank/BankManagerModal.js';
-import { bridge } from './bridge/bridgeCore.js';
+import { BankManagerModal } from './components/bank/src/components/BankManagerModal.js';
 
-let bankManagerModal = null;
+const bankManagerModal = new BankManagerModal({
+  iframeSrc: 'src/components/bank/index.html?model=korg-ms2000', // o ?model=casio-cz101, etc.
+  synthBridge: bridge
+});
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Inicialización acotada por contrato al modelo del sinte
-  bankManagerModal = new BankManagerModal({
-    modelId: 'casio-cz101', // O 'roland-juno106', 'behringer-dm12', 'korg-ms2000'
-    lockModel: true,        // Bloquea selectores y fija el layout nativo del modelo
-    synthBridge: bridge     // Conecta con los endpoints de C++
-  });
-
-  // Botón para abrir el modal
-  document.getElementById('btn-open-bank-manager')?.addEventListener('click', () => {
-    bankManagerModal.toggle();
-  });
+document.getElementById('btn-open-bank-manager')?.addEventListener('click', () => {
+  bankManagerModal.toggle();
 });
 ```
 
 ---
 
-## 4. Contrato de Theming CSS (Variables Dinámicas)
+### PASO 4: Theming por Variables CSS
 
-`BankManagerModal.css` utiliza variables CSS estándar con fallbacks. Cada sintetizador solo necesita definir sus variables en su propio `themes.css`:
+El componente hereda dinámicamente las variables del tema activo del sintetizador:
 
 ```css
 :root {
-  /* Variables consumidas automáticamente por BankManagerModal */
-  --color-bg-base: #0a1118;           /* Fondo exterior del modal */
-  --color-panel-bg: #102130;          /* Fondo del contenedor principal */
-  --color-panel-surface: #172d42;     /* Fondo de tarjetas de patches y cabeceras */
-  --color-panel-border: rgba(0, 195, 255, 0.2); /* Bordes de paneles y cards */
-  
-  --color-accent: #00c3ff;            /* Color de acento primario y botones de acción */
-  --color-accent-hover: #38d3ff;      /* Hover de botones y selección */
-  
-  --color-text-main: #f0f7ff;         /* Texto principal de patches */
-  --color-text-muted: #7e9bb5;        /* Texto secundario, categorías y direcciones */
-  
-  --color-lcd-bg: #1c3322;            /* Fondo del display LCD de previsualización */
-  --color-lcd-text: #54ff72;          /* Texto del display LCD */
-  
-  --font-lcd: 'Courier New', monospace; /* Tipografía para display */
-  --panel-radius: 4px;                /* Radio de bordes */
+  --color-bg-base: #0a1118;        /* Fondo base */
+  --color-panel-bg: #102130;       /* Fondo de paneles */
+  --color-panel-surface: #172d42;  /* Superficies de tarjetas */
+  --color-panel-border: #1c354d;   /* Bordes */
+  --color-accent: #00c3ff;         /* Acento principal */
+  --color-accent-hover: #38d3ff;   /* Hover de acento */
+  --color-text-main: #f0f7ff;      /* Texto primario */
+  --color-text-muted: #7e9bb5;     /* Texto atenuado */
 }
 ```
-
----
-
-## 5. Cómo Añadir un Nuevo Sintetizador al Ecosistema
-
-Para soportar un nuevo sintetizador futuro:
-1. Crea el archivo de contrato en `Source/Contracts/Models/mi-nuevo-sinte.ts`.
-2. Define los campos obligatorios: `modelId`, `displayName`, `manufacturer`, `bankCapacity`, `banksCount`, `programsPerBank`, `patchDataSize`, `patchNameMaxLength`, `categories`, `defaultCategory`, `sysexManufacturerId`, `getProgramAddress`, `parseProgramAddress`.
-3. Opcionalmente añade `buildPatchSysEx` y `buildBulkSysEx`.
-4. Ejecuta `npm run generate` en `ABDBankManager`.
-5. Ejecuta `npm test` para validar que cumple la suite de invariantes de contratos.
-6. En el proyecto del nuevo sinte, ejecuta `npm run sync:bankmanager` y pásale su `modelId`.
