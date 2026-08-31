@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # --- ABDBankManagerCore Library ---
 add_library(ABDBankManagerCore STATIC
     ABDBankManagerCore.cpp
+    BankManagerWebViewAdapter.cpp
     Pro800Midi.cpp
 )
 
@@ -35,6 +36,14 @@ install(TARGETS ABDBankManagerCore
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
 )
+
+if(BUILD_TESTING)
+    add_executable(ABDBankManagerCoreTests
+        tests/BankManagerCoreTests.cpp
+    )
+    target_link_libraries(ABDBankManagerCoreTests PRIVATE ABDBankManagerCore)
+    add_test(NAME ABDBankManagerCoreTests COMMAND ABDBankManagerCoreTests)
+endif()
 
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/Source/State/ParameterRegistry.gen.h

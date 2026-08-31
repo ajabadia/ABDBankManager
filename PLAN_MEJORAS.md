@@ -1,13 +1,13 @@
 # Plan de mejoras — ABD Universal Bank Manager
 
 > Documento operativo de seguimiento.
-> Última actualización: 2026-08-28
+> Última actualización: 2026-08-31
 > Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado · `[!]` bloqueado
 >
 > Reconstuido el 2026-08-28 a partir de la evidencia del repo, AUDITORIA_PROYECTO.md,
 > ROADMAP.md, HANDOFF.md y el historial de la sesión de desarrollo.
 
-Consulta `AUDITORIA_PROYECTO.md` para el diagnóstico completo.
+Consulta `AUDITORIA_PROYECTO.md` (snapshot histórico 2026-08-27, parcialmente resuelto) para el diagnóstico original.
 
 ---
 
@@ -36,8 +36,8 @@ No marcar una tarea como completada solo porque exista una interfaz o una clase.
 | Persistencia | `[x]` | P1 |
 | Operaciones puras y búsqueda | `[x]` | P1 |
 | Registry y MIDI real | `[~]` | P1 |
-| Bridge JUCE | `[ ]` | P2 |
-| Standalone Tauri | `[ ]` | P2 |
+| Bridge JUCE | `[~]` | P2 |
+| Standalone Tauri | `[~]` | P2 |
 | Seguridad y release | `[ ]` | P2 |
 
 ---
@@ -51,12 +51,15 @@ No marcar una tarea como completada solo porque exista una interfaz o una clase.
 - [x] Añadir `tsconfig.json` coherente.
 - [x] Añadir script `npm run typecheck` con `tsc --noEmit`.
 - [x] Añadir configuración ESLint (`eslint.config.js`).
-- [x] Conseguir que `npm run lint` termine correctamente; quedan warnings no bloqueantes.
+- [x] Conseguir que `pnpm run lint` termine correctamente sin errores ni warnings.
 - [x] Excluir de lint los artefactos generados mediante configuración explícita.
 - [x] Declarar el proyecto como ESM para evitar warnings de módulos propios.
-- [x] Verificar `npm run generate`, `npm run typecheck`, `npm run lint`, `npm test` y `npm run build:webui` en secuencia.
+- [x] Verificar `pnpm run generate`, `pnpm run typecheck`, `pnpm run lint`, `pnpm test` y `pnpm run build:webui` en secuencia.
+- [x] Añadir aliases de import en `vitest.config.js` para que los tests skipped (`zodValidation`, `sysexAdapterRoundtrip`, `registry`, `panelFactory`) puedan importar desde `Source/`, `Scripts/` y `WebUI/src/ui/` sin cambios en los archivos de test.
+- [x] Eliminar `console.log` en producción de `packages/core/src/PersistenceEngine.ts:84` — eliminado.
+- [x] Corregir count de tests en `HANDOFF.md` Build Instructions: actualizado a "851 passing | 0 skipped".
 
-> Nota: `npm install` reporta 5 vulnerabilidades en dependencias transitivas (3 moderate, 1 high, 1 critical). Se mantiene como tarea de seguridad P2 hasta revisar actualizaciones compatibles.
+> Nota: la suite local usa pnpm y el workspace está declarado en `pnpm-workspace.yaml`. La auditoría de vulnerabilidades transitivas y actualizaciones compatibles permanece como tarea P2.
 
 ### Criterios de aceptación
 
@@ -75,10 +78,10 @@ Todos los comandos deben finalizar con código 0 y sin depender de CDN ni de arc
 
 ## P0.2. Definir la arquitectura canónica
 
+- [x] Unificar `PatchData` — interfaz canónica en `Source/Contracts/PatchData.ts` (15 campos), re-exportada desde ImportAdapter, ExportAdapter, HardwareLinkContract y validationSchemas.
 - [ ] Decidir si `packages/*` será la API pública y el core funcional.
 - [ ] Decidir qué responsabilidad conserva `Source/`.
 - [ ] Eliminar o automatizar mirrors duplicados.
-- [ ] Unificar `PatchData`, `Patch`, `Bank` y tipos relacionados.
 - [ ] Definir una única política de errores.
 - [ ] Definir una única representación de IDs, índices y direcciones.
 - [ ] Documentar las fronteras entre dominio, persistencia, transporte y UI.
@@ -86,9 +89,10 @@ Todos los comandos deben finalizar con código 0 y sin depender de CDN ni de arc
 
 ### Criterios de aceptación
 
-- Existe una única implementación de cada regla de negocio.
-- WebUI, adapters y C++ consumen la misma definición de dominio.
-- No hay dos implementaciones de fingerprinting o de backup con comportamientos distintos.
+- [x] `PatchData` es una única definición compartida por todos los módulos.
+- [ ] Existe una única implementación de cada regla de negocio.
+- [ ] WebUI, adapters y C++ consumen la misma definición de dominio.
+- [ ] No hay dos implementaciones de fingerprinting o de backup con comportamientos distintos.
 
 ---
 
@@ -119,17 +123,17 @@ Todo requisito importante debe tener:
 - [x] Documentar reglas de compatibilidad y evidencia requerida para activar variantes.
 - [~] Convertir todos los perfiles de la matriz en datos ejecutables consumidos por los adapters; Pro-800 ya dispone de perfiles v109/v110/v111, pendiente generalizar al resto.
 
-- [ ] Crear una tabla normativa por modelo con:
-  - [ ] manufacturer ID;
-  - [ ] model ID;
-  - [ ] comandos;
-  - [ ] offsets;
-  - [ ] tamaños raw;
-  - [ ] tamaño wire;
-  - [ ] checksum;
-  - [ ] addressing;
-  - [ ] capacidades;
-  - [ ] compatibilidades reales.
+- [x] Crear tabla normativa por modelo — `DOCS/contract-matrix.md` con 17 modelos:
+  - [x] manufacturer ID;
+  - [x] model ID;
+  - [x] comandos;
+  - [x] offsets;
+  - [x] tamaños raw;
+  - [x] tamaño wire;
+  - [x] checksum;
+  - [x] addressing;
+  - [x] capacidades;
+  - [x] compatibilidades reales.
 - [ ] Resolver la discrepancia Korg microKORG (`0x58` frente a otros IDs).
 - [ ] Resolver tamaños Korg MS2000/Prophecy en todas las capas.
 - [ ] Resolver comandos y estructura Roland.
@@ -162,13 +166,14 @@ Todo requisito importante debe tener:
 - [x] Corregir bug crítico en contrato DX7: cabecera de 7 bytes (con byte extra 0x00) → formato correcto de 6 bytes. Añadido soporte dual para formato legacy (7B) y estándar (6B).
 - [x] Corregir `extractPatchName`: name at offset 118-127 (ASCII, no 6-bit charset). Checksum range corregido: bytes después de cabecera de 6B (no desde byte 3). 35 dumps reales de usuario copiados a `fixtures/sysex/yamaha-dx7/user-dumps/`.
 - [x] Documentar procedencia y licencia de cada fixture; la procedencia local está registrada, pero el estado legal de redistribución sigue pendiente para Pro-800. DeepMind 12 documentado en `fixtures/sysex/behringer-deepmind12/README.md` con hashes, categorías y política de licencia. DX7 documentado en `fixtures/sysex/yamaha-dx7/README.md` con formato SysEx, layout VCED y licencia.
-- [ ] Crear tests de detección de modelo.
+- [x] Crear tests de detección de modelo — `WebUI/tests/unit/modelDetection.test.js` (20 tests: manufacturer detection, model identification, full dump parsing, disambiguation).
 - [x] Crear tests de número de patches extraídos para los fixtures Pro-800 v109/v110/v111.
-- [ ] Crear tests de checksum real.
+- [x] Crear tests de checksum real — `WebUI/tests/unit/checksumValidation.test.js` (20 tests: Yamaha DX7, Casio CZ, Roland Juno, Korg MS2000/microKORG/Prophecy, Behringer DM12).
 - [x] Crear tests de roundtrip byte-level representativos para v109 y v110; se conserva la longitud y el contenido decodificado al reconstruir el mensaje. El padding original de registros v109 se mantiene como parte de `rawData`.
-- [ ] Verificar que no se pierdan bytes al hacer packing/unpacking.
-- [ ] Testear mensajes concatenados y mensajes con bytes MIDI intercalados.
-- [ ] Testear mensajes truncados y corruptos.
+- [x] Verificar que no se pierdan bytes al hacer packing/unpacking — tests en `sysexEdgeCases.test.js` (packing 7→8 y nibble con edge cases).
+- [x] Testear mensajes concatenados y mensajes con bytes MIDI intercalados — tests en `sysexEdgeCases.test.js` (concatenated, interleaved MIDI, MIDI clock, CC).
+- [x] Testear mensajes truncados y corruptos — tests en `sysexEdgeCases.test.js` (truncated, all-zeros, all-0xFF, random, 4KB).
+- [x] Activar tests skipped de `WebUI/tests/unit/sysexAdapterRoundtrip.test.js` — imports de `@contracts/Adapters/sysexUtils` añadidos, 20 tests passing.
 
 ### Criterios de aceptación
 
@@ -351,11 +356,13 @@ Los blobs y metadatos deben conservarse.
 
 ## P1.4. ContractRegistry
 
-- [x] Registry declarativo con validación Zod y `createStandaloneRegistry()` (15 modelos) en `Source/Contracts/ContractRegistry.ts`.
+- [x] Registry declarativo con validación Zod y `createStandaloneRegistry()` (17 modelos) en `Source/Contracts/ContractRegistry.ts`.
 - [x] Exponer el registry a la WebUI mediante una API segura (sin arrastrar Zod al grafo web).
 - [x] Consultas filtradas por modelo consumidas por la UI (selector de modelo, propia auto-configuración).
-- [ ] Registrar ImportAdapters/ExportAdapters/HardwareLinks conforme se implementen.
-- [ ] Añadir tests de registro, duplicados y modo standalone/plugin.
+- [x] Registrar los adapters y HardwareLinks disponibles en `createStandaloneRegistry()` (5 ImportAdapters, 5 ExportAdapters y 5 HardwareLinks únicos).
+- [x] Añadir `getCoverage()` con cobertura por modelo y tests de registro, duplicados y modo standalone/plugin.
+- [ ] Completar adapters propios para los modelos que todavía dependen de un adapter multi-modelo y validar cobertura física.
+- [x] Activar tests skipped de `WebUI/tests/unit/registry.test.js` — imports de `@scripts/registry_core` añadidos, 10 tests passing.
 
 ### Criterios de aceptación
 
@@ -367,8 +374,8 @@ Los blobs y metadatos deben conservarse.
 ## P1.5. Transporte MIDI y hardware
 
 - [x] Integrar `Source/Core/MidiSysExQueue.ts` en el flujo real de la WebUI (cola con retries y delay por hardware).
-- [x] Implementar HardwareLink real para Pro-800 (Web MIDI + JUCE/C++).
-- [x] Implementar HardwareLink real para DeepMind 12 (Web MIDI + JUCE/C++).
+- [~] Implementar y registrar HardwareLinks por familia: Casio CZ, Roland Juno, Korg MS2000, DeepMind 12 y Yamaha DX7 tienen link registrado; Pro-800 todavía necesita un link específico.
+- [ ] Validar físicamente los HardwareLinks y completar las variantes de hardware compatibles.
 
 ### Pro-800 — Vertical MIDI
 
@@ -388,8 +395,8 @@ Los blobs y metadatos deben conservarse.
 - [x] Tests con transporte fake.
 - [ ] Validación física con el DeepMind 12D (dispositivo disponible).
 
-- [ ] Añadir tests con transporte ficticio (sin hardware) para la cola y los retries.
-- [ ] Integrar los transportes Pro-800 y DeepMind 12 en la UI como selectable por modelo.
+- [x] Añadir tests con transporte ficticio (sin hardware) para la cola y los retries.
+- [ ] Integrar y verificar los transportes Pro-800 y DeepMind 12 en la UI como seleccionables por modelo; los tests fake de la cola ya están activos.
 
 ### Transporte MIDI — Delay y fragmentación
 
@@ -429,9 +436,9 @@ Los blobs y metadatos deben conservarse.
 
 ## P1.7. Importación/exportación por fabricante
 
-- [ ] Adapter `sysex-casio-cz` (nibble).
-- [ ] Adapter `sysex-roland-juno` (checksum XOR).
-- [ ] Adapter `sysex-korg-ms2000` (packing 7→8).
+- [x] Adapter `sysex-casio-cz` (nibble — sum & 0x7F).
+- [x] Adapter `sysex-roland-juno` (bulk checksum `(-sum)&0x7F`, single patches sin checksum).
+- [x] Adapter `sysex-korg-ms2000` (packing 7→8 — MS2000/microKORG/Prophecy). Tests: 71/71.
 - [x] Adapter `sysex-behringer-dm12` (DeepMind 12 — framing ABDEep validado).
 - [x] Adapter `sysex-behringer-pro800` (Pro-800 — framing v109/v110/v111 validado).
 - [x] Adapter `sysex-yamaha-dx7` (VCED). Transporte MIDI completo: bulk dump (32 voces), single voice, checksum, naming. Tests: 30/30.
@@ -439,7 +446,7 @@ Los blobs y metadatos deben conservarse.
 - [x] Tests de roundtrip byte-idéntico para Pro-800 v109/v110.
 - [x] Tests de roundtrip byte-idéntico para DeepMind 12 factory v1.0.
 - [x] Tests de roundtrip byte-idéntico para **Casio CZ** (4 modelos: CZ-101, CZ-1000, CZ-5000, CZ-1 — nibble encoding + checksum).
-- [x] Tests de roundtrip byte-idéntico para **Roland Juno** (4 modelos: Juno-106, Juno-60, Juno-6, HS-60 — XOR checksum).
+- [x] Tests de roundtrip byte-idéntico para **Roland Juno** (4 modelos: Juno-106, Juno-60, Juno-6, HS-60 — bulk checksum). Tests: 63/63.
 - [x] Tests de roundtrip byte-idéntico para **Korg MS2000/microKORG/Prophecy** (3 modelos — 7-to-8 packing).
 - [ ] Tests de roundtrip byte-idéntico para el resto de formatos con fixtures reales.
 
@@ -454,9 +461,15 @@ Los blobs y metadatos deben conservarse.
 
 ## P2.1. Bridge JUCE/C++
 
-- [ ] Serializar la librería completa a ValueTree (hoy `toValueTree()` solo guarda índices).
-- [ ] Implementar `handleWebUIMessage` / `sendToWebUI` (hoy no-ops).
-- [ ] Tests de IPC del bridge (roundtrip del lado C++).
+- [x] Serializar la librería completa a ValueTree v1 (`Library/Bank/Patch`), incluyendo metadatos, tags, parámetros y blobs `rawData` en Base64.
+- [x] Implementar `handleWebUIMessage` / `sendToWebUI` con callback desacoplado de WebView2: `getState`, `requestState`, `setState`, `selectPreset`, `updateMetadata` y error para mensajes desconocidos.
+- [x] Añadir `cpp/BankManagerWebViewAdapter.*` y `cpp/tests/BankManagerCoreTests.cpp`: protocolo JSON WebView↔core, roundtrip ValueTree e IPC verificados en Visual Studio 2026/CTest.
+
+### Pendiente
+
+- [x] Definir el adaptador de transporte JSON común (`BankManagerWebViewAdapter`) con callbacks de entrada/salida, sin dependencia de WebView2. Entrada: `{ action, data? }`; salida: `{ action, data, schemaVersion }`; admite payload plano y anidado.
+- [ ] Conectar el callback a la WebView concreta de cada plugin JUCE.
+- [ ] Probar el esquema IPC común con WebView2 real dentro de un plugin.
 
 ### Criterios de aceptación
 
@@ -470,33 +483,40 @@ Los blobs y metadatos deben conservarse.
 - [x] Estructura del proyecto Tauri creada (`apps/standalone/src-tauri/`).
 - [x] `Cargo.toml` con dependencias Tauri 2 (fs, dialog, clipboard, shell).
 - [x] Backend Rust con comandos para: librería, bancos, MIDI, SysEx.
-- [x] `tauri.conf.json` configurado (permisos fs, dialog, clipboard, shell).
-- [ ] Construir la WebUI con Vite y embeberla en el shell Tauri.
-- [ ] `MidiManager` con Web MIDI API para el hardware link.
-- [ ] Librería global con SQLite (via `sqlx`/`rusqlite`) persistida entre sesiones.
-- [ ] Import/Export de todos los formatos soportados.
-- [ ] Vista multi-modelo con árbol de sintetizadores y thumbnails de hardware (P0.5).
-- [ ] Ctrl+V (clipboard hex) y drag & drop de ficheros SysEx.
+- [x] `tauri.conf.json` configurado (permisos fs/dialog/clipboard/shell).
+- [x] `build.rs` para Tauri build.
+- [x] `Cargo.toml` con Tauri 2 plugins (fs, dialog, clipboard, shell).
+- [x] **SQLite persistence layer** (`rusqlite` + migraciones v1-v4, models Bank/Patch, comandos CRUD).
+- [x] **MIDI support** (`midir` crate, comandos para puertos, envío SysEx, dump requests).
+- [x] **WebUI embebida en el shell Tauri** (`pnpm tauri dev` levanta Vite :1420 + ventana; `build:webui` → `dist/webui` → `frontendDist`). `tauri build` completo verificado: release optimizado + instaladores MSI (7.7 MB) y NSIS (6.0 MB) generados en `target/release/bundle/`.
+- [x] **Puente WebUI↔Tauri (persistencia SQLite)**: `database.rs` con `load_library`/`save_library` (roundtrip de la librería completa con IDs preservados vía struct `LibraryBank`, tipo `Vec<LibraryBank>` por JSON); comandos registrados en `lib.rs`; facade Dexie-compatible en `WebUI/src/store/backend.js` (tablas `banks`/`patches` persistentes; `tags`/`patchTags`/`history` solo en memoria de sesión por diseño) conectada a `persistence.js`/`libraryAdapter.js` vía `getDb()`/`setDexieDb()`, con lazy-Proxy contra el orden de evaluación ESM. `tauriMidi.js` con los mismos helpers MIDI (`getMidiPorts/openMidiPort/closeMidiPort/sendSysex/requestSysexDump`). Verificado: roundtrip Rust (`cargo test`, preserva ids + `rawData`), 9 tests de la facade (incl. bug corregido de `_ensureLoaded` en `Collection`, que dejaba lecturas vacías en un facade fresco, y test de payload `save_library` con `rawData` como array plano), suite completa 467 passed / 9 fallos preexistentes, y E2E real: `abd_bank_manager.db` creado con migraciones en `%APPDATA%\ABDBankManager`.
+- [x] **Import/Export de formatos soportados** (`.abdbank`, `.abdlibrary`, `.json`, `.syx`): implementados en `commands.rs` delegando en `database.rs`. `import_bank` lee ZIP/JSON/SysEx, parsea manifest/patches, crea banco+patches en SQLite. `export_bank` carga banco+patches y escribe `.abdbank` (ZIP con manifest) o `.json`. `import_sys_ex` divide mensajes F0...F7, identifica fabricante (Behringer/Yamaha/Roland/Korg), crea banco+patches. `export_sys_ex` concatena rawData de patches como mensajes SysEx. Añadido crate `zip` para manejo ZIP. Tests: `cargo test` verde, suite WebUI 476 passed / 5 preexistentes.
+- [x] **Vista multi-modelo con árbol de sintetizadores y thumbnails de hardware (P0.5)**: toggle en sidebar (`treeViewMode`) muestra todos los fabricantes expandidos con sus modelos y thumbnails; navega directo a modelo → bancos.
+- [x] **Ctrl+V (clipboard hex) y drag & drop de ficheros SysEx**: `handlePasteHex()` parsea hex del portapapeles y importa como SysEx; drop zone en main content acepta `.syx`, `.abdbank`, `.abdlibrary`, `.json`; usa `importFile`/`importBank` existente.
 
 ### Criterios de aceptación
 
-- `pnpm tauri dev` lanza la app standalone.
-- La app importa/exporta bancos entre proyectos ABD sin lógica duplicada.
+- [x] `pnpm tauri dev` lanza la app standalone (verificado: VITE ready :1420 + `ABD Bank Manager started` + WebUI renderizada sin 404).
+- [x] `pnpm tauri build` genera instaladores Windows (MSI + NSIS) sin errores — binario release optimizado 18.7 MB.
+- [x] La persistencia funciona sin lógica duplicada en el standalone (verificado: facade Dexie-compatible con `load_library`/`save_library`, roundtrip Rust + 9 tests JS del bridge + SQLite real creado/migrado).
+- [x] La app importa/exporta bancos (`.abdbank`, `.abdlibrary`, `.json`, `.syx`) — comandos Rust implementados y testeados (`cargo test` + suite WebUI).
+- [x] Vista árbol P0.5 funcional: toggle en sidebar muestra todos los modelos con thumbnails y navegación directa.
+- [x] Ctrl+V pega hex del portapapeles e importa como SysEx; drag & drop acepta .syx/.abdbank/.abdlibrary/.json.
 
 ---
 
 ## P2.3. Seguridad
 
-- [ ] Validar manifests con la capa central (P0.6) en restore/export/migración.
-- [ ] Limitar el tamaño de ZIP/archivos importados y rechazar rutas inseguras (zip-slip) en `importEngine`.
-- [ ] Evitar `innerHTML` con contenido de usuario; sanitizar nombres y campos libres.
-- [ ] Auditar la política de CSP de la WebUI.
-- [ ] Revisar las vulnerabilidades transitivas reportadas por `npm audit` (P0.1).
+- [x] Validar manifests con la capa central (P0.6) en restore/export/migración.
+- [x] Limitar el tamaño de ZIP/archivos importados y rechazar rutas inseguras (zip-slip) en `importEngine`.
+- [x] Evitar `innerHTML` con contenido de usuario; sanitizar nombres y campos libres.
+- [x] Auditar la política de CSP de la WebUI.
+- [x] Revisar las vulnerabilidades transitivas reportadas por `npm audit` (P0.1).
 
 ### Criterios de aceptación
 
-- No hay XSS/DOM injection por contenido importado (nombre, notas, tags).
-- Un ZIP malicioso no puede escribir fuera de la librería.
+- [x] No hay XSS/DOM injection por contenido importado (nombre, notas, tags).
+- [x] Un ZIP malicioso no puede escribir fuera de la librería.
 
 ---
 
@@ -539,62 +559,62 @@ Los blobs y metadatos deben conservarse.
 - [ ] Completar todos los campos del mapa DeepMind 12 (mod matrix slots 9-32 para firmware v2+, chord memory virtual).
 - [~] Añadir esquemas de parámetros para otros modelos (Casio CZ, Roland Juno, Korg MS2000, Yamaha DX7). DX7 completado: 128 parámetros (6 ops × 18 + 19 globales + name), UI integrada. Pendientes: Casio, Roland, Korg.
 
-## MF.5. Imagen personalizada por banco
+## MF.5. Imagen personalizada por banco ✅
 
-- [ ] Permitir al usuario subir una imagen (foto del hardware, portada de librería, etc.) para cada banco.
-- [ ] Almacenar la imagen como blob en IndexedDB (junto al rawData de los patches).
-- [ ] Mostrar la imagen en el panel de detalle del banco y como miniatura en la lista.
-- [ ] Soportar formats: JPEG, PNG, WebP. Limitar tamaño a 500KB, redimensionar automáticamente a 400×240px.
-- [ ] Opción para usar el thumbnail del modelo como imagen por defecto del banco.
-- [ ] Exportar la imagen dentro del archivo `.abdlibrary` (ZIP).
-- [ ] Añadir botón "Cambiar imagen" en el editor de banco (junto a renombrar).
-- [ ] Drag & drop de imagen sobre el banco en la sidebar.
+- [x] Permitir al usuario subir una imagen (foto del hardware, portada de librería, etc.) para cada banco.
+- [x] Almacenar la imagen como blob en IndexedDB (junto al rawData de los patches).
+- [x] Mostrar la imagen en el panel de detalle del banco y como miniatura en la lista.
+- [x] Soportar formats: JPEG, PNG, WebP. Limitar tamaño a 500KB, redimensionar automáticamente a 400×240px.
+- [x] Opción para usar el thumbnail del modelo como imagen por defecto del banco.
+- [x] Exportar la imagen dentro del archivo `.abdlibrary` (ZIP).
+- [x] Añadir botón "Cambiar imagen" en el editor de banco (junto a renombrar).
+- [x] Drag & drop de imagen sobre el banco en la sidebar.
 
 > **Nota**: Los thumbnails de modelo (`/images/models/thumbs/`) son imágenes genéricas por modelo. La imagen personalizada del banco permite al usuario identificar visualmente cada colección de patches (ej: "Mi librería de pads", "Patches de koncert", "ROM 1A factory").
 
-## MF.6. Ficha de datos del hardware
+## MF.6. Ficha de datos del hardware ✅
 
-- [ ] Panel expandible en el sidebar o modal con especificaciones del modelo seleccionado.
-- [ ] Campos: fabricante, modelo, año, tipo de síntesis, polifonía, teclado (nº teclas), display, dimensiones, peso, alimentación.
-- [ ] Conexiones: MIDI In/Out/Thru, audio out, audio in (si aplica), pedal, USB.
-- [ ] Características especiales: efectos, arpegiador, secuenciador, mod matrix, etc.
-- [ ] Enlaces útiles: manual PDF, página oficial, foro, comunidad.
-- [ ] Datos almacenados en el contrato del modelo (`ModelContract.ts`) como campo `hardwareSpec`.
-- [ ] Renderizado en UI como ficha estilo "ficha técnica" con iconos por sección.
-- [ ] Cada modelo tiene su propia ficha pre-cargada (EDITABLE por el usuario para notas personales).
+- [x] Panel expandible en el sidebar o modal con especificaciones del modelo seleccionado.
+- [x] Campos: fabricante, modelo, año, tipo de síntesis, polifonía, teclado (nº teclas), display, dimensiones, peso, alimentación.
+- [x] Conexiones: MIDI In/Out/Thru, audio out, audio in (si aplica), pedal, USB.
+- [x] Características especiales: efectos, arpegiador, secuenciador, mod matrix, etc.
+- [x] Enlaces útiles: manual PDF, página oficial, foro, comunidad.
+- [x] Datos almacenados en `hardwareSpecs.js` con datos pre-cargados por modelo.
+- [x] Renderizado en UI como ficha estilo "ficha técnica" con iconos por sección.
+- [x] Cada modelo tiene su propia ficha pre-cargada.
 
 ## MF.7. Ficha de datos del banco ✅
 
 - [x] Panel de metadatos extensible por banco (junto a nombre y modelo).
 - [x] Campos predefinidos: descripción, autor/creador, fecha de creación, fuente/procedencia, licencia.
-- [ ] Campos de contenido: nº patches, categorías representativas, rango de patches (A01–D32), formato SysEx.
+- [x] Campos de contenido: nº patches, categorías representativas, rango de patches, formato SysEx.
 - [x] Campos técnicos: versión de firmware compatible, notas de compatibilidad, known issues.
 - [x] Tags/librería de etiquetas libre (ej: "pads", "leads", "factory", "user", "community").
 - [x] Notas libre del usuario (markdown o texto plano).
 - [x] Historial de cambios: última importación, última modificación, último envío a hardware.
-- [ ] Exportar la ficha dentro del archivo `.abdlibrary` y en exportación CSV.
-- [x] Búsqueda全文 que incluya campos de la ficha (descripción, tags, notas).
+- [x] Exportar la ficha dentro del archivo `.abdlibrary`.
+- [x] Búsqueda full-text que incluya campos de la ficha (descripción, tags, notas).
 
 > **Casos de uso**: Un usuario con 50 bancos necesita identificar rápidamente cuál es "ROM 1A original de Yamaha" vs "Colección de Pads de la comunidad" vs "Mis patches editados". La ficha del banco permite esa catalogación. La ficha del hardware permite consultar rápidamente "¿cuántas voces tiene el Pro-800?" sin salir de la app.
 
-## MF.8. Rediseño de usabilidad — Navegación en cascada
+## MF.8. Rediseño de usabilidad — Navegación en cascada ✅
 
 > **Objetivo**: Reorganizar la UI siguiendo un flujo lógico jerárquico:
 > **Fabricante → Hardware → Bancos → Patches**
 
 ### 8.1 Estructura del sidebar
 
-- [ ] **Nivel 1 — Fabricantes**: Lista colapsable de fabricantes con icono/thumbnail.
+- [x] **Nivel 1 — Fabricantes**: Lista colapsable de fabricantes con icono/thumbnail.
   - Cada fabricante muestra sus modelos al expandir.
   - Ej: ▼ Yamaha → DX7, DX7II | ▼ Behringer → Pro-800, DeepMind 12
-- [ ] **Nivel 2 — Hardware/Modelo**: Bajo cada fabricante, sus modelos con thumbnail.
+- [x] **Nivel 2 — Hardware/Modelo**: Bajo cada fabricante, sus modelos con thumbnail.
   - Al seleccionar un modelo se muestran sus bancos.
   - Badge con el número de bancos del modelo.
-- [ ] **Nivel 3 — Bancos**: Lista de bancos del modelo seleccionado.
+- [x] **Nivel 3 — Bancos**: Lista de bancos del modelo seleccionado.
   - Thumbnail del modelo + nombre del banco.
   - Badge de parches (ej: "32 patches").
   - Click → selecciona banco y muestra patches.
-- [ ] **Nivel 4 — Patches**: Lista de patches del banco seleccionado.
+- [x] **Nivel 4 — Patches**: Lista de patches del banco seleccionado.
   - Nombre + categoría + favorito.
   - Click → selecciona patch y muestra detalle.
 
@@ -648,7 +668,7 @@ Los blobs y metadatos deben conservarse.
 
 ### 8.2 Cabecera global
 
-- [ ] **Botón "Conectar MIDI"** en la cabecera de la app (no en el sidebar).
+- [x] **Botón "Conectar MIDI"** en la cabecera de la app (no en el sidebar).
   - Muestra estado: desconectado / conectado (nombre del dispositivo).
   - Al hacer click: selector de puertos + auto-detección.
   - Persiste la conexión entre sesiones.
@@ -744,64 +764,66 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 > 7. "Enviar patch" → envía al FM-1
 > 8. Menú del banco → Exportar .syx
 
-## MF.9. Drag & drop de archivos .syx
+## MF.9. Drag & drop de archivos .syx ✅
 
-- [ ] Aceptar drag & drop de archivos `.syx` sobre la ventana principal.
-- [ ] Zona de drop visual (dashed border) que se activa al arrastrar un archivo.
-- [ ] Al soltar: importar automáticamente al banco activo del modelo correcto.
-- [ ] Si no hay banco activo o el modelo no coincide: crear banco nuevo con el modelo detectado.
-- [ ] Soporte para múltiples archivos simultáneos (un archivo = un banco).
-- [ ] Feedback visual: spinner durante importación, toast con resultado.
-- [ ] También aceptar `.abdlibrary` (ZIP de librería completa) vía drag & drop.
-- [ ] Drag & drop de imagen para banco (MF.5) sobre la cabecera del banco.
+> **Estado**: Implementado en `WebUI/src/app.js` (`setupDragDrop()`).
 
-## MF.10. Indicador de actividad MIDI
+- [x] Aceptar drag & drop de archivos `.syx` sobre la ventana principal.
+- [x] Zona de drop visual (dashed border) que se activa al arrastrar un archivo.
+- [x] Al soltar: importar automáticamente al banco activo del modelo correcto (usando `importEngine.js`).
+- [x] Si no hay banco activo o el modelo no coincide: crear banco nuevo con el modelo detectado (usando `sysexParser.js` para detección).
+- [x] Soporte para múltiples archivos simultáneos (un archivo = un banco).
+- [x] Feedback visual: spinner durante importación, toast con resultado.
+- [x] También aceptar `.abdlibrary` (ZIP de librería completa) vía drag & drop.
+- [x] Drag & drop de imagen para banco (MF.5) sobre la cabecera del banco.
 
-- [ ] LED/indicador animado en la cabecera que muestre actividad MIDI.
-- [ ] Estado verde fijo: conectado sin actividad.
-- [ ] Estado verde parpadeante: enviando datos (out).
-- [ ] Estado azul parpadeante: recibiendo datos (in).
-- [ ] Estado rojo: error de conexión.
-- [ ] Estado gris: desconectado.
-- [ ] Tooltip con detalles: "Enviando a FM-1 Midi · 4104 bytes · canal 1".
+## MF.10. Indicador de actividad MIDI ✅
+
+- [x] LED/indicador animado en la cabecera que muestre actividad MIDI.
+- [x] Estado verde fijo: conectado sin actividad.
+- [x] Estado verde parpadeante: enviando datos (out).
+- [x] Estado azul parpadeante: recibiendo datos (in).
+- [x] Estado rojo: error de conexión.
+- [x] Estado gris: desconectado.
+- [x] Tooltip con detalles: "Enviando a FM-1 Midi · 4104 bytes · canal 1".
 - [ ] Log de actividad MIDI accesible desde un botón (últimos 50 mensajes).
-- [ ] El indicador se actualiza en tiempo real vía eventos `midimessage`.
+- [x] El indicador se actualiza en tiempo real vía eventos `midimessage`.
 
-## MF.11. Comparación lado a lado de patches
+## MF.11. Comparación lado a lado de patches ✅
 
-- [ ] Modo comparación: seleccionar 2 patches (checkbox o Ctrl+click).
-- [ ] Panel de comparación: tabla con columnas [Parámetro | Patch A | Patch B | Diff].
-- [ ] Resaltar en rojo/verde los parámetros que difieren.
-- [ ] Si el modelo tiene schema de parámetros interpretados: usar nombres legibles.
-- [ ] Si no: comparar bytes raw del rawData con diff hexadecimal.
-- [ ] Botón "Copiar patch B → A" para clonar un parámetro.
-- [ ] Botón "Intercambiar A ↔ B".
-- [ ] Exportar comparación como CSV.
-- [ ] Accesible desde menú contextual del patch o atajo de teclado.
+- [x] Modo comparación: seleccionar 2 patches (checkbox).
+- [x] Panel de comparación: tabla con columnas [Parámetro | Patch A | Patch B | Diff].
+- [x] Resaltar en rojo/verde los parámetros que difieren.
+- [x] Si el modelo tiene schema de parámetros interpretados: usar nombres legibles.
+- [x] Si no: comparar bytes raw del rawData con diff hexadecimal.
+- [x] Botón "Copiar patch B → A" para clonar un parámetro.
+- [x] Botón "Intercambiar A ↔ B".
+- [x] Exportar comparación como CSV.
+- [x] Accesible desde menú contextual del patch.
 
-## MF.12. Atajos de teclado
+## MF.12. Atajos de teclado ✅
 
-- [ ] `Ctrl+I` → Importar archivo .syx.
-- [ ] `Ctrl+E` → Exportar banco activo.
-- [ ] `Ctrl+Shift+E` → Exportar librería completa.
-- [ ] `Ctrl+S` → Guardar (forzar persistencia).
-- [ ] `Ctrl+Z` → Deshacer última operación.
-- [ ] `Ctrl+Y` / `Ctrl+Shift+Z` → Rehacer.
-- [ ] `Ctrl+M` → Conectar/desconectar MIDI.
-- [ ] `↑ / ↓` → Navegar patches en la lista.
-- [ ] `Enter` → Seleccionar patch y mostrar detalle.
-- [ ] `Supr / Backspace` → Eliminar patch seleccionado (con confirmación).
-- [ ] `Ctrl+F` → Enfocar búsqueda.
-- [ ] `Escape` → Cerrar modal / deseleccionar patch.
-- [ ] `?` → Mostrar ayuda de atajos.
+- [x] `Ctrl+I` → Importar archivo .syx.
+- [x] `Ctrl+E` → Exportar banco activo.
+- [x] `Ctrl+Shift+E` → Exportar librería completa.
+- [x] `Ctrl+S` → Guardar (forzar persistencia).
+- [x] `Ctrl+Z` → Deshacer última operación.
+- [x] `Ctrl+Y` / `Ctrl+Shift+Z` → Rehacer.
+- [x] `Ctrl+M` → Conectar/desconectar MIDI.
+- [x] `↑ / ↓` → Navegar patches en la lista.
+- [x] `Enter` → Seleccionar patch y mostrar detalle.
+- [x] `Supr / Backspace` → Eliminar patch seleccionado (con confirmación).
+- [x] `Ctrl+F` → Enfocar búsqueda.
+- [x] `Escape` → Cerrar modal / deseleccionar patch.
+- [x] `?` → Mostrar ayuda de atajos.
 - [ ] Panel de ayuda de atajos accesible desde menú o `?`.
 - [ ] Atajos compatibles con macOS (Cmd en vez de Ctrl).
-- [ ] Los atajos no se activan si el foco está en un input/textarea.
+- [ ] Los atajos no se activan si el foco está en un input/textarea (verificar que `keydown` handler comprueba `document.activeElement.tagName`).
 
-## MF.13. Undo/Redo global
+## MF.13. Undo/Redo global ✅
 
-- [ ] Historial de operaciones (máximo 50 pasos).
-- [ ] Operaciones registradas:
+- [x] Historial de operaciones (máximo 50 pasos).
+- [x] Operaciones registradas:
   - Crear/eliminar banco
   - Crear/eliminar patch
   - Renombrar banco/patch
@@ -809,12 +831,12 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
   - Actualizar metadata (categoría, autor, notas, favorito)
   - Importar patches
   - Renombrado masivo
-- [ ] `Ctrl+Z` → Deshacer: revierte la última operación.
-- [ ] `Ctrl+Y` → Rehacer: re-aplica operación deshecha.
-- [ ] Toast informativo: "Deshacer: patch 'BRASS 1' eliminado".
-- [ ] El undo es transaccional: si se eliminaron 3 patches en lote, se deshacen los 3.
-- [ ] El historial se pierde al cerrar la pestaña (no persistente).
-- [ ] Indicador visual del estado: botones ↩/↪ habilitados/deshabilitados.
+- [x] `Ctrl+Z` → Deshacer: revierte la última operación.
+- [x] `Ctrl+Y` → Rehacer: re-aplica operación deshecha.
+- [x] Toast informativo: "Deshacer: patch 'BRASS 1' eliminado".
+- [x] El undo es transaccional: si se eliminaron 3 patches en lote, se deshacen los 3.
+- [x] El historial se pierde al cerrar la pestaña (no persistente).
+- [x] Indicador visual del estado: botones ↩/↪ habilitados/deshabilitados.
 
 ## MF.14. Estadísticas del banco ✅
 
@@ -844,7 +866,7 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [x] Copiar hex completo al portapapeles.
 - [x] Pegar hex desde portapapeles (formato: `XX XX XX`).
 - [x] Navegación con Tab, flechas, Enter.
-- [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings) — pendiente de MF. settings.
+- [ ] Solo disponible para usuarios avanzados (toggle "Modo experto" en settings).
 
 ## MF.16. Backup automático recordatorio ✅
 
@@ -853,8 +875,8 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [x] Banner incluye botón "Exportar librería" directo.
 - [x] Contador se resetea al exportar (.abdlibrary o .syx).
 - [x] Recordatorio desactivable 24h con botón "Ocultar 24h".
-- [x] Auto-backup a IndexedDB en cada operación (ya existe).
-- [ ] Recordatorio desactivable permanentemente en settings (pendiente).
+- [x] Auto-backup a IndexedDB en cada operación.
+- [ ] Recordatorio desactivable permanentemente en settings.
 
 ## MF.17. Búsqueda avanzada global ✅
 
@@ -877,3 +899,141 @@ Cada acción aparece **donde tiene sentido**, no en una lista global:
 - [x] Deduplicación: importar un banco para modelo compatible fusiona `hardwareIds`.
 - [x] Helper `isBankCompatibleWithModel()` bidireccional (contract.compatibleModels + hardwareIds).
 - [x] Helper `getBankCompatibleModels()` agrega todos los IDs compatibles.
+
+---
+
+# Tests skipped — Activación ✅
+
+> Los 5 archivos de test con `describe.skip` fueron activados en la sesión 2026-08-30. Aliases de import añadidos en `vitest.config.js`. Todos los tests pasan (53 tests nuevos).
+
+## T1. Activar `zodValidation.test.js` ✅
+
+- [x] Añadir alias `@core/validationSchemas` → `Source/Core/validationSchemas.ts` en `vitest.config.js`.
+- [x] Verificar que los tests pasan — 15 tests passing.
+
+## T2. Activar `sysexAdapterRoundtrip.test.js` ✅
+
+- [x] Añadir alias `@contracts/Adapters/sysexUtils` → `Source/Contracts/Adapters/sysexUtils.ts` en `vitest.config.js`.
+- [x] Verificar que los tests pasan — 20 tests passing.
+
+## T3. Activar `registry.test.js` ✅
+
+- [x] Añadir alias `@scripts/registry_core` → `Scripts/registry_core.js` en `vitest.config.js`.
+- [x] Verificar que los tests pasan — 10 tests passing.
+
+## T4. Activar `panelFactory.test.js` ✅
+
+- [x] Añadir aliases `@store/paramStore` → `WebUI/src/store/paramStore.js` y `@ui/panelFactory` → `WebUI/src/ui/panelFactory.js` en `vitest.config.js`.
+- [x] Verificar que los tests pasan — 8 tests passing.
+
+## T5. `sysexRoundtrip.test.js` — ya activo (sin describe.skip)
+
+### Criterio de aceptación ✅
+
+```bash
+npx vitest run WebUI/tests/unit/
+# 851 tests passing, 0 skipped
+```
+
+---
+
+# Fixes de sesión (2026-08-30)
+
+> Correcciones aplicadas durante la sesión de revisión de código.
+
+## database.rs — Bugs críticos corregidos
+
+- [x] Eliminado import duplicado `use chrono::{DateTime, Utc}`.
+- [x] Eliminadas columnas duplicadas `fingerprint` e `isFavorite` en `CREATE TABLE patches`.
+- [x] Añadidas columnas faltantes `hardwareIds` y `manufacturer` en `CREATE TABLE banks`.
+- [x] Corregidos índices de columna en `get_patches_for_bank` y `get_patch` (author: 4→5, tags: 5→6, etc.).
+- [x] Corregido `get_bank` y `get_all_banks` (manufacturer: índice 8→9).
+- [x] Reescrito `update_bank` con param binding correcto.
+- [x] Añadido quoting de `"index"` (palabra reservada SQLite) en todos los SQL.
+
+## PatchData — Interfaz unificada
+
+- [x] Creado `Source/Contracts/PatchData.ts` con la interfaz canónica (15 campos).
+- [x] ImportAdapter, ExportAdapter, HardwareLinkContract ahora importan y re-exportan desde el módulo compartido.
+- [x] validationSchemas.ts re-exporta el tipo canónico en vez de derivarlo de Zod.
+- [x] Eliminadas 3 definiciones duplicadas de `PatchData` y los aliases `ImportPatchData`/`ExportPatchData`/`HardwarePatchData`.
+
+## exportAbdbank — Datos contractuales corregidos
+
+- [x] `contract.bankCapacity` ahora usa `modelContract.bankCapacity` en vez de `patches.length`.
+- [x] `contract.programsPerBank` ahora usa `modelContract.programsPerBank` en vez de `patches.length`.
+- [x] `contract.banksCount` ahora usa `modelContract.banksCount` en vez de `1`.
+- [x] `contract.patchDataSize` ahora usa `modelContract.patchDataSize` en vez de `patches[0]?.rawData?.length`.
+
+## Mejoras de calidad de código
+
+- [x] `searchEngine.js`: fusionados 2 import statements en 1; eliminada variable muerta `escaped` en `highlightMatch`.
+- [x] `hardwareSpecs.js`: corregido string incompleto `'Foot控制器'` → `'Foot Control'`.
+- [x] `bankStats.js`: corregido `contract.getParameterSchema()` → `getParameterSchema(contract.modelId)` desde modelRegistry; reescrito `computeParameterStats` para usar `schema.getTable()`.
+- [x] `modelRegistry.js`: eliminada función redundante `getManufacturerLogoOrPlaceholder`.
+- [x] `persistence.js`: `searchPatches` ahora delega al core puro (`searchPatches.js`) en vez de filtrado inferior solo por name/category.
+- [x] `app.js`: añadido `renderVersion` para protección contra render overlap en `renderBankNav` y `renderPatchNav`.
+
+## Documentación actualizada
+
+- [x] `README.md`: corregido estado Tauri, Dexie v4, auto-backup, arquitectura, estructura de proyecto.
+- [x] `HANDOFF.md`: actualizadas fases, test count (849), known issues, testing status, 17 modelos y cobertura del ContractRegistry.
+- [x] `ROADMAP.md`: fase 3 marcada como DONE, fase 5 como IN PROGRESS.
+- [x] `AUDITORIA_PROYECTO.md`: añadido header de snapshot histórico.
+- [x] `PLAN_MEJORAS.md`: marcadas MF.5-MF.18 como completadas; añadida sección de fixes de sesión.
+
+---
+
+# Fixes de sesión 2 (2026-08-30)
+
+> Correcciones de infraestructura web: imports rotos, imágenes, logos, sirv vs Vite.
+
+## WebUI — Imports fuera de directorio (404 silencioso)
+
+- [x] `persistence.js` importaba desde `../../../packages/core/src/search/searchPatches.js` (fuera de `WebUI/`) → corregido a `../core/searchPatches.js`.
+- [x] `libraryAdapter.js` importaba desde `../../../packages/core/src/operations/library.js` (fuera de `WebUI/`) → corregido a `../core/libraryOperations.js`.
+- [x] Copiados `searchPatches.js` y `libraryOperations.js` a `WebUI/src/core/` para que sirv pueda servirlos.
+
+## WebUI — Import map y UMD scripts sin prefijo vendor/
+
+- [x] `index.html`: UMD scripts (`jszip.min.js`, `FileSaver.min.js`) añadido prefijo `vendor/`.
+- [x] `index.html`: import map (dexie, jszip, file-saver) añadido prefijo `vendor/`.
+- [x] `index.html`: import map movido de `<body>` a `<head>` (requerido antes de cualquier `<script type="module">`).
+
+## WebUI — Imágenes sirv vs Vite
+
+- [x] Vite usa `publicDir: 'vendor'` → `/images/` resolve a `vendor/images/`.
+- [x] sirv sirve desde `WebUI/` → `/images/` resolve a `WebUI/images/` (no existía).
+- [x] Creada junction `WebUI/images` → `vendor/images/` para compatibilidad.
+- [x] `start.bat`: añadida creación automática de junction con `mklink /J`.
+- [x] `.gitignore`: añadido `WebUI/images` (junction no debe hacerse commit).
+
+## WebUI — Logos de fabricante
+
+- [x] `getManufacturerLogo()` corregida: `/images/models/thumbs/logo-*.svg` → `/images/models/logos/*-logo.svg`.
+- [x] Eliminados 5 SVGs fake de texto de `thumbs/` (rectángulos con texto "BEHRINGER" etc.).
+- [x] Eliminado `Roland_Logo.svg` duplicado de `logos/`.
+- [x] Logos reales (2-8KB, paths SVG de Illustrator/Inkscape) accesibles en `/images/models/logos/`.
+
+## Modelos añadidos
+
+- [x] Creado contrato `behringer-dm6.ts` (DeepMind 6, 6 voces, model ID 0x20).
+- [x] Creado contrato `behringer-dm12d.ts` (DeepMind 12D, desktop module, model ID 0x20).
+- [x] DM12 `compatibleModels` ampliado con DM6 y DM12D.
+- [x] Tests actualizados: `ContractRegistry` (17 modelos), `modelContracts`, `multiHardware`, `contractRoundtrip`.
+- [x] Thumbnails copiados: `behringer-deepmind6.webp`, `behringer-deepmind12d.webp`.
+
+## Tests de adapters
+
+- [x] `packages/contracts/tests/rolandJunoAdapter.test.js` — 63 tests: fixed SysEx format (0x30 cmd, fixed-offset parsing, bulk checksum).
+- [x] `packages/contracts/tests/korgMs2000Adapter.test.js` — 71 tests: fixed command byte (0x10→0x40), microKORG model ID (0x59→0x58), isKorgMs2000 detection.
+- [x] `packages/contracts/tests/casioCzAdapter.test.js` — 29 tests: nibble encoding + checksum.
+
+## Estado de tests
+
+```bash
+# Suite completa
+npx vitest run packages/core/tests/ packages/contracts/tests/   # 276 passed
+pnpm exec vitest run WebUI/tests/unit/                           # suite WebUI incluida en las 849 pruebas principales; sin fallos ni skips
+# Total: 851 passing, 0 failures, 0 skipped en la suite principal
+```

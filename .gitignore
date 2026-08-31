@@ -1,7 +1,8 @@
 node_modules/
 dist/
 build/
-.DS_Store
+target/
+*.DS_Store
 *.log
 .env
 coverage/
@@ -32,3 +33,6 @@ DOCS/librerías yamaha dx7/
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Windows junction for sirv dev server (mirrors vendor/images)
+WebUI/images

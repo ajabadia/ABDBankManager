@@ -1,0 +1,28 @@
+[package]
+name = "abd-bank-manager"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "abd_bank_manager"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["default"] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "serde_json"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+midir = "0.9"
+zip = "0.6"

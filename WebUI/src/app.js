@@ -7,26 +7,27 @@ import { BUILD_VERSION } from './contracts/buildVersion.js';
 import {
   createBank, getBank, getAllBanks, updateBank, deleteBank,
   createPatch, getPatchesForBank, getPatch, updatePatch, deletePatch,
-  importBank, exportBank, getDatabaseStats, getAllPatches,
-  runPreMigrationBackup, getFilteredPatches
+  importBank, exportBank, getDatabaseStats,
+  runPreMigrationBackup
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
 import { getModelContract, MODEL_CONTRACTS, getHardwareIds } from './contracts/modelContracts.js';
-import { contractRegistryData } from './contracts/modelContracts.js';
-import { applyRenameTemplate, validateRenameTemplate, patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
+import { patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
 import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getAllModels, getManufacturer } from './core/modelRegistry.js';
-import { hexDump, spacedHex } from './core/hexDump.js';
+import { hexDump } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
+import icons from './ui/icons.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
 import { undoHistory } from './core/undoHistory.js';
 import { createHexEditor } from './core/hexEditor.js';
 import { computeBankStats } from './core/bankStats.js';
-import { renderModelSelector, initModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
-import { globalSearch, highlightMatch, countByType } from './core/searchEngine.js';
+import { renderModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
+import { globalSearch, countByType } from './core/searchEngine.js';
 import { processBankImage, promptBankImageUpload } from './core/bankImage.js';
 import { getHardwareSpec } from './core/hardwareSpecs.js';
 import { renderBankDataSheet, initDataSheetHandlers } from './ui/components/bankDataSheet.js';
+import { bridge } from './bridge/bridgeManager.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
@@ -71,9 +72,9 @@ async function checkBackupReminder() {
   el.id = 'backup-reminder';
   el.className = 'backup-reminder';
   el.innerHTML = `
-    <span class="backup-reminder-icon">⚠️</span>
+    <span class="backup-reminder-icon">${icons.warning}</span>
     <span class="backup-reminder-text">Tienes <strong>${stats.patchCount} patches</strong> sin backup reciente (último: ${daysText}).</span>
-    <button class="btn btn-sm btn-primary" id="backup-reminder-export">💾 Exportar librería</button>
+    <button class="btn btn-sm btn-primary" id="backup-reminder-export">${icons.exportIcon} Exportar librería</button>
     <button class="btn btn-sm" id="backup-reminder-dismiss">Ocultar 24h</button>`;
   header.after(el);
 
@@ -87,10 +88,12 @@ let selectedManufacturer = null;
 let selectedModelId = null;
 let selectedBankId = null;
 let selectedPatchId = null;
+let renderVersion = 0; // Monotonically increasing; async renders discard results if stale
 let compareIds = new Set(); // For MF.11 patch comparison
 let searchMode = false; // MF.17 global search active
 let searchResults = [];
 let searchFilter = 'all'; // 'all' | 'models' | 'banks' | 'patches'
+let treeViewMode = false; // P0.5: tree view (all manufacturers expanded)
 
 // Group contracts by manufacturer
 const manufacturers = {};
@@ -128,8 +131,66 @@ async function init() {
   // Help button
   document.getElementById('btn-help').onclick = showShortcutsHelp;
 
+  // Tree view toggle (P0.5)
+  const treeToggle = document.getElementById('tree-view-toggle');
+  if (treeToggle) {
+    treeToggle.onclick = () => {
+      treeViewMode = !treeViewMode;
+      treeToggle.classList.toggle('active', treeViewMode);
+      renderNav();
+    };
+  }
+
   // Keyboard shortcuts
   document.addEventListener('keydown', handleKeyboard);
+
+  // Drag & drop zone (P2.2)
+  const dropZone = document.getElementById('drop-zone');
+  if (dropZone) {
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (e.dataTransfer.types.includes('Files')) {
+          dropZone.classList.add('active');
+        }
+      });
+    });
+    ['dragleave', 'dragend'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        dropZone.classList.remove('active');
+      });
+    });
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      dropZone.classList.remove('active');
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        const result = await importFile(file);
+        if (!result.success) { toast(`Error: ${result.error}`, 'error'); continue; }
+        let total = 0;
+        if (result.banks) {
+          for (const { bank, patches } of result.banks) {
+            const r = await importBank(bank, patches, { deduplication: 'skip' });
+            total += r.importedCount;
+          }
+        } else {
+          const r = await importBank(result.bank, result.patches, { deduplication: 'skip' });
+          total = r.importedCount;
+          if (!selectedBankId && r.bankId) { selectedBankId = r.bankId; navLevel = 'patches'; }
+        }
+        await renderNav(); await renderContent();
+        if (total) toast(`Importado: ${total} patches`, 'success');
+      }
+    });
+  }
+
+  // Native JUCE/WebView bridge: request the persisted library state when hosted in a plugin.
+  bridge.on('state', handleNativeLibraryState);
+  bridge.on('error', ({ message } = {}) => {
+    if (message) toast(message, 'error');
+  });
+  bridge.send('requestState');
 
   // MF.16 Backup reminder
   await checkBackupReminder();
@@ -189,6 +250,11 @@ function renderNav(filter = '') {
   const list = document.getElementById('nav-list');
   list.innerHTML = '';
 
+  if (treeViewMode && navLevel !== 'patches') {
+    renderTreeNav(list, filter);
+    return;
+  }
+
   if (navLevel === 'manufacturers') {
     renderManufacturerNav(list, filter);
   } else if (navLevel === 'models') {
@@ -225,14 +291,14 @@ function renderModelNav(list, filter) {
   // Back button
   const back = document.createElement('li');
   back.className = 'list-item';
-  back.innerHTML = '<span class="item-name" style="color:var(--accent);">← Fabricantes</span>';
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Fabricantes</span>`;
   back.onclick = () => { navLevel = 'manufacturers'; selectedManufacturer = null; renderNav(); renderContent(); };
   list.appendChild(back);
 
   // Header
   const header = document.createElement('li');
   header.className = 'list-section-header';
-  header.innerHTML = `<span class="arrow">▼</span> ${escHtml(selectedManufacturer)}`;
+  header.innerHTML = `<span class="arrow">${icons.chevronDown}</span> ${escHtml(selectedManufacturer)}`;
   list.appendChild(header);
 
   const models = manufacturers[selectedManufacturer] || [];
@@ -253,7 +319,7 @@ async function renderBankNav(list, filter) {
   // Back button
   const back = document.createElement('li');
   back.className = 'list-item';
-  back.innerHTML = `<span class="item-name" style="color:var(--accent);">← ${escHtml(selectedManufacturer)}</span>`;
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} ${escHtml(selectedManufacturer)}</span>`;
   back.onclick = () => { navLevel = 'models'; selectedModelId = null; selectedBankId = null; renderNav(); renderContent(); };
   list.appendChild(back);
 
@@ -261,10 +327,12 @@ async function renderBankNav(list, filter) {
   const contract = getModelContract(selectedModelId);
   const header = document.createElement('li');
   header.className = 'list-section-header';
-  header.innerHTML = `<span class="arrow">▼</span> ${escHtml(contract?.displayName || selectedModelId)}`;
+  header.innerHTML = `<span class="arrow">${icons.chevronDown}</span> ${escHtml(contract?.displayName || selectedModelId)}`;
   list.appendChild(header);
 
+  const myVersion = ++renderVersion;
   const banks = await getAllBanks();
+  if (myVersion !== renderVersion) return; // stale — a newer render took over
   // MF.18: Show banks compatible with selected model (including multi-hardware)
   const modelBanks = banks.filter(b => isBankCompatibleWithModel(b, selectedModelId));
   const filtered = filter ? modelBanks.filter(b => b.name.toLowerCase().includes(filter.toLowerCase())) : modelBanks;
@@ -272,8 +340,8 @@ async function renderBankNav(list, filter) {
   for (const bank of filtered) {
     const li = document.createElement('li');
     li.className = 'list-item' + (bank.id === selectedBankId ? ' active' : '');
-    const factoryBadge = bank.isFactory ? ' 🔒' : '';
-    const multiHw = (bank.hardwareIds && bank.hardwareIds.length > 1) ? ' 🔗' : '';
+    const factoryBadge = bank.isFactory ? ` ${icons.lock}` : '';
+    const multiHw = (bank.hardwareIds && bank.hardwareIds.length > 1) ? ` ${icons.link}` : '';
     const patchCount = (await getPatchesForBank(bank.id)).length;
     li.innerHTML = `
       <span class="item-name">${escHtml(bank.name)}${factoryBadge}${multiHw}</span>
@@ -287,25 +355,87 @@ async function renderPatchNav(list, filter) {
   // Back button
   const back = document.createElement('li');
   back.className = 'list-item';
+  const myVersion = ++renderVersion;
   const bank = await getBank(selectedBankId);
-  back.innerHTML = `<span class="item-name" style="color:var(--accent);">← ${escHtml(bank?.name || 'Banco')}</span>`;
+  if (myVersion !== renderVersion) return;
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} ${escHtml(bank?.name || 'Banco')}</span>`;
   back.onclick = () => { navLevel = 'banks'; selectedPatchId = null; renderNav(); renderContent(); };
   list.appendChild(back);
 
   const patches = await getPatchesForBank(selectedBankId);
+  if (myVersion !== renderVersion) return;
   const filtered = filter ? patches.filter(p => p.name.toLowerCase().includes(filter.toLowerCase())) : patches;
 
   for (const patch of filtered) {
     const li = document.createElement('li');
     li.className = 'list-item' + (patch.id === selectedPatchId ? ' active' : '');
-    const fav = patch.isFavorite ? ' ★' : '';
+    const fav = patch.isFavorite ? ` ${icons.star}` : '';
     li.innerHTML = `<span class="item-name">${escHtml(patch.name)}${fav}</span><span class="item-badge">${patch.category}</span>`;
     li.onclick = () => selectPatch(patch.id);
     list.appendChild(li);
   }
 }
 
-// ─── Selection handlers ───
+// ─── Tree view (P0.5) ───
+function renderTreeNav(list, filter) {
+  // Back button (go to cascade mode)
+  const back = document.createElement('li');
+  back.className = 'list-item';
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Vista en cascada</span>`;
+  back.onclick = () => { treeViewMode = false; renderNav(); };
+  list.appendChild(back);
+
+  // Header
+  const header = document.createElement('li');
+  header.className = 'list-section-header';
+  header.innerHTML = `<span class="arrow">${icons.chevronDown}</span> Todos los modelos (${Object.values(manufacturers).flat().length})`;
+  list.appendChild(header);
+
+  const mfrs = Object.keys(manufacturers).sort();
+  const filteredMfrs = filter ? mfrs.filter(m => m.toLowerCase().includes(filter.toLowerCase())) : mfrs;
+
+  for (const mfr of filteredMfrs) {
+    const models = manufacturers[mfr].sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const filteredModels = filter ? models.filter(c => c.displayName.toLowerCase().includes(filter.toLowerCase())) : models;
+    if (filteredModels.length === 0) continue;
+
+    // Manufacturer section
+    const mfrHeader = document.createElement('li');
+    mfrHeader.className = 'list-section-header';
+    mfrHeader.innerHTML = `<span class="arrow">${icons.chevronDown}</span> ${escHtml(mfr)} (${filteredModels.length})`;
+    mfrHeader.onclick = () => {
+      mfrHeader.classList.toggle('collapsed');
+      const body = mfrHeader.nextElementSibling;
+      if (body && body.classList.contains('list-section-body')) body.classList.toggle('hidden');
+    };
+    list.appendChild(mfrHeader);
+
+    // Models body
+    const body = document.createElement('li');
+    body.className = 'list-section-body';
+    const ul = document.createElement('ul');
+    ul.style.paddingLeft = '1rem';
+    ul.style.listStyle = 'none';
+    ul.style.margin = '0';
+
+    for (const contract of filteredModels) {
+      const li = document.createElement('li');
+      li.className = 'list-item' + (contract.modelId === selectedModelId ? ' active' : '');
+      const thumb = getModelThumbnail(contract.modelId);
+      li.innerHTML = `<img class="item-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'"><span class="item-name">${escHtml(contract.displayName)}</span>`;
+      li.onclick = () => selectModel(contract.modelId);
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+    list.appendChild(body);
+  }
+}
+
+function handleNativeLibraryState(state) {
+  if (!state || !Array.isArray(state.banks)) return;
+  setStatus('connected', `Estado JUCE: ${state.banks.length} bancos`);
+}
+
 function selectManufacturer(mfr) {
   selectedManufacturer = mfr;
   navLevel = 'models';
@@ -360,8 +490,7 @@ async function showComparison(container) {
   if (!patchA || !patchB) return;
 
   const bankA = await getBank(patchA.bankId);
-  const bankB = await getBank(patchB.bankId);
-  const contractA = getModelContract(bankA?.modelId);
+  await getBank(patchB.bankId);
   const rawA = patchA.rawData instanceof Uint8Array ? patchA.rawData : new Uint8Array(patchA.rawData);
   const rawB = patchB.rawData instanceof Uint8Array ? patchB.rawData : new Uint8Array(patchB.rawData);
 
@@ -403,10 +532,10 @@ async function showComparison(container) {
       <div class="panel-header">
         <span class="panel-title">Comparación: ${escHtml(patchA.name)} ↔ ${escHtml(patchB.name)}</span>
         <div style="display:flex;gap:0.3rem;">
-          <button class="btn btn-sm" id="btn-compare-swap">↕ Intercambiar</button>
+          <button class="btn btn-sm" id="btn-compare-swap">${icons.swap} Intercambiar</button>
           <button class="btn btn-sm" id="btn-compare-copy">Copiar B → A</button>
           <button class="btn btn-sm" id="btn-compare-csv">CSV</button>
-          <button class="btn btn-sm" id="btn-compare-close">✕ Cerrar</button>
+          <button class="btn btn-sm" id="btn-compare-close">${icons.close} Cerrar</button>
         </div>
       </div>
       <div class="parameter-table-wrap">
@@ -490,7 +619,7 @@ function renderSearchPanel(query) {
 
   const itemsHtml = filtered.length > 0
     ? filtered.map(r => {
-        const typeIcon = r.type === 'model' ? '🎹' : r.type === 'bank' ? '📁' : '🎵';
+        const typeIcon = r.type === 'model' ? icons.keyboard : r.type === 'bank' ? icons.folder : icons.music;
         const thumbHtml = r.thumbnail
           ? `<img class="search-result-thumb" src="${r.thumbnail}" alt="" onerror="this.style.display='none'">`
           : '';
@@ -510,7 +639,7 @@ function renderSearchPanel(query) {
   content.innerHTML = `
     <div class="search-panel">
       <div class="search-panel-header">
-        <span class="search-panel-title">🔍 Resultados para "${escHtml(query)}"</span>
+        <span class="search-panel-title">${icons.search} Resultados para "${escHtml(query)}"</span>
         <span class="search-panel-count">${total} resultado${total !== 1 ? 's' : ''}</span>
       </div>
       <div class="search-tabs">
@@ -661,10 +790,10 @@ async function renderModelContent(el) {
     const card = document.createElement('div');
     card.className = 'bank-card' + (bank.id === selectedBankId ? ' active' : '');
     const patchCount = (await getPatchesForBank(bank.id)).length;
-    const factoryLabel = bank.isFactory ? '🔒 Fábrica' : '👤 Usuario';
+    const factoryLabel = bank.isFactory ? `${icons.lock} Fábrica` : `${icons.user} Usuario`;
     const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
     const compatBadge = compatModels.length > 0
-      ? `<div class="bank-compat">🔗 ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
+      ? `<div class="bank-compat">${icons.link} ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
       : '';
     card.innerHTML = `
       <div class="bank-name">${escHtml(bank.name)}</div>
@@ -693,7 +822,7 @@ async function renderBankContent(el) {
   // MF.18: Show compatible models in header
   const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
   const compatHtml = compatModels.length > 0
-    ? `<div class="bk-compat">🔗 Compatible con: ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
+    ? `<div class="bk-compat">${icons.link} Compatible con: ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
     : '';
 
   el.innerHTML = `
@@ -701,29 +830,29 @@ async function renderBankContent(el) {
       <div class="bank-thumb-wrapper" id="bank-thumb-wrapper">
         <img class="bank-thumb-lg" id="bank-thumb-img" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
         <div class="bank-thumb-overlay" id="bank-thumb-overlay">
-          <span>📷 Cambiar imagen</span>
+          <span>${icons.camera} Cambiar imagen</span>
         </div>
       </div>
       <div class="bank-info">
         <h2>${escHtml(bank.name)}</h2>
-        <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? '🔒 Fábrica' : '👤 Usuario'}</div>
+        <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? `${icons.lock} Fábrica` : `${icons.user} Usuario`}</div>
         ${compatHtml}
       </div>
     </div>
     <div class="action-bar">
-      <button class="btn" id="btn-fetch-bank">📥 Fetch</button>
+      <button class="btn" id="btn-fetch-bank">${icons.download} Fetch</button>
       <div class="send-dropdown" id="send-dropdown">
-        <button class="btn btn-primary" id="btn-send-bank">📤 Enviar banco</button>
+        <button class="btn btn-primary" id="btn-send-bank">${icons.upload} Enviar banco</button>
         <div class="send-dropdown-menu" id="send-dropdown-menu"></div>
       </div>
-      <button class="btn" id="btn-import-bank">📂 Importar .syx</button>
-      <button class="btn" id="btn-export-bank">💾 Exportar .syx</button>
-      <button class="btn" id="btn-rename-bank">✏️ Renombrar</button>
-      <button class="btn" id="btn-change-image" title="MF.5: Imagen personalizada">📷 Imagen</button>
-      <button class="btn" id="btn-hw-specs" title="MF.6: Ficha técnica del hardware">📋 Specs</button>
-      <button class="btn" id="btn-export-csv-bank">📋 CSV</button>
-      <button class="btn" id="btn-import-csv-bank">📋 Importar CSV</button>
-      ${!bank.isFactory ? '<button class="btn" style="color:var(--error);" id="btn-delete-bank">🗑️ Eliminar</button>' : ''}
+      <button class="btn" id="btn-import-bank">${icons.importIcon} Importar .syx</button>
+      <button class="btn" id="btn-export-bank">${icons.exportIcon} Exportar .syx</button>
+      <button class="btn" id="btn-rename-bank">${icons.edit} Renombrar</button>
+      <button class="btn" id="btn-change-image" title="MF.5: Imagen personalizada">${icons.image} Imagen</button>
+      <button class="btn" id="btn-hw-specs" title="MF.6: Ficha técnica del hardware">${icons.specs} Specs</button>
+      <button class="btn" id="btn-export-csv-bank">${icons.clipboard} CSV</button>
+      <button class="btn" id="btn-import-csv-bank">${icons.clipboard} Importar CSV</button>
+      ${!bank.isFactory ? `<button class="btn" style="color:var(--error);" id="btn-delete-bank">${icons.trash} Eliminar</button>` : ''}
     </div>
     <div class="patch-grid" id="patch-grid"></div>
     <div id="patch-detail-container"></div>`;
@@ -775,7 +904,7 @@ async function renderBankContent(el) {
   }
 
   // MF.14 Statistics panel
-  await renderBankStats(el, patches, contract);
+  await renderBankStats(el, patches, contract, bank);
 
   // Render patch grid
   const grid = el.querySelector('#patch-grid');
@@ -783,7 +912,7 @@ async function renderBankContent(el) {
     const chip = document.createElement('div');
     chip.className = 'patch-chip' + (patch.id === selectedPatchId ? ' active' : '');
     const isCompare = compareIds.has(patch.id);
-    const fav = patch.isFavorite ? ' ★' : '';
+    const fav = patch.isFavorite ? ` ${icons.star}` : '';
     chip.innerHTML = `<input type="checkbox" class="patch-compare-check" data-patch-id="${patch.id}"${isCompare ? ' checked' : ''} title="Seleccionar para comparar">
       <span>${escHtml(patch.name)}${fav}</span><span class="patch-cat">${patch.category}</span>`;
     chip.querySelector('.patch-compare-check').onclick = (e) => {
@@ -799,7 +928,7 @@ async function renderBankContent(el) {
     const compareBar = document.createElement('div');
     compareBar.className = 'action-bar';
     compareBar.innerHTML = `
-      <button class="btn btn-primary" id="btn-compare-now">⚖️ Comparar ${compareIds.size} patches</button>
+      <button class="btn btn-primary" id="btn-compare-now">${icons.compare} Comparar ${compareIds.size} patches</button>
       <button class="btn" id="btn-compare-clear">Limpiar selección</button>`;
     el.querySelector('#patch-grid').after(compareBar);
     compareBar.querySelector('#btn-compare-now').onclick = () => showComparison(el.querySelector('#patch-detail-container'));
@@ -822,7 +951,7 @@ async function recordPatchUpdate(patchId, field, oldValue, newValue) {
 }
 
 // MF.14 Bank Statistics
-async function renderBankStats(el, patches, contract) {
+async function renderBankStats(el, patches, contract, bank) {
   const stats = computeBankStats(patches, contract);
   if (stats.total === 0) return;
 
@@ -869,7 +998,7 @@ async function renderBankStats(el, patches, contract) {
     <div class="bank-stats" id="bank-stats">
       <div class="stats-header" id="stats-toggle">
         <span class="stats-title">📊 Estadísticas</span>
-        <span class="stats-arrow">▼</span>
+        <span class="stats-arrow">${icons.chevronDown}</span>
       </div>
       <div class="stats-body" id="stats-body">
         <div class="stats-grid">
@@ -897,15 +1026,15 @@ async function renderBankStats(el, patches, contract) {
         </div>
         ${nameIssues.length > 0 ? `<div class="stats-section">
           <div class="stats-section-title">Problemas de nombre</div>
-          <div class="stats-issues">${nameIssues.map(i => `<span class="stats-issue">⚠️ ${escHtml(i)}</span>`).join('')}</div>
+          <div class="stats-issues">${nameIssues.map(i => `<span class="stats-issue">${icons.warning} ${escHtml(i)}</span>`).join('')}</div>
         </div>` : ''}
         ${stats.noCategory > 0 ? `<div class="stats-section">
           <div class="stats-section-title">Sin categoría</div>
-          <span class="stats-issue">⚠️ ${stats.noCategory} patch${stats.noCategory > 1 ? 'es' : ''} sin categoría</span>
+          <span class="stats-issue">${icons.warning} ${stats.noCategory} patch${stats.noCategory > 1 ? 'es' : ''} sin categoría</span>
         </div>` : ''}
         ${paramHtml}
         <div class="stats-section" style="text-align:right;">
-          <button class="btn btn-sm" id="btn-export-stats-json">📥 Exportar JSON</button>
+          <button class="btn btn-sm" id="btn-export-stats-json">${icons.download} Exportar JSON</button>
         </div>
       </div>
     </div>`;
@@ -921,8 +1050,7 @@ async function renderBankStats(el, patches, contract) {
   const body = el.querySelector('#stats-body');
   if (toggle && body) {
     toggle.onclick = () => {
-      body.classList.toggle('collapsed');
-      toggle.querySelector('.stats-arrow').textContent = body.classList.contains('collapsed') ? '▶' : '▼';
+      body.classList.toggle('collapsed');        toggle.querySelector('.stats-arrow').innerHTML = body.classList.contains('collapsed') ? icons.chevronRight : icons.chevronDown;
     };
   }
 
@@ -946,7 +1074,6 @@ async function renderPatchDetail(container) {
   if (!patch) { container.innerHTML = ''; return; }
 
   const bank = await getBank(patch.bankId);
-  const contract = getModelContract(bank?.modelId);
   const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
 
   let paramsHtml = '';
@@ -983,7 +1110,7 @@ async function renderPatchDetail(container) {
             <span class="patch-info-label">Nombre</span>
             <input class="patch-info-input" id="patch-name" value="${escHtml(patch.name)}" maxlength="64">
           </div>
-          <button class="btn btn-sm" id="btn-fav">${patch.isFavorite ? '★' : '☆'} Favorito</button>
+          <button class="btn btn-sm" id="btn-fav">${patch.isFavorite ? icons.star : icons.starOutline} Favorito</button>
           <button class="btn btn-sm" style="color:var(--error);" id="btn-delete-patch">Borrar</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;">
@@ -1122,7 +1249,7 @@ function showKnownDevicePicker(known, inputs) {
     const inPort = findMatchingInput(c.port.name, inputs);
     return `<div style="padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--bg-tertiary);" class="midi-device-row" data-idx="${i}">
       <div><strong>${escHtml(c.model.displayName)}</strong><br><small style="color:var(--text-secondary);">Out: ${escHtml(c.port.name || '?')} · In: ${escHtml(inPort?.name || 'Ninguna')}</small></div>
-      <span style="color:var(--text-secondary);">▶</span>
+      <span style="color:var(--text-secondary);">${icons.chevronRight}</span>
     </div>`;
   }).join('');
 
@@ -1159,7 +1286,7 @@ function showManualSelector(outputs, inputs) {
       <span class="patch-info-label">Entrada MIDI</span>
       <select class="param-select" id="midi-in" style="width:100%"><option value="-1">— No conectar entrada —</option>${inOpts}</select>
     </div>
-    <button class="btn" id="midi-detect-btn" style="margin-top:0.6rem;width:100%;">🔍 Detectar modelo</button>
+    <button class="btn" id="midi-detect-btn" style="margin-top:0.6rem;width:100%;">${icons.search} Detectar modelo</button>
     <div id="midi-detect-result"></div>
     <div id="midi-model-manual" style="display:none;margin-top:0.5rem;" class="patch-info-field">
       <span class="patch-info-label">Modelo</span>
@@ -1320,7 +1447,7 @@ async function handleMidiSendBank(targetModelId = null) {
   } catch (error) { toast(error.message, 'error'); }
 }
 
-async function handleMidiSendPatch() {
+window.handleMidiSendPatch = async function () {
   if (!activeMidiTransport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
   if (!selectedPatchId) { toast('Selecciona un patch', 'error'); return; }
   const patch = await getPatch(selectedPatchId);
@@ -1521,7 +1648,7 @@ function showHardwareSpecs(modelId) {
 
   showModal(`
     <div class="spec-sheet">
-      <h3 style="margin:0 0 0.8rem;">📋 Ficha Técnica — ${escHtml(s.model || c.displayName || modelId)}</h3>
+      <h3 style="margin:0 0 0.8rem;">${icons.specs} Ficha Técnica — ${escHtml(s.model || c.displayName || modelId)}</h3>
       ${section('Información básica', basicHtml)}
       ${section('Teclado y display', keyboardHtml)}
       ${section('Conexiones', connHtml)}
@@ -1644,6 +1771,7 @@ function handleKeyboard(e) {
   // Ctrl/Cmd shortcuts
   if (ctrl) {
     if (e.key === 'i') { e.preventDefault(); document.getElementById('file-input')?.click(); }
+    else if (e.key === 'v') { e.preventDefault(); handlePasteHex(); }
     else if (e.key === 'e' && !e.shiftKey) { e.preventDefault(); handleExport(); }
     else if (e.key === 'e' && e.shiftKey) { e.preventDefault(); handleExportLibrary(); }
     else if (e.key === 's') { e.preventDefault(); toast('Guardado', 'success'); }
@@ -1678,6 +1806,53 @@ function handleKeyboard(e) {
   if (e.key === '?') {
     showShortcutsHelp();
     return;
+  }
+}
+
+// ─── Clipboard paste (Ctrl+V) ───
+async function handlePasteHex() {
+  try {
+    const text = await navigator.clipboard.readText();
+    const cleaned = text.replace(/[^0-9a-fA-F\s]/g, '').replace(/\s+/g, '');
+    if (cleaned.length < 2) return;
+    const bytes = [];
+    for (let i = 0; i < cleaned.length - 1; i += 2) {
+      bytes.push(parseInt(cleaned.substring(i, i + 2), 16) & 0xFF);
+    }
+    if (bytes.length === 0) return;
+
+    // If we have a selected patch, paste into hex editor
+    if (selectedPatchId) {
+      const patch = await getPatch(selectedPatchId);
+      if (patch && patch.rawData) {
+        const editor = document.querySelector('.hex-editor-bytes');
+        if (editor) {
+          const pasteEvent = new CustomEvent('hex-editor-paste', { detail: new Uint8Array(bytes) });
+          editor.dispatchEvent(pasteEvent);
+          return;
+        }
+      }
+    }
+
+    // Otherwise, import as new SysEx file
+    const file = new File([new Uint8Array(bytes)], 'clipboard.syx', { type: 'application/octet-stream' });
+    const result = await importFile(file);
+    if (!result.success) { toast(`Paste failed: ${result.error}`, 'error'); return; }
+    let total = 0;
+    if (result.banks) {
+      for (const { bank, patches } of result.banks) {
+        const r = await importBank(bank, patches, { deduplication: 'skip' });
+        total += r.importedCount;
+      }
+    } else {
+      const r = await importBank(result.bank, result.patches, { deduplication: 'skip' });
+      total = r.importedCount;
+      if (!selectedBankId && r.bankId) { selectedBankId = r.bankId; navLevel = 'patches'; }
+    }
+    await renderNav(); await renderContent();
+    toast(`Pegado: ${total} patches desde portapapeles`, 'success');
+  } catch {
+    // Clipboard not available or empty
   }
 }
 
@@ -1777,7 +1952,7 @@ window.toggleSection = (toggleEl) => {
   const section = toggleEl.closest('.sidebar-section');
   const icon = toggleEl.querySelector('span');
   section.classList.toggle('collapsed');
-  if (icon) icon.textContent = section.classList.contains('collapsed') ? '▶' : '▼';
+  if (icon) icon.innerHTML = section.classList.contains('collapsed') ? icons.chevronRight : icons.chevronDown;
 };
 
 // Hidden file inputs for import
@@ -1806,7 +1981,7 @@ function setupDragDrop() {
   // Create drop overlay
   const overlay = document.createElement('div');
   overlay.id = 'drop-overlay';
-  overlay.innerHTML = '<div class="drop-overlay-content">📂 Soltar archivo aquí<br><small>.syx · .sysex · .abdlibrary</small></div>';
+  overlay.innerHTML = `<div class="drop-overlay-content">${icons.folder} Soltar archivo aquí<br><small>.syx · .sysex · .abdlibrary</small></div>`;
   overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,212,255,0.1);border:3px dashed var(--accent);z-index:999;justify-content:center;align-items:center;pointer-events:none;';
   document.body.appendChild(overlay);
 

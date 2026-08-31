@@ -1,26 +1,41 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' ws: wss:;">
+    <script type="importmap">
+    {
+      "imports": {
+        "dexie": "./vendor/dexie/dexie.mjs",
+        "jszip": "./vendor/jszip.mjs",
+        "file-saver": "./vendor/FileSaver.mjs"
+      }
+    }
+    </script>
     <title>ABD Universal Bank Manager</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>ðŸŽ›ï¸</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --accent: #00d4ff;
-            --accent-dim: #00d4ff22;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --border: #30363d;
-            --success: #3fb950;
-            --warning: #d29922;
-            --error: #f85149;
+            --bg-primary: var(--color-bg-base, #0d1117);
+            --bg-secondary: var(--color-panel-bg, #161b22);
+            --bg-tertiary: var(--color-panel-surface, #21262d);
+            --accent: var(--color-accent, #00d4ff);
+            --accent-dim: var(--color-accent-dim, rgba(0, 212, 255, 0.15));
+            --accent-strong: var(--color-accent-hover, #00d4ff);
+            --text-primary: var(--color-text-main, #e6edf3);
+            --text-secondary: var(--color-text-muted, #8b949e);
+            --border: var(--color-panel-border, #30363d);
+            --success: var(--color-success, #3fb950);
+            --warning: var(--color-warning, #d29922);
+            --error: var(--color-error, #f85149);
         }
         body {
             font-family: 'Space Grotesk', sans-serif;
@@ -114,6 +129,15 @@
             font-family: inherit;
         }
         .sidebar-search input:focus { outline: none; border-color: var(--accent); }
+        .sidebar-header {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .sidebar-header .btn-ghost.active {
+            background: var(--accent-dim);
+            color: var(--accent);
+        }
         .sidebar-list {
             flex: 1;
             overflow-y: auto;
@@ -165,7 +189,7 @@
         .list-section-body { padding-left: 0.5rem; }
         .list-section-body.hidden { display: none; }
 
-        /* Main content — single scroll container */
+        /* Main content â€” single scroll container */
         .main-content {
             display: flex;
             flex-direction: column;
@@ -173,6 +197,25 @@
             padding: 1.5rem;
             gap: 1.5rem;
         }
+
+        /* Drop zone */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 3rem 2rem;
+            text-align: center;
+            background: var(--bg-tertiary);
+            transition: all 0.2s;
+            pointer-events: none;
+        }
+        .drop-zone.active {
+            border-color: var(--accent);
+            background: var(--accent-dim);
+            pointer-events: auto;
+        }
+        .drop-zone .drop-zone-icon { font-size: 3rem; color: var(--accent); margin-bottom: 1rem; }
+        .drop-zone .drop-zone-text { font-size: 1rem; color: var(--text-primary); margin-bottom: 0.5rem; }
+        .drop-zone .drop-zone-hint { font-size: 0.75rem; color: var(--text-secondary); }
 
         /* Panels */
         .panel {
@@ -258,7 +301,7 @@
             gap: 1.5rem;
             padding: 1rem 0;
         }
-        .manufacturer-logo { max-height: 80px; max-width: 200px; object-fit: contain; }
+        .manufacturer-logo { max-height: 80px; max-width: 200px; object-fit: contain; color: var(--text-primary); }
 
         /* Hardware header */
         .hardware-header {
@@ -269,7 +312,7 @@
             border-bottom: 1px solid var(--border);
             margin-bottom: 1rem;
         }
-        .hardware-logo { max-height: 60px; max-width: 120px; object-fit: contain; }
+        .hardware-logo { max-height: 60px; max-width: 120px; object-fit: contain; color: var(--text-primary); }
         .hardware-thumb { max-height: 100px; max-width: 160px; object-fit: contain; border-radius: 6px; }
         .hardware-info { flex: 1; }
         .hardware-info h2 { font-size: 1.2rem; margin-bottom: 0.3rem; }
@@ -653,6 +696,8 @@
         .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
         .btn-icon { padding: 0.25rem; width: 24px; height: 24px; justify-content: center; }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+        .icon svg { width: 1em; height: 1em; fill: none; stroke: currentColor; }
 
         /* Toast */
         #toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 1000; display: flex; flex-direction: column; gap: 0.5rem; }
@@ -1191,7 +1236,7 @@
         .model-selector__mfr summary::-webkit-details-marker { display: none; }
         .model-selector__mfr summary::marker { content: ''; }
         .model-selector__mfr summary::before {
-            content: '▶';
+            content: 'â–¶';
             display: inline-block;
             transition: transform 0.15s;
             font-size: 0.5rem;
@@ -1215,8 +1260,13 @@
 
     <div class="main-grid">
         <aside class="sidebar">
-            <div class="sidebar-search">
-                <input type="search" id="global-search" placeholder="Buscar...">
+            <div class="sidebar-header">
+                <div class="sidebar-search">
+                    <input type="search" id="global-search" placeholder="Buscar...">
+                </div>
+                <button class="btn btn-sm btn-ghost" id="tree-view-toggle" title="Vista Ã¡rbol (P0.5)" style="margin:0 0.5rem 0.5rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px; margin-right:4px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Vista Árbol
+                </button>
             </div>
             <ul class="sidebar-list" id="nav-list"></ul>
         </aside>
@@ -1227,6 +1277,11 @@
                 <p>Selecciona un fabricante en la barra lateral para empezar, o conecta un hardware MIDI.</p>
             </div>
             <div id="panel-content" style="display:none;"></div>
+            <div class="drop-zone" id="drop-zone" style="display:none;">
+                <div class="drop-zone-icon">${icons.upload}</div>
+                <div class="drop-zone-text">Arrastra archivos .syx, .abdbank, .abdlibrary, .json aquÃ­</div>
+                <div class="drop-zone-hint">o pega hex con Ctrl+V</div>
+            </div>
         </main>
     </div>
 
@@ -1236,6 +1291,12 @@
         <div class="modal" id="modal-content"></div>
     </div>
 
+    <!-- UMD bundles (loaded before modules so import map wrappers can reference globals) -->
+    <script src="./vendor/jszip/jszip.min.js"></script>
+    <script src="./vendor/file-saver/FileSaver.min.js"></script>
+
     <script type="module" src="./src/app.js"></script>
+    <!-- Cache-busting: change version to force browser reload -->
+    <script>/* ABDBankManager v0.1.0 */</script>
 </body>
 </html>
