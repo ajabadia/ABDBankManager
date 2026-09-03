@@ -239,7 +239,7 @@
 - [x] Implement bi-directional DSP communication bridge contract (synthBridge: audition, capture, commit bank)
 - [x] Softsynth contract `abd-sm002` (isSoftsynth: true, `compatibleModels: ['korg-ms2000','korg-microkorg']`) — especc §10 del `BANK_MANAGER_INTEGRATION_SPEC.md` de ABDMS2000
 - [x] WebUI source of truth via CMake FetchContent: ABDMS2000 consume `../ABDBankManager/WebUI` (dev) / tag `v0.3.0-lib` (CI/clones frescos). Sustituye al antiguo `Scripts/sync_bankmanager.js` (copias eliminadas: `WebUI/src/components/bank/`, `sync:bankmanager`, deps dexie/jszip)
-- [ ] Connect physical hardware MIDI dumping from plugin WebUI
+- [ ] Wire physical hardware MIDI dumping in plugin WebUI — el transporte ya existe en ABDBankManager (`WebUI/src/bridge/hardwareMidi.js` + `cpp/HardwareMidiPipe.h`: acciones `hardware.send`/`hardware.listen`/`hardware.receive`), pero el puente del plugin ABDMS2000 (`WebUI/src/bridge/bridgeCore.js`) aún no las maneja (solo `sendMidiCC`). Falta enrutar esas acciones a un puerto MIDI físico JUCE para que "Send/Receive from MS2000 Hardware" del modal funcione dentro del plugin.
 - [ ] **Crear bancos de fábrica** — el banco básico propio (de ABDSynths) para incrustar dentro del synth y/o como banco de fábrica de ABDBankManager. Diferido: infraestructura aún en maduración
 - [ ] **Desplegar el WebUI en internet** — `npm run build` → `dist/` limpio (sin `.syx` de terceros) para host estático. Los fixtures `*.syx` quedan fuera (solo estudio local, protegidos en `.gitignore`)
 
