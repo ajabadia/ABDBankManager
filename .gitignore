@@ -36,3 +36,20 @@ Desktop.ini
 
 # Windows junction for sirv dev server (mirrors vendor/images)
 WebUI/images
+
+# --- Fixtures SysEx de terceros (solo estudio local; NO se publican) ---
+# Bancos comerciales/factory de terceros (Behringer, Yamaha, Roland, etc.)
+# se usan para probar/estudiar en local. No versionar ni desplegar.
+fixtures/
+*.syx
+*.SYX
+
+# Build local de pruebas (presets de ABDMS2000 etc.)
+build-test/
+
+# Builds de plugin/bridge (cualquier variante)
+build-plugin*/
+build-bridge/
+
+# Instalador descargado
+rustup-init.exe
