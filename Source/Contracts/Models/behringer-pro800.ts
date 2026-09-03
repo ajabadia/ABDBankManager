@@ -24,7 +24,8 @@
  * 7-to-8 packing identical to Korg format.
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import { ModelContract, validateModelContract, type ContractFileParse } from '../ModelContract';
+import { pack7to8NoPad, unpack7to8NoPad, splitSysexMessages } from '../SysEx/codec';
 
 const PRO800_BANK_CAPACITY = 400;
 const PRO800_BANKS_COUNT = 4;
@@ -48,23 +49,7 @@ const PRO800_CMD_RESPONSE = 0x78;
 
 const PRO800_HEADER_BYTES = [0x00, 0x20, 0x32, 0x00, 0x01, 0x24, 0x00];
 
-// ─── 7-to-8 Packing (same as Korg — ABDMS2000 SysExCodec reference) ───
-
-function pack8to7(data: Uint8Array): Uint8Array {
-  const packed: number[] = [];
-  let srcIdx = 0;
-  while (srcIdx < data.length) {
-    const chunkSize = Math.min(7, data.length - srcIdx);
-    let msbCollector = 0;
-    for (let i = 0; i < chunkSize; i++) {
-      if ((data[srcIdx + i] & 0x80) !== 0) msbCollector |= (1 << i);
-    }
-    packed.push(msbCollector);
-    for (let i = 0; i < chunkSize; i++) packed.push(data[srcIdx + i] & 0x7F);
-    srcIdx += chunkSize;
-  }
-  return new Uint8Array(packed);
-}
+// ─── Helpers ───
 
 function getFormatVersion(rawData: Uint8Array): number | null {
   const version = rawData[4];
@@ -75,19 +60,6 @@ function hasKnownFormatVersion(rawData: Uint8Array): boolean {
   // Synthetic payloads used by contract tests may not include a version byte;
   // real dumps are versioned and are validated when the byte is present.
   return rawData.length <= 4 || getFormatVersion(rawData) !== null;
-}
-
-function unpack7to8(packed: Uint8Array): Uint8Array {
-  const unpacked: number[] = [];
-  let srcIdx = 0;
-  while (srcIdx < packed.length) {
-    const msbCollector = packed[srcIdx++];
-    for (let i = 0; i < 7 && srcIdx < packed.length; i++) {
-      const bit7 = (msbCollector >> i) & 0x01;
-      unpacked.push((packed[srcIdx++] & 0x7F) | (bit7 << 7));
-    }
-  }
-  return new Uint8Array(unpacked);
 }
 
 // ─── SysEx Helpers ───
@@ -101,17 +73,6 @@ function isPro800SysEx(msg: Uint8Array, cmd: number): boolean {
   if (msg[8] !== cmd) return false;
   if (msg[msg.length - 1] !== 0xF7) return false;
   return true;
-}
-
-function splitSysex(raw: Uint8Array): Uint8Array[] {
-  const msgs: Uint8Array[] = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 0xF0 && !inSysex) { inSysex = true; start = i; }
-    else if (raw[i] === 0xF7 && inSysex) { msgs.push(raw.slice(start, i + 1)); inSysex = false; }
-  }
-  return msgs;
 }
 
 function getPro800BankLetter(index: number): string {
@@ -132,7 +93,7 @@ const behringerPro800Contract: ModelContract = {
   displayName: 'Behringer Pro-800',
   manufacturer: 'Behringer',
   icon: 'behringer-logo.svg',
-  thumbnail: 'behringer-pro800.svg',
+  thumbnail: 'behringer-pro800.webp',
 
   bankCapacity: PRO800_BANK_CAPACITY,
   banksCount: PRO800_BANKS_COUNT,
@@ -189,7 +150,7 @@ const behringerPro800Contract: ModelContract = {
   verifyChecksum(sysex: Uint8Array): boolean {
     if (!isPro800SysEx(sysex, PRO800_CMD_RESPONSE)) return false;
     const packed = sysex.slice(11, sysex.length - 1);
-    const unpacked = unpack7to8(packed);
+    const unpacked = unpack7to8NoPad(packed);
     return packed.length > 0 && isPro800SysEx(sysex, PRO800_CMD_RESPONSE);
   },
 
@@ -202,7 +163,7 @@ const behringerPro800Contract: ModelContract = {
     const data = rawData.slice(0, size);
     const padded = new Uint8Array(size);
     padded.set(data);
-    const packed = pack8to7(padded);
+    const packed = pack7to8NoPad(padded);
     const lsb = s % 128;
     const msb = Math.floor(s / 128);
     return new Uint8Array([
@@ -213,7 +174,7 @@ const behringerPro800Contract: ModelContract = {
   parsePatchSysEx(sysex: Uint8Array): { rawData: Uint8Array; slot: number } | null {
     if (!isPro800SysEx(sysex, PRO800_CMD_RESPONSE)) return null;
     const packed = sysex.slice(11, sysex.length - 1);
-    const unpacked = unpack7to8(packed);
+    const unpacked = unpack7to8NoPad(packed);
     const version = getFormatVersion(unpacked);
     const versionSize = version === null
       ? this.patchDataSize
@@ -239,13 +200,51 @@ const behringerPro800Contract: ModelContract = {
   },
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
-    const msgs = splitSysex(sysex);
     const results: { rawData: Uint8Array; slot: number }[] = [];
-    for (const msg of msgs) {
+    for (const msg of splitSysexMessages(sysex)) {
       const parsed = behringerPro800Contract.parsePatchSysEx?.(msg);
       if (parsed) results.push(parsed);
     }
     return results;
+  },
+
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const parsed = splitSysexMessages(data)
+      .map(m => this.parsePatchSysEx?.(m))
+      .filter((p): p is { rawData: Uint8Array; slot: number } => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map(p => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /pro.?800/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'Pro-800', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Behringer', modelId: this.modelId }
+      : null;
   },
 
   legacySysEx: {

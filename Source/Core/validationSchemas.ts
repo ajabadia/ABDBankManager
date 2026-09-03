@@ -1,9 +1,17 @@
 /**
  * ABD Bank Manager — Zod Validation Schemas
  * Runtime validation for all imported/exported data
+ *
+ * The canonical PatchData type is defined in Source/Contracts/PatchData.ts
+ * and re-exported here so consumers can import it from either location.
  */
 
 import { z } from 'zod';
+import type { PatchData } from '../Contracts/PatchData.ts';
+
+// Re-export the canonical interface so existing
+// `import { PatchData } from './validationSchemas'` keeps working.
+export type { PatchData } from '../Contracts/PatchData.ts';
 
 // --- Base Types ---
 
@@ -25,8 +33,6 @@ export const PatchDataSchema = z.object({
   versionNumber: z.number().int().positive().default(1),
   previousVersionId: z.string().uuid().nullable().optional()
 });
-
-export type PatchData = z.infer<typeof PatchDataSchema>;
 
 export const ImportResultSchema = z.object({
   success: z.boolean(),

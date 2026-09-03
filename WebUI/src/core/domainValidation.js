@@ -17,7 +17,18 @@ function validateCommonPatch(patch) {
   }
 }
 
-export function validatePatchAgainstContract(patch, contract, index) {
+/**
+ * Allowed hardware ids: the set a bank/patch may carry. Defaults to the
+ * contract's forward family (modelId + compatibleModels). A caller may pass
+ * the richer result of getHardwareIds() so reverse-listed softsynth/derived
+ * models are also accepted.
+ */
+function allowedHardwareIds(contract, hardwareIds) {
+  if (hardwareIds) return new Set(hardwareIds);
+  return new Set([contract.modelId, ...(contract.compatibleModels || [])]);
+}
+
+export function validatePatchAgainstContract(patch, contract, index, hardwareIds) {
   validateCommonPatch(patch);
   if (!contract) return;
 
@@ -25,9 +36,8 @@ export function validatePatchAgainstContract(patch, contract, index) {
     throw new DomainValidationError(`patch rawData has ${patch.rawData.length} bytes; ${contract.patchDataSize} required`);
   }
 
-  const hardwareIds = patch.hardwareIds || [];
-  const allowed = new Set([contract.modelId, ...(contract.compatibleModels || [])]);
-  if (hardwareIds.some(id => !allowed.has(id))) {
+  const allowed = allowedHardwareIds(contract, hardwareIds);
+  if ((patch.hardwareIds || []).some(id => !allowed.has(id))) {
     throw new DomainValidationError(`patch hardwareIds are incompatible with ${contract.modelId}`);
   }
 
@@ -38,7 +48,7 @@ export function validatePatchAgainstContract(patch, contract, index) {
   }
 }
 
-export function validateBankAgainstContract(bank, patches, contract) {
+export function validateBankAgainstContract(bank, patches, contract, hardwareIds) {
   if (!bank || typeof bank !== 'object') throw new DomainValidationError('bank must be an object');
   if (!bank.id || !bank.name || bank.name.length > 64) {
     throw new DomainValidationError('bank id and a 1–64 character name are required');
@@ -53,7 +63,7 @@ export function validateBankAgainstContract(bank, patches, contract) {
   if (bank.modelId !== contract.modelId) {
     throw new DomainValidationError(`bank modelId '${bank.modelId}' does not match '${contract.modelId}'`);
   }
-  const allowed = new Set([contract.modelId, ...(contract.compatibleModels || [])]);
+  const allowed = allowedHardwareIds(contract, hardwareIds);
   if ((bank.hardwareIds || []).some(id => !allowed.has(id))) {
     throw new DomainValidationError(`bank hardwareIds are incompatible with ${contract.modelId}`);
   }
@@ -69,6 +79,6 @@ export function validateBankAgainstContract(bank, patches, contract) {
     }
     if (indexes.has(index)) throw new DomainValidationError(`duplicate patch index '${index}'`);
     indexes.add(index);
-    validatePatchAgainstContract(patch, contract, index);
+    validatePatchAgainstContract(patch, contract, index, hardwareIds);
   });
 }

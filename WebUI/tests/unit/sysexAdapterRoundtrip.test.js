@@ -9,9 +9,17 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  pack8to7,
+  unpack7to8,
+  encodeNibble,
+  decodeNibble,
+  rolandChecksum,
+  yamahaChecksum,
+  casioChecksum
+} from '@contracts/SysEx/codec';
 
-// @contracts/Adapters/sysexUtils not compiled to WebUI — skip
-describe.skip('SysEx Utilities — Roundtrip', () => {
+describe('SysEx Utilities — Roundtrip', () => {
   describe('7-to-8 packing (Korg, Behringer)', () => {
     it('roundtrips arbitrary data through pack→unpack', () => {
       // Test with known data
@@ -170,7 +178,7 @@ describe.skip('SysEx Utilities — Roundtrip', () => {
   });
 });
 
-describe.skip('Full SysEx Message Roundtrip', () => {
+describe('Full SysEx Message Roundtrip', () => {
   describe('Roland Juno-106', () => {
     it('builds valid SysEx with correct checksum', () => {
       const voiceData = new Uint8Array(18);
@@ -301,22 +309,28 @@ describe.skip('Full SysEx Message Roundtrip', () => {
       for (let i = 0; i < 242; i++) patchData[i] = (i * 29 + 17) & 0xFF;
 
       const packed = pack8to7(patchData);
-      const modelId = 0x0E;
-      const cmd = 0x01;
-      const subId = 0x01;
+      // Real DM12 header: F0 00 20 32 20 <device> 02 <protocol> <bank> <program>
+      const modelId = 0x20;
+      const device = 0x00;
+      const cmd = 0x02;
+      const protocol = 0x07;
+      const bank = 0x00;
+      const program = 0x04;
+      const trailer = [0x00, 0x00];
 
-      const sysex = new Uint8Array([0xF0, 0x00, 0x20, 0x32, modelId, cmd, subId, ...packed, 0xF7]);
+      const sysex = new Uint8Array([0xF0, 0x00, 0x20, 0x32, modelId, device, cmd, protocol, bank, program, ...packed, ...trailer, 0xF7]);
 
       // Verify structure
       expect(sysex[0]).toBe(0xF0);
       expect(sysex[1]).toBe(0x00);
       expect(sysex[2]).toBe(0x20);
       expect(sysex[3]).toBe(0x32); // Behringer
-      expect(sysex[4]).toBe(0x0E); // DeepMind 12
+      expect(sysex[4]).toBe(0x20); // DeepMind 12 model ID (real value, NOT 0x0E)
+      expect(sysex[6]).toBe(0x02); // CMD_DUMP
       expect(sysex[sysex.length - 1]).toBe(0xF7);
 
       // Verify unpack roundtrip
-      const receivedPacked = sysex.slice(7, sysex.length - 1);
+      const receivedPacked = sysex.slice(10, 10 + packed.length);
       const unpacked = unpack7to8(receivedPacked);
       for (let i = 0; i < 242; i++) {
         expect(unpacked[i]).toBe(patchData[i]);

@@ -4,24 +4,23 @@
  */
 
 export * from './ModelContract';
+export type { PatchData } from './PatchData';
+export type { MidiPortInfo, MidiOutputPortInfo } from './Midi';
 export {
   BaseImportAdapter,
   type ImportAdapter,
-  type ImportResult,
-  type PatchData as ImportPatchData
+  type ImportResult
 } from './ImportAdapter';
 export {
   BaseExportAdapter,
   type ExportAdapter,
-  type ExportOptions,
-  type PatchData as ExportPatchData
+  type ExportOptions
 } from './ExportAdapter';
 export {
   BaseHardwareLink,
   type HardwareLinkContract,
   type HardwareDevice,
-  type ImportResult as HardwareImportResult,
-  type PatchData as HardwarePatchData
+  type ImportResult as HardwareImportResult
 } from './HardwareLinkContract';
 export * from './ContractRegistry';
 export * from './Models';

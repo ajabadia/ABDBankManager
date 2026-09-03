@@ -17,7 +17,7 @@ Dexie.dependencies.IDBKeyRange = globalThis.IDBKeyRange;
 const { db } = await import('../../src/store/persistence.js');
 
 async function resetDb() {
-  try { await db.delete(); } catch (e) { /* already deleted */ }
+  try { await db.delete(); } catch { /* already deleted */ }
 }
 
 describe('Migración Dexie real (fake-indexeddb)', () => {
@@ -84,7 +84,7 @@ describe('Migración Dexie real (fake-indexeddb)', () => {
     failing.version(2).stores({ newTable: '++id', others: '++id' });
     failing.version(3).upgrade(() => { throw new Error('migración simulada rota'); });
     await expect(failing.open()).rejects.toThrow('migración simulada rota');
-    try { failing.close(); } catch (e) { /* already torn down */ }
+    try { failing.close(); } catch { /* already torn down */ }
 
     const probe = new Dexie('ABDBankManager');
     probe.version(1).stores({ banks: '++dbId, id, modelId, name' });

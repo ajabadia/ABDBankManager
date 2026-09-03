@@ -1,14 +1,15 @@
-/**
+﻿/**
  * MF.17 — Advanced Global Search Engine
  * Searches across patches, banks, models, hex data, and parameters.
  * Returns grouped, ranked results with highlight info.
  */
 
-import { getAllBanks, getAllPatches, getPatchesForBank } from '../store/persistence.js';
-import { MODEL_CONTRACTS } from '../contracts/modelContracts.js';
+import icons from '../ui/icons.js';
+
+import { getAllBanks, getAllPatches } from '../store/persistence.js';
+import { MODEL_CONTRACTS, getModelContract } from '../contracts/modelContracts.js';
 import { getParameterSchema, hasParameterSchema, getModelThumbnail } from './modelRegistry.js';
 import { spacedHex } from './hexDump.js';
-import { getModelContract } from '../contracts/modelContracts.js';
 
 /**
  * @typedef {Object} SearchResult
@@ -44,9 +45,8 @@ const SCORE_MODEL = 10;
  */
 export function highlightMatch(text, query) {
   if (!query || !text) return escHtml(text || '');
-  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`(${escaped})`, 'gi');
-  return escHtml(text).replace(new RegExp(`(${escHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<mark>$1</mark>');
+  const escapedQuery = escHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escHtml(text).replace(new RegExp(`(${escapedQuery})`, 'gi'), '<mark>$1</mark>');
 }
 
 function escHtml(s) {
@@ -109,8 +109,8 @@ export async function globalSearch(query) {
 
     if (searchableFields.includes(q)) {
       // Determine which field matched
-      let matchField = 'banco';
-      if ((bank.description || '').toLowerCase().includes(q)) matchField = 'descripción';
+      let matchField = 'bank';
+      if ((bank.description || '').toLowerCase().includes(q)) matchField = 'description';
       else if ((bank.bankAuthor || '').toLowerCase().includes(q)) matchField = 'autor';
       else if ((bank.tags || []).some(t => t.toLowerCase().includes(q))) matchField = 'tags';
       else if ((bank.bankNotes || '').toLowerCase().includes(q)) matchField = 'notas';
@@ -129,7 +129,7 @@ export async function globalSearch(query) {
         score,
         nav: { level: 'patches', manufacturer: bank.manufacturer || contract?.manufacturer, modelId: bank.modelId, bankId: bank.id },
         thumbnail: getModelThumbnail(bank.modelId),
-        badge: bank.isFactory ? '🔒 Fábrica' : '👤 Usuario'
+        badge: bank.isFactory ? `${icons.lock} Factory` : `${icons.user} User`
       });
     }
   }
@@ -155,7 +155,7 @@ export async function globalSearch(query) {
         type: 'patch',
         id: patch.id,
         name: patch.name,
-        matchField: 'nombre',
+        matchField: 'name',
         matchSnippet: highlightMatch(patch.name, query),
         context: contextStr,
         score,
@@ -172,7 +172,7 @@ export async function globalSearch(query) {
         type: 'patch',
         id: patch.id,
         name: patch.name,
-        matchField: 'categoría',
+        matchField: 'category',
         matchSnippet: highlightMatch(patch.category, query),
         context: contextStr,
         score: SCORE_CATEGORY,
@@ -259,7 +259,7 @@ export async function globalSearch(query) {
             type: 'patch',
             id: patch.id,
             name: patch.name,
-            matchField: 'parámetro',
+            matchField: 'parameter',
             matchSnippet: `${highlightMatch(p.name, query)} = ${escHtml(String(p.displayValue ?? p.value ?? p.rawByte ?? '—'))}`,
             context: contextStr,
             score: SCORE_PARAM_NAME,

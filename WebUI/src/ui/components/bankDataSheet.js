@@ -1,12 +1,13 @@
-/**
+﻿/**
  * MF.7 — Bank Data Sheet Panel
  *
  * Expandible panel showing bank metadata: description, author, source,
  * license, tags, notes, firmware compatibility, known issues, and history.
  * All fields are editable inline.
  */
+import { file, chevronDown } from '../icons.js';
+
 function escHtml(s) {
-  const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
 }
@@ -30,63 +31,63 @@ export function renderBankDataSheet(bank) {
   ).join('');
 
   const historyRows = [];
-  if (bank.lastImportDate) historyRows.push({ label: 'Última importación', value: formatDate(bank.lastImportDate) });
-  if (bank.lastModifiedDate) historyRows.push({ label: 'Última modificación', value: formatDate(bank.lastModifiedDate) });
-  if (bank.lastSentDate) historyRows.push({ label: 'Último envío', value: `${formatDate(bank.lastSentDate)}${bank.lastSentTarget ? ` → ${bank.lastSentTarget}` : ''}` });
-  if (bank.creationDate) historyRows.push({ label: 'Creación', value: formatDate(bank.creationDate) });
+  if (bank.lastImportDate) historyRows.push({ label: 'Last import', value: formatDate(bank.lastImportDate) });
+  if (bank.lastModifiedDate) historyRows.push({ label: 'Last modified', value: formatDate(bank.lastModifiedDate) });
+  if (bank.lastSentDate) historyRows.push({ label: 'Last sent', value: `${formatDate(bank.lastSentDate)}${bank.lastSentTarget ? ` → ${bank.lastSentTarget}` : ''}` });
+  if (bank.creationDate) historyRows.push({ label: 'Created', value: formatDate(bank.creationDate) });
 
   const historyHtml = historyRows.length > 0
     ? historyRows.map(r => `<div class="spec-field"><span class="spec-label">${r.label}</span><span class="spec-value">${escHtml(r.value)}</span></div>`).join('')
-    : '<span class="spec-empty">Sin historial</span>';
+    : '<span class="spec-empty">No history</span>';
 
   return `
     <div class="bank-datasheet" id="bank-datasheet">
       <div class="datasheet-header" id="datasheet-toggle">
-        <span class="datasheet-title">📄 Ficha del banco</span>
-        <span class="datasheet-arrow">▶</span>
+        <span class="datasheet-title">${icons.file} Bank data sheet</span>
+        <span class="datasheet-arrow">${icons.chevronDown}</span>
       </div>
       <div class="datasheet-body collapsed" id="datasheet-body">
         <div class="datasheet-grid">
           <div class="datasheet-section">
-            <div class="datasheet-section-title">Información</div>
+            <div class="datasheet-section-title">Information</div>
             <div class="patch-info-field">
-              <span class="patch-info-label">Descripción</span>
-              <textarea class="patch-info-input datasheet-textarea" id="ds-description" placeholder="Describe este banco..." rows="2">${escHtml(bank.description || '')}</textarea>
+              <span class="patch-info-label">Description</span>
+              <textarea class="patch-info-input datasheet-textarea" id="ds-description" placeholder="Describe this bank..." rows="2">${escHtml(bank.description || '')}</textarea>
             </div>
             <div class="patch-info-field">
-              <span class="patch-info-label">Autor / Creador</span>
-              <input class="patch-info-input" id="ds-bankAuthor" value="${escHtml(bank.bankAuthor || '')}" placeholder="Nombre del autor">
+              <span class="patch-info-label">Author / Creator</span>
+              <input class="patch-info-input" id="ds-bankAuthor" value="${escHtml(bank.bankAuthor || '')}" placeholder="Author name">
             </div>
             <div class="patch-info-field">
-              <span class="patch-info-label">Fuente / Procedencia</span>
-              <input class="patch-info-input" id="ds-source" value="${escHtml(bank.source || '')}" placeholder="Ej: Factory ROM, Importado de...">
+              <span class="patch-info-label">Source / Origin</span>
+              <input class="patch-info-input" id="ds-source" value="${escHtml(bank.source || '')}" placeholder="e.g. Factory ROM, Imported from...">
             </div>
             <div class="patch-info-field">
-              <span class="patch-info-label">Licencia</span>
-              <input class="patch-info-input" id="ds-license" value="${escHtml(bank.license || '')}" placeholder="Ej: Freeware, MIT, Propietaria">
+              <span class="patch-info-label">License</span>
+              <input class="patch-info-input" id="ds-license" value="${escHtml(bank.license || '')}" placeholder="e.g. Freeware, MIT, Proprietary">
             </div>
           </div>
 
           <div class="datasheet-section">
-            <div class="datasheet-section-title">Técnico</div>
+            <div class="datasheet-section-title">Technical</div>
             <div class="patch-info-field">
               <span class="patch-info-label">Firmware compatible</span>
-              <input class="patch-info-input" id="ds-firmwareCompat" value="${escHtml(bank.firmwareCompat || '')}" placeholder="Ej: v1.4.4+, 2.0.7+">
+              <input class="patch-info-input" id="ds-firmwareCompat" value="${escHtml(bank.firmwareCompat || '')}" placeholder="e.g. v1.4.4+, 2.0.7+">
             </div>
             <div class="patch-info-field">
               <span class="patch-info-label">Known issues</span>
-              <textarea class="patch-info-input datasheet-textarea" id="ds-knownIssues" placeholder="Problemas conocidos..." rows="2">${escHtml(bank.knownIssues || '')}</textarea>
+              <textarea class="patch-info-input datasheet-textarea" id="ds-knownIssues" placeholder="Known issues..." rows="2">${escHtml(bank.knownIssues || '')}</textarea>
             </div>
           </div>
 
           <div class="datasheet-section">
-            <div class="datasheet-section-title">Etiquetas</div>
+            <div class="datasheet-section-title">Tags</div>
             <div class="bank-tags" id="bank-tags">
-              ${tagsHtml || '<span class="bank-tags-empty">Sin etiquetas</span>'}
+              ${tagsHtml || '<span class="bank-tags-empty">No tags</span>'}
             </div>
             <div class="bank-tags-add">
-              <input class="patch-info-input" id="ds-new-tag" placeholder="Añadir tag..." style="width:120px;">
-              <button class="btn btn-sm" id="ds-add-tag">+ Añadir</button>
+              <input class="patch-info-input" id="ds-new-tag" placeholder="Add tag..." style="width:120px;">
+              <button class="btn btn-sm" id="ds-add-tag">+ Add</button>
             </div>
             <div class="bank-tag-suggestions" id="bank-tag-suggestions">
               ${TAG_SUGGESTIONS.filter(t => !tags.includes(t)).slice(0, 12).map(t =>
@@ -97,11 +98,11 @@ export function renderBankDataSheet(bank) {
 
           <div class="datasheet-section">
             <div class="datasheet-section-title">Notas</div>
-            <textarea class="patch-info-input datasheet-textarea" id="ds-bankNotes" placeholder="Notas libres del usuario..." rows="3">${escHtml(bank.bankNotes || '')}</textarea>
+            <textarea class="patch-info-input datasheet-textarea" id="ds-bankNotes" placeholder="Free-form notes..." rows="3">${escHtml(bank.bankNotes || '')}</textarea>
           </div>
 
           <div class="datasheet-section">
-            <div class="datasheet-section-title">Historial</div>
+            <div class="datasheet-section-title">History</div>
             <div class="datasheet-history">${historyHtml}</div>
           </div>
         </div>
@@ -132,7 +133,6 @@ export function initDataSheetHandlers(container, bank, updateFn) {
     const el = container.querySelector(`#${fieldId}`);
     if (el) {
       el.onchange = () => {
-        const key = fieldId.replace('ds-', '').replace('bank', 'bank');
         const dbKey = fieldId === 'ds-bankAuthor' ? 'bankAuthor'
           : fieldId === 'ds-bankNotes' ? 'bankNotes'
           : fieldId.replace('ds-', '');
@@ -194,7 +194,7 @@ function refreshTagList(container, bank) {
   const tags = bank.tags || [];
   tagContainer.innerHTML = tags.length > 0
     ? tags.map(t => `<span class="bank-tag">${escHtml(t)} <button class="bank-tag-remove" data-tag="${escHtml(t)}">×</button></span>`).join('')
-    : '<span class="bank-tags-empty">Sin etiquetas</span>';
+    : '<span class="bank-tags-empty">No tags</span>';
   // Rebind remove handlers
   tagContainer.querySelectorAll('.bank-tag-remove').forEach(btn => {
     btn.onclick = () => {

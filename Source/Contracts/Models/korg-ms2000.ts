@@ -16,7 +16,12 @@
  * [0x0D] reserved, [0x0E..0x4B] timbre params, [0x4C..0x7F] reserved.
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import {
+  ModelContract, validateModelContract, type ContractFileParse
+} from '../ModelContract';
+import {
+  pack8to7, unpack7to8, splitSysexMessages
+} from '../SysEx/codec';
 
 const BANK_CAPACITY = 128;
 const BANKS_COUNT = 8;
@@ -41,12 +46,11 @@ const CMD_ACK        = 0x23; // Write Completed
 const CMD_NACK       = 0x24; // Write Error
 
 // ─── Model IDs (per hardware) ───
-// All Korg models below use the same SysEx format; the model byte is 0x58
-// for MS2000/MS2000R. microKORG uses the same protocol (identical format).
+// MS2000/microKORG use model byte 0x58. Prophecy uses 0x41 (different format).
 const MODEL_IDS: Record<string, number> = {
   'korg-ms2000':    0x58,
   'korg-microkorg': 0x58, // identical SysEx format to MS2000
-  'korg-prophecy':  0x5A
+  'korg-prophecy':  0x41
 };
 
 function getBankLetter(index: number): string {
@@ -55,36 +59,6 @@ function getBankLetter(index: number): string {
 
 function getProgramNumber(index: number): number {
   return (index % 16) + 1;
-}
-
-// ─── 7-to-8 Packing (ABDMS2000 SysExCodec reference) ───
-
-function pack8to7(data: Uint8Array): Uint8Array {
-  const packed: number[] = [];
-  for (let i = 0; i < data.length; i += 7) {
-    const group = data.slice(i, Math.min(i + 7, data.length));
-    let control = 0;
-    for (let j = 0; j < 7; j++) {
-      const byte = j < group.length ? group[j] : 0;
-      control |= ((byte >> 7) & 1) << (6 - j);
-    }
-    packed.push(control);
-    for (let j = 0; j < 7; j++) packed.push((j < group.length ? group[j] : 0) & 0x7F);
-  }
-  return new Uint8Array(packed);
-}
-
-function unpack7to8(packed: Uint8Array): Uint8Array {
-  const unpacked: number[] = [];
-  for (let i = 0; i < packed.length; i += 8) {
-    if (i + 8 > packed.length) break;
-    const control = packed[i];
-    for (let j = 0; j < 7; j++) {
-      const highBit = (control >> (6 - j)) & 1;
-      unpacked.push(((highBit << 7) | (packed[i + 1 + j] & 0x7F)) & 0xFF);
-    }
-  }
-  return new Uint8Array(unpacked);
 }
 
 // ─── SysEx Helpers ───
@@ -97,23 +71,12 @@ function isKorgSysEx(msg: Uint8Array, modelIdByte: number): boolean {
     && (msg[4] === CMD_DUMP || msg[4] === CMD_ALL_DUMP);
 }
 
-function splitSysex(raw: Uint8Array): Uint8Array[] {
-  const msgs: Uint8Array[] = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 0xF0 && !inSysex) { inSysex = true; start = i; }
-    else if (raw[i] === 0xF7 && inSysex) { msgs.push(raw.slice(start, i + 1)); inSysex = false; }
-  }
-  return msgs;
-}
-
 const korgMs2000Contract: ModelContract = {
   modelId: 'korg-ms2000',
   displayName: 'Korg MS2000',
   manufacturer: 'Korg',
   icon: 'korg-logo.svg',
-  thumbnail: 'korg-ms2000.jpg',
+  thumbnail: 'korg-ms2000.webp',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
@@ -206,13 +169,56 @@ const korgMs2000Contract: ModelContract = {
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
     const modelId = MODEL_IDS[this.modelId] || 0x58;
-    const msgs = splitSysex(sysex).filter(m => isKorgSysEx(m, modelId));
+    const msgs = splitSysexMessages(sysex).filter(m => isKorgSysEx(m, modelId));
     const results: { rawData: Uint8Array; slot: number }[] = [];
     for (const msg of msgs) {
       const parsed = korgMs2000Contract.parsePatchSysEx?.call(this, msg);
       if (parsed) results.push(parsed);
     }
     return results;
+  },
+
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const modelId = MODEL_IDS[this.modelId] || 0x58;
+    const parsed = splitSysexMessages(data)
+      .filter(m => isKorgSysEx(m, modelId))
+      .map(m => this.parsePatchSysEx?.(m))
+      .filter((p): p is { rawData: Uint8Array; slot: number } => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map(p => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Korg ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /ms.?2000|microkorg/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'Korg MS2000', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Korg', modelId: this.modelId }
+      : null;
   },
 
   legacySysEx: {
@@ -227,32 +233,27 @@ export const korgMicrokorgContract: ModelContract = {
   ...korgMs2000Contract,
   modelId: 'korg-microkorg',
   displayName: 'Korg microKORG',
-  thumbnail: 'korg-microkorg.jpg'
+  thumbnail: 'korg-microkorg.webp'
 };
 
-// Prophecy (different model byte, potentially different data size)
-export const korgProphecyContract: ModelContract = {
-  ...korgMs2000Contract,
-  modelId: 'korg-prophecy',
-  displayName: 'Korg Prophecy',
-  thumbnail: 'korg-ms2000.jpg',
-  patchDataSize: 256, // Prophecy has a larger program data size
-  extractPatchName(data: Uint8Array): string {
-    const nameOffset = 0x1C;
-    if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH) return '';
-    const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH);
-    return new TextDecoder().decode(nameBytes).replace(/\0/g, '').trim();
-  },
-  legacySysEx: {
-    ...korgMs2000Contract.legacySysEx!,
-    modelIdByte: 0x5A
-  }
+// ABD MS2000 (SM002) — software synth of the ABDMS2000 host.
+// Reuses the MS2000 patch format (rawData is an MS2000-style SysEx frame) so it
+// can open hardware MS2000/microKORG banks, but is a local edit target: no
+// physical MIDI port, so MIDI auto-detection/hardware routing is disabled.
+export const korgAbdSm002Contract: ModelContract = {
+  ...korgMicrokorgContract,
+  modelId: 'abd-sm002',
+  displayName: 'ABD MS2000 (SM002)',
+  manufacturer: 'ABDSynths',
+  isSoftsynth: true,
+  compatibleModels: ['korg-ms2000', 'korg-microkorg'],
+  midiDetection: undefined,
 };
 
 export const allKorgContracts = [
   korgMs2000Contract,
   korgMicrokorgContract,
-  korgProphecyContract
+  korgAbdSm002Contract
 ];
 
 allKorgContracts.forEach(c => {

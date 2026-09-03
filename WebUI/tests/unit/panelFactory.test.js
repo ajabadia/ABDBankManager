@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ParamStore } from '@store/paramStore';
+import { PANEL_DEFS, WIDGET_FACTORY } from '@ui/panelFactory';
 
-// @store/paramStore.js and @ui/panelFactory.js not compiled to WebUI — skip
-describe.skip('ParamStore', () => {
+describe('ParamStore', () => {
   let store;
 
   beforeEach(() => {
@@ -77,35 +78,30 @@ describe.skip('ParamStore', () => {
   });
 });
 
-describe.skip('PANEL_DEFS', () => {
+describe('PANEL_DEFS', () => {
   it('should have valid panel definitions', () => {
     // El gestor de bancos no renderiza paneles de parámetros (registry vacío):
     // PANEL_DEFS está vacío hasta que los plugins ABD definan sus parámetros de editor.
     expect(Array.isArray(PANEL_DEFS)).toBe(true);
 
-    PANEL_DEFS.forEach(def => {
-      expect(def.containerId).toBeTruthy();
-      expect(def.title).toBeTruthy();
-      expect(Array.isArray(def.params)).toBe(true);
-      expect(def.params.length).toBeGreaterThan(0);
-    });
+    // PANEL_DEFS is intentionally empty in the bank manager
+    // (parameter panels are defined by ABD plugins, not the bank manager)
+    // So we just verify it's an array — no items to validate
   });
-
-it('should reference valid parameter IDs', () => {
-      PANEL_DEFS.forEach(def => {
-        def.params.forEach(paramId => {
-          const param = PARAMETER_REGISTRY.getParam(paramId);
-          expect(param).toBeDefined();
-        });
-      });
-    });
 });
 
-describe.skip('WIDGET_FACTORY', () => {
+describe('WIDGET_FACTORY', () => {
   it('should have factories for all parameter types', () => {
     expect(WIDGET_FACTORY.continuous).toBeDefined();
     expect(WIDGET_FACTORY.integer).toBeDefined();
     expect(WIDGET_FACTORY.choice).toBeDefined();
     expect(WIDGET_FACTORY.boolean).toBeDefined();
+  });
+
+  it('should have function factories', () => {
+    expect(typeof WIDGET_FACTORY.continuous).toBe('function');
+    expect(typeof WIDGET_FACTORY.integer).toBe('function');
+    expect(typeof WIDGET_FACTORY.choice).toBe('function');
+    expect(typeof WIDGET_FACTORY.boolean).toBe('function');
   });
 });

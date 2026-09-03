@@ -3,6 +3,28 @@
  * Defines the capabilities and structure of a synthesizer model
  */
 
+/**
+ * Result of parsing a full SysEx dump file. Mirrors the shape of a PatchData[]
+ * so adapters can hand the result back verbatim as an ImportResult.
+ */
+export interface ContractFileParse {
+  modelId: string;
+  bankName: string;
+  patches: {
+    name: string;
+    category: string;
+    author: string;
+    tags: string[];
+    notes: string;
+    originAddress: string;
+    rawData: Uint8Array;
+    hardwareIds?: string[];
+    isFavorite: boolean;
+    creationDate: string;
+  }[];
+  warnings: string[];
+}
+
 export interface ModelContract {
   // ─── Identity ───
   modelId: string;              // 'casio-cz101', 'roland-juno106', 'korg-ms2000', 'behringer-deepmind12', 'yamaha-dx7'
@@ -32,17 +54,26 @@ export interface ModelContract {
   // ─── Compatibility ───
   compatibleModels?: string[];  // Models with identical patch format
 
+  // ─── Nature ───
+  /** True for a software-synth that shares a hardware family's patch format.
+   *  Such a model is a local edit target (no physical MIDI port); dumps apply
+   *  to the emulated hardware but auto-detection/hardware routing is disabled. */
+  isSoftsynth?: boolean;
+
   // ─── SysEx Metadata ───
   sysexManufacturerId: number[]; // [0x44,0x00,0x00] Casio, [0x41] Roland, [0x42] Korg
   formatVersion: number;        // Contract version for migrations
 
   // ─── SysEx Disambiguation (when multiple models share a manufacturer byte) ───
-  /** Byte position + expected value to disambiguate models within same manufacturer.
-   *  Example: DX7 uses { offset: 3, values: [0x00] }, DX7II uses { offset: 3, values: [0x01] }
-   *           Casio CZ-101 uses { offset: 4, values: [0x12] } */
+  /** Byte position + expected value(s) to disambiguate models within one manufacturer.
+   *  `values` describes the byte at `offset`; `multiByte`, when present, describes
+   *  the following bytes as one contiguous identity sequence.
+   *  Example: DX7 uses { offset: 3, values: [0x00] }, DX7II uses { offset: 3, values: [0x01] }.
+   */
   sysexModelId?: {
     offset: number;       // byte offset in SysEx message (after F0)
     values: number[];     // expected byte value(s) at this offset
+    multiByte?: number[]; // optional expected bytes immediately after offset
   };
 
   // ─── MIDI Detection (auto-detect from port name) ───
@@ -85,6 +116,31 @@ export interface ModelContract {
   dumpTimeoutMs?: number;
   /** Maximum SysEx message size (bytes) before splitting. If set, bulk dumps are split into chunks. */
   maxSysExMessageSize?: number;
+
+  // ─── File-Level Orchestration (SSOT for Import/Export/HardwareLink) ───
+  // These make the contract the single source of truth for parsing a whole
+  // SysEx file into PatchData[] and serializing patches back to a file, so the
+  // concrete adapters can be thin delegating wrappers.
+
+  /**
+   * Parse a complete SysEx dump file (single patch, bank or bulk) into
+   * PatchData[]. Returns null when the file does not match this contract's
+   * format (used by the import adapter's canParse + parse).
+   */
+  parseFile?(data: Uint8Array, filename: string): ContractFileParse | null;
+
+  /** Serialize a set of patches back to a SysEx file (single or bank). */
+  serializeFile?(
+    patches: { rawData: Uint8Array; slot: number; name?: string }[],
+    options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' },
+  ): Uint8Array;
+
+  /** Auto-detect hardware from MIDI port name (used by the HardwareLink adapter). */
+  detectHardware?(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null;
+
+  // ─── Parameter Validation (NeuralDX7 ranges) ───
+  /** Verify that a decoded parameter set is within valid hardware ranges. */
+  verifyVoice?(params: Record<string, number>): boolean;
 
   // ─── Legacy Support (Guide §9.1 compat) ───
   legacySysEx?: {

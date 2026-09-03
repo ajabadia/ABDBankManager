@@ -1,5 +1,5 @@
-/**
- * ABD Bank Manager — Model Selector Component
+﻿/**
+ * ABD Bank Manager â€” Model Selector Component
  *
  * Reusable model selector with manufacturer filtering and auto-configuration display.
  * Uses contractRegistryData for data, no hardcoded model lists.
@@ -26,8 +26,8 @@ export function renderModelSelector(container, options = {}) {
   container.innerHTML = `
     <div class="model-selector">
       <div class="model-selector__filter">
-        <label for="model-search">Buscar modelo</label>
-        <input type="search" id="model-search" placeholder="Filtrar por nombre..." 
+        <label for="model-search">Search model</label>
+        <input type="search" id="model-search" placeholder="Filter by name..." 
           value="${currentFilter}" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:4px;">
       </div>
       
@@ -36,15 +36,15 @@ export function renderModelSelector(container, options = {}) {
           <details class="model-selector__mfr" ${manufacturers[mfr].some(m => m.modelId === selectedModelId) ? 'open' : ''}>
             <summary class="model-selector__mfr-summary">
               <span class="model-selector__mfr-name">${escHtml(mfr)}</summary>
-              <span class="model-selector__mfr-count">${manufacturers[mfr].length} modelo${manufacturers[mfr].length > 1 ? 's' : ''}</span>
+              <span class="model-selector__mfr-count">${manufacturers[mfr].length} model${manufacturers[mfr].length > 1 ? 's' : ''}</span>
             </summary>
             <ul class="model-selector__models">
               ${manufacturers[mfr].map(model => `
                 <li class="model-selector__model ${model.modelId === selectedModelId ? 'selected' : ''}" 
                     data-model-id="${model.modelId}" data-mfr="${mfr}">
-                  <img class="model-selector__thumb" src="${getModelThumbnail(model.modelId)}" alt="" loading="lazy" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">
+                  <img class="model-selector__thumb" src="${getModelThumbnail(model.modelId)}" alt="" loading="lazy" onerror="this.src='./vendor/images/models/thumbs/placeholder-synth.svg'">
                   <span class="model-selector__name">${escHtml(model.displayName)}</span>
-                  <span class="model-selector__badge">${model.programsPerBank} patches/banco</span>
+                  <span class="model-selector__badge">${model.programsPerBank} patches/bank</span>
                 </li>
               `).join('')}
             </ul>
@@ -107,8 +107,8 @@ function getModelMetadata(modelId) {
 
 function getModelThumbnail(modelId) {
   const meta = contractRegistryData.modelMetadata[modelId];
-  if (meta?.thumbnail) return `/images/models/thumbs/${meta.thumbnail}`;
-  return '/images/models/thumbs/placeholder-synth.svg';
+  if (meta?.thumbnail) return `./vendor/images/models/thumbs/${meta.thumbnail}`;
+  return './vendor/images/models/thumbs/placeholder-synth.svg';
 }
 
 function escHtml(str) {
@@ -123,22 +123,22 @@ function renderAutoConfig(modelId) {
   
   return `
     <div class="model-selector__autoconfig">
-      <h4>Auto-configuración para ${escHtml(meta.displayName)}</h4>
+      <h4>Auto-configuration for ${escHtml(meta.displayName)}</h4>
       <div class="autoconfig__grid">
         <div class="autoconfig__item">
-          <label>Fabricante</label>
+          <label>Manufacturer</label>
           <span>${escHtml(meta.manufacturer)}</span>
         </div>
         <div class="autoconfig__item">
-          <label>Capacidad banco</label>
-          <span>${meta.bankCapacity} patches (${meta.programsPerBank} por banco)</span>
+          <label>Bank capacity</label>
+          <span>${meta.bankCapacity} patches (${meta.programsPerBank} per bank)</span>
         </div>
         <div class="autoconfig__item">
-          <label>Tamaño patch</label>
+          <label>Patch size</label>
           <span>${meta.patchDataSize} bytes</span>
         </div>
         <div class="autoconfig__item">
-          <label>MIDI canal por defecto</label>
+          <label>Default MIDI channel</label>
           <span>${midiConfig?.channel || 1}</span>
         </div>
         <div class="autoconfig__item">
@@ -146,19 +146,19 @@ function renderAutoConfig(modelId) {
           <span>${midiConfig?.deviceId || 'N/A'}</span>
         </div>
         <div class="autoconfig__item">
-          <label>Delay entre mensajes</label>
+          <label>Inter-message delay</label>
           <span>${midiConfig?.interMessageDelayMs || 0} ms</span>
         </div>
         <div class="autoconfig__item">
-          <label>Timeout dump</label>
+          <label>Dump timeout</label>
           <span>${midiConfig?.dumpTimeoutMs || 3000} ms</span>
         </div>
         <div class="autoconfig__item">
-          <label>Categorías</label>
+          <label>Categories</label>
           <span>${meta.categories?.join(', ') || '—'}</span>
         </div>
         <div class="autoconfig__item">
-          <label>Modelos compatibles</label>
+          <label>Compatible models</label>
           <span>${meta.compatibleModels?.join(', ') || '—'}</span>
         </div>
       </div>

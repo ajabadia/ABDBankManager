@@ -210,8 +210,7 @@ export class RotaryKnob {
  */
 export function initRotaryKnobs(container = document) {
   const knobs = container.querySelectorAll('[data-rotary-knob]');
-  knobs.forEach(el => {
-    const paramId = el.dataset.paramId;
+  knobs.forEach(() => {
     // Would need param registry lookup here
     // new RotaryKnob(param).mount(el);
   });

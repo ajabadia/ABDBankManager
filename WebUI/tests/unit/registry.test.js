@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
-import path from 'path';
+import { loadAndValidateSchema, generateSysexOffsetMap } from '@scripts/registry_core';
 
-// @scripts/registry_core.js not compiled to WebUI — skip
-describe.skip('Parameter Registry', () => {
-const SCHEMA_PATH = 'schemas/parameters-spec.schema.v1.json';
+describe('Parameter Registry', () => {
+  const SCHEMA_PATH = 'schemas/parameters-spec.schema.v1.json';
+
   it('should load and validate schema', () => {
     const { valid, schema, errors } = loadAndValidateSchema(SCHEMA_PATH);
     expect(valid).toBe(true);
@@ -79,7 +79,7 @@ const SCHEMA_PATH = 'schemas/parameters-spec.schema.v1.json';
   });
 });
 
-describe.skip('Generated Registry Artifacts', () => {
+describe('Generated Registry Artifacts', () => {
   it('should have generated C++ header', () => {
     const cppHeader = 'Source/State/ParameterRegistry.gen.h';
     expect(fs.existsSync(cppHeader)).toBe(true);

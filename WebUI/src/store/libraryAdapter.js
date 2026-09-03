@@ -25,8 +25,15 @@ import {
   ERR_SOURCE_EQUALS_TARGET,
   ERR_DUPLICATE_PATCH_ID,
   freshPatchId
-} from '../../../packages/core/src/operations/library.js';
-import { db } from './persistence.js';
+} from '../core/libraryOperations.js';
+import { getDb } from './backend.js';
+
+// Acceso diferido a `getDb()`: durante la evaluación ESM de este módulo aún no
+// se ha registrado la instancia Dexie (lo hace `persistence.js`), así que la
+// resolución se aplaza al primer uso real.
+const db = new Proxy({}, {
+  get: (_target, prop) => getDb()[prop]
+});
 import { getModelContract, getHardwareIds } from '../contracts/modelContracts.js';
 import { validateBankAgainstContract, validatePatchAgainstContract } from '../core/domainValidation.js';
 import { calculateFingerprint } from '../core/fingerprint.js';
@@ -80,6 +87,33 @@ export async function loadLibrary() {
   };
 }
 
+/** Replace the persisted library with a complete state received from a native host. */
+export async function replaceLibrary(nextLibrary) {
+  const prev = await loadLibrary();
+  const next = {
+    banks: (nextLibrary?.banks || []).map(bank => ({
+      ...bank,
+      patches: (bank.patches || []).map(patch => ({
+        ...patch,
+        bankId: bank.id,
+        rawData: patch.rawData instanceof Uint8Array
+          ? patch.rawData
+          : (typeof patch.rawDataBase64 === 'string' ? decodeBase64(patch.rawDataBase64) : new Uint8Array(patch.rawData || []))
+      }))
+    }))
+  };
+  await persistLibrary(prev, next, { notify: false });
+  return next;
+}
+
+function decodeBase64(value) {
+  if (typeof atob !== 'function') return new Uint8Array(0);
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 function changedEntity(prev, next) {
   if (!prev || !next) return true;
   return prev.modifiedDate !== next.modifiedDate;
@@ -124,7 +158,7 @@ async function persistPatchesForBank(bankId, patches, prevPatchesById) {
   if (toPut.length) await db.patches.bulkPut(toPut);
 }
 
-export async function persistLibrary(prevLibrary, nextLibrary) {
+export async function persistLibrary(prevLibrary, nextLibrary, { notify = true } = {}) {
   const prevBanksById = new Map(prevLibrary.banks.map(b => [b.id, b]));
   const nextBanksById = new Map(nextLibrary.banks.map(b => [b.id, b]));
 
@@ -149,6 +183,10 @@ export async function persistLibrary(prevLibrary, nextLibrary) {
       }
     }
   });
+
+  if (notify && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('abd-library-changed', { detail: nextLibrary }));
+  }
 }
 
 function findPatchLocation(library, patchId) {
@@ -175,6 +213,7 @@ export async function createBank(bankData) {
     manufacturer: bankData.manufacturer || '',
     isFactory: bankData.isFactory || false,
     isLocked: bankData.isLocked || false,
+    includeInBundle: bankData.includeInBundle ?? bankData.isFactory ?? false,
     source: bankData.source || null,
     // MF.5: Custom image
     imageUrl: bankData.imageUrl || null,
@@ -195,10 +234,20 @@ export async function createBank(bankData) {
     modifiedDate: nowIso()
   };
 
-  validateBankAgainstContract(bank, [], contract);
+  validateBankAgainstContract(bank, [], contract, getHardwareIds(contract.modelId));
   const next = addBank(prev, bank);
   await persistLibrary(prev, next);
   return bank;
+}
+
+export async function updateBankAdmin(bankId, changes) {
+  const prev = await loadLibrary();
+  const bank = findBank(prev, bankId);
+  if (!bank) throw new Error(`ERR_BANK_NOT_FOUND: Bank '${bankId}' not found`);
+
+  const updated = { ...bank, ...changes, modifiedDate: nowIso() };
+  const next = { ...prev, banks: prev.banks.map(b => b.id === bankId ? updated : b) };
+  await persistLibrary(prev, next);
 }
 
 export async function updateBank(bankId, changes) {
@@ -259,7 +308,7 @@ export async function createPatch(bankId, patchData, { maxPatches } = {}) {
     modifiedDate: nowIso()
   };
 
-  validatePatchAgainstContract(patch, contract, patch.index);
+  validatePatchAgainstContract(patch, contract, patch.index, getHardwareIds(contract.modelId));
   const next = addPatch(prev, bankId, patch, undefined, { maxPatches: effectiveMax });
   await persistLibrary(prev, next);
 
@@ -408,7 +457,7 @@ export async function importBank(bankData, patchesData, { deduplication = 'allow
   const { accepted, duplicates } = partitionDuplicates(idFiltered, existingPatches, deduplication);
   const allDuplicates = [...idDuplicates.map(p => ({ patch: p, existingPatch: existingPatches.find(e => e.id === p.id) })), ...duplicates];
 
-  validateBankAgainstContract(bank, accepted, contract);
+  validateBankAgainstContract(bank, accepted, contract, getHardwareIds(contract.modelId));
 
   const next = addBank(prev, { ...bank, patches: accepted });
   await persistLibrary(prev, next);

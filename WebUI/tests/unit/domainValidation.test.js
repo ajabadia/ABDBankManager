@@ -24,11 +24,17 @@ function patch(contract, index = 0, overrides = {}) {
   };
 }
 
+// The shared hardwareId set a bank may carry for a given model (matches what
+// the app stores via getHardwareIds, forward + reverse).
+function hardwareIdsFor(contract) {
+  return getHardwareIds(contract.modelId);
+}
+
 describe('domain validation', () => {
   it('accepts a valid bank and patches', () => {
     const contract = getModelContract('korg-ms2000');
     const bank = { id: crypto.randomUUID(), name: 'User', modelId: contract.modelId, hardwareIds: getHardwareIds(contract.modelId) };
-    expect(() => validateBankAgainstContract(bank, [patch(contract)], contract)).not.toThrow();
+    expect(() => validateBankAgainstContract(bank, [patch(contract)], contract, hardwareIdsFor(contract))).not.toThrow();
   });
 
   it('rejects a patch with the wrong rawData size', () => {
@@ -46,16 +52,16 @@ describe('domain validation', () => {
   it('rejects duplicate indexes and capacity overflow', () => {
     const contract = getModelContract('korg-ms2000');
     const bank = { id: crypto.randomUUID(), name: 'User', modelId: contract.modelId, hardwareIds: getHardwareIds(contract.modelId) };
-    expect(() => validateBankAgainstContract(bank, [patch(contract, 0), patch(contract, 0)], contract))
+    expect(() => validateBankAgainstContract(bank, [patch(contract, 0), patch(contract, 0)], contract, hardwareIdsFor(contract)))
       .toThrow('duplicate patch index');
 
     const full = Array.from({ length: contract.programsPerBank + 1 }, (_, index) => patch(contract, index));
-    expect(() => validateBankAgainstContract(bank, full, contract)).toThrow('maximum');
+    expect(() => validateBankAgainstContract(bank, full, contract, hardwareIdsFor(contract))).toThrow('maximum');
   });
 
   it('rejects an invalid patch address format', () => {
     const contract = getModelContract('korg-ms2000');
-    expect(() => validatePatchAgainstContract(patch(contract, 5, { originAddress: 'Z999' }), contract, 5))
+    expect(() => validatePatchAgainstContract(patch(contract, 5, { originAddress: 'Z999' }), contract, 5, hardwareIdsFor(contract)))
       .toThrow('address');
   });
 

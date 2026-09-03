@@ -1,7 +1,9 @@
-/**
+﻿/**
  * ABD Bank Manager — MF.15 Hex Editor Component
  * Inline editable hexdump for patch rawData.
  */
+
+import icons from '../ui/icons.js';
 
 /**
  * Create a hex editor DOM element for a patch's rawData.
@@ -36,7 +38,7 @@ export function createHexEditor(originalData, options = {}) {
 
     const byteCount = document.createElement('span');
     byteCount.className = 'hex-editor-info';
-    byteCount.textContent = `${data.length} bytes · ${modified.size} modificados`;
+    byteCount.textContent = `${data.length} bytes · ${modified.size} modified`;
 
     toolbar.appendChild(byteCount);
 
@@ -50,25 +52,25 @@ export function createHexEditor(originalData, options = {}) {
 
       const copyBtn = document.createElement('button');
       copyBtn.className = 'btn btn-sm';
-      copyBtn.textContent = '📋 Copiar hex';
+      copyBtn.innerHTML = `${icons.clipboard} Copiar hex`;
       copyBtn.onclick = () => copyHex();
       toolbar.appendChild(copyBtn);
 
       const pasteBtn = document.createElement('button');
       pasteBtn.className = 'btn btn-sm';
-      pasteBtn.textContent = '📋 Pegar hex';
+      pasteBtn.innerHTML = `${icons.clipboard} Pegar hex`;
       pasteBtn.onclick = () => pasteHex();
       toolbar.appendChild(pasteBtn);
 
       const selectAllBtn = document.createElement('button');
       selectAllBtn.className = 'btn btn-sm';
-      selectAllBtn.textContent = 'Seleccionar todo';
+      selectAllBtn.textContent = 'Select all';
       selectAllBtn.onclick = () => selectAllBytes();
       toolbar.appendChild(selectAllBtn);
     } else {
       const copyBtn = document.createElement('button');
       copyBtn.className = 'btn btn-sm';
-      copyBtn.textContent = '📋 Copiar hex';
+      copyBtn.innerHTML = `${icons.clipboard} Copiar hex`;
       copyBtn.onclick = () => copyHex();
       toolbar.appendChild(copyBtn);
     }
@@ -184,7 +186,6 @@ export function createHexEditor(originalData, options = {}) {
     }
 
     if (val !== data[idx]) {
-      const oldVal = data[idx];
       data[idx] = val;
       modified.add(idx);
       cell.textContent = toHex(val);
@@ -233,7 +234,7 @@ export function createHexEditor(originalData, options = {}) {
   function updateInfo() {
     const info = container.querySelector('.hex-editor-info');
     if (info) {
-      info.textContent = `${data.length} bytes · ${modified.size} modificados`;
+      info.textContent = `${data.length} bytes · ${modified.size} modified`;
     }
     const revertBtn = container.querySelector('.hex-editor-toolbar .btn');
     if (revertBtn && revertBtn.textContent.includes('Revertir')) {
@@ -301,6 +302,7 @@ export function createHexEditor(originalData, options = {}) {
   return {
     element: container,
     getData: () => new Uint8Array(data),
+    paste: pasteHex,
     revert,
     hasChanges: () => modified.size > 0,
   };

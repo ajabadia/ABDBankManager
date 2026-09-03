@@ -50,12 +50,25 @@ function mockHardwareLink(modelId) {
 }
 
 describe('ContractRegistry — createStandaloneRegistry', () => {
-  it('registers all 15 models and reports standalone mode', () => {
+  it('registers all 22 models and reports standalone mode', () => {
     const registry = createStandaloneRegistry();
     expect(registry.mode).toBe('standalone');
-    expect(registry.getModels()).toHaveLength(15);
+    expect(registry.getModels()).toHaveLength(22);
     expect(registry.isSupported('korg-ms2000')).toBe(true);
+    expect(registry.isSupported('behringer-deepmind6')).toBe(true);
+    expect(registry.isSupported('behringer-deepmind12d')).toBe(true);
     expect(registry.isSupported('unknown-model')).toBe(false);
+  });
+
+  it('reports per-model adapter and hardware coverage', () => {
+    const registry = createStandaloneRegistry();
+    const coverage = new Map(registry.getCoverage().map(row => [row.modelId, row]));
+
+    expect(coverage.get('korg-ms2000').importAdapters).toContain('sysex-korg-ms2000');
+    expect(coverage.get('yamaha-dx7').exportAdapters).toContain('export-yamaha-dx7');
+    expect(coverage.get('behringer-deepmind12').hardwareLinks).toBe(true);
+    expect(coverage.get('behringer-pro800').importAdapters).toContain('sysex-behringer-pro800');
+    expect(coverage.get('behringer-pro800').hardwareLinks).toBe(true);
   });
 
   it('exposes model lookup and midi config', () => {
@@ -66,8 +79,14 @@ describe('ContractRegistry — createStandaloneRegistry', () => {
     expect(registry.getMidiConfig('unknown-model').channel).toBe(1);
   });
 
-  it('has no registration issues for the full bundle', () => {
+  it('registers the available adapters and hardware links in the full bundle', () => {
     const registry = createStandaloneRegistry();
+    expect(registry.getImportAdapters()).toHaveLength(7);
+    expect(registry.getExportAdapters()).toHaveLength(7);
+    expect(registry.getHardwareLinks()).toHaveLength(7);
+    expect(registry.getImportAdapters('korg-ms2000').length).toBeGreaterThan(0);
+    expect(registry.getExportAdapters('yamaha-dx7').length).toBeGreaterThan(0);
+    expect(registry.getHardwareLinks('behringer-deepmind12')).toHaveLength(1);
     expect(registry.getIssues()).toEqual([]);
   });
 });
@@ -102,8 +121,8 @@ describe('ContractRegistry — registro y validación', () => {
     const registry = createStandaloneRegistry();
     registry.registerHardwareLink(mockHardwareLink('roland-juno106'));
     expect(registry.getHardwareLinks('roland-juno106')).toHaveLength(1);
-    expect(registry.getHardwareLinks('korg-ms2000')).toHaveLength(0);
-    expect(registry.getHardwareLinks()).toHaveLength(1);
+    expect(registry.getHardwareLinks('korg-ms2000')).toHaveLength(1);
+    expect(registry.getHardwareLinks()).toHaveLength(7);
   });
 
   it('warns when ImportAdapter.targetModelIds has no registered model', () => {
@@ -136,18 +155,18 @@ describe('ContractRegistry — modo plugin vs standalone', () => {
     registry.registerImportAdapter(mockImportAdapter({ adapterId: 'mock-juno', targetModelIds: ['roland-juno106'] }));
     registry.registerExportAdapter(mockExportAdapter({ targetModelIds: ['korg-ms2000'] }));
 
-    expect(registry.getImportAdapters('korg-ms2000').map(a => a.adapterId)).toEqual(['mock-import']);
-    expect(registry.getImportAdapters('roland-juno106').map(a => a.adapterId)).toEqual(['mock-juno']);
-    expect(registry.getImportAdapters('casio-cz101')).toHaveLength(0);
-    expect(registry.getImportAdapters()).toHaveLength(2);
-    expect(registry.getExportAdapters('korg-ms2000')).toHaveLength(1);
-    expect(registry.getExportAdapters()).toHaveLength(1);
+    expect(registry.getImportAdapters('korg-ms2000').map(a => a.adapterId)).toEqual(['sysex-korg-ms2000', 'mock-import']);
+    expect(registry.getImportAdapters('roland-juno106').map(a => a.adapterId)).toEqual(['sysex-roland-juno', 'mock-juno']);
+    expect(registry.getImportAdapters('casio-cz101')).toHaveLength(1);
+    expect(registry.getImportAdapters()).toHaveLength(9);
+    expect(registry.getExportAdapters('korg-ms2000')).toHaveLength(2);
+    expect(registry.getExportAdapters()).toHaveLength(8);
   });
 });
 
 describe('getHardwareIds — asociación multi-hardware (diseño §5)', () => {
   it('derives canonical + compatible models', () => {
-    expect(getHardwareIds('korg-ms2000')).toEqual(['korg-ms2000', 'korg-microkorg']);
+    expect(getHardwareIds('korg-ms2000')).toEqual(['korg-ms2000', 'korg-microkorg', 'abd-sm002']);
     expect(getHardwareIds('casio-cz101')).toEqual(['casio-cz101', 'casio-cz1000', 'casio-cz5000', 'casio-cz1']);
     expect(getHardwareIds('roland-juno106')).toEqual(['roland-juno106', 'roland-juno60', 'roland-juno6', 'roland-hs60']);
   });

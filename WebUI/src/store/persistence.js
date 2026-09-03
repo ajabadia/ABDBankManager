@@ -5,7 +5,8 @@
  */
 
 import Dexie from 'dexie';
-import { getFilteredPatches } from '../../../packages/core/src/search/searchPatches.js';
+import { getFilteredPatches, searchPatches as coreSearchPatches } from '../core/searchPatches.js';
+import { getDb, setDexieDb, isJuce } from './backend.js';
 
 import {
   isLibrary,
@@ -20,12 +21,15 @@ import {
   ERR_DUPLICATE_PATCH_ID,
   createBank as coreCreateBank,
   updateBank as coreUpdateBank,
+  updateBankAdmin as coreUpdateBankAdmin,
   deleteBank as coreDeleteBank,
   createPatch as coreCreatePatch,
   updatePatch as coreUpdatePatch,
   deletePatch as coreDeletePatch,
   movePatch as coreMovePatch,
-  importBank as coreImportBank
+  importBank as  coreImportBank,
+  loadLibrary as coreLoadLibrary,
+  replaceLibrary as coreReplaceLibrary
 } from './libraryAdapter.js';
 
 class BankManagerDB extends Dexie {
@@ -102,10 +106,13 @@ export function purgeLegacySettingsStore(tx) {
   }
 }
 
-const db = new BankManagerDB();
+const dexieDb = new BankManagerDB();
+setDexieDb(dexieDb);
+// En JUCE, `getDb()` devuelve la facade JUCE; en navegador/tests la instancia Dexie.
+const db = getDb();
 
 // ─── Auto-backup before migration ───
-export const CURRENT_SCHEMA_VERSION = db.verno;
+export const CURRENT_SCHEMA_VERSION = dexieDb.verno;
 
 export function shouldBackupBeforeMigration(installedVersion) {
   return Number.isInteger(installedVersion) && installedVersion > 0 && installedVersion < CURRENT_SCHEMA_VERSION;
@@ -127,6 +134,7 @@ export function buildMigrationBackupPayload(banks, patches, version) {
   return {
     format: 'abdlibrary-json',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    fpVersion: 1,
     sourceVersion: version,
     timestamp: Date.now(),
     bankCount: banks.length,
@@ -165,6 +173,7 @@ let preMigrationBackupCompleted = false;
 
 export async function runPreMigrationBackup() {
   if (preMigrationBackupCompleted) return { attempted: false, reason: 'already-run' };
+  if (isJuce()) return { attempted: false, reason: 'juce-backend' };
   if (typeof indexedDB === 'undefined') return { attempted: false, reason: 'no-indexeddb' };
 
   let installedVersion;
@@ -213,8 +222,20 @@ export async function getAllBanks() {
   return await db.banks.toArray();
 }
 
+export async function loadLibrary() {
+  return coreLoadLibrary();
+}
+
+export async function replaceLibrary(library) {
+  return coreReplaceLibrary(library);
+}
+
 export async function updateBank(bankId, changes) {
   return coreUpdateBank(bankId, changes);
+}
+
+export async function updateBankAdmin(bankId, changes) {
+  return coreUpdateBankAdmin(bankId, changes);
 }
 
 export async function deleteBank(bankId) {
@@ -255,11 +276,26 @@ export async function getFavoritePatches() {
   return await db.patches.where('isFavorite').equals(1).toArray();
 }
 
+/**
+ * Search patches using the core pure search engine (full-text on name/author/tags/notes).
+ * @param {string} query - search string
+ * @returns {Promise<Array>} matching patches with bankId/bankName context
+ */
 export async function searchPatches(query) {
-  const q = query.toLowerCase();
-  return await db.patches
-    .filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
-    .toArray();
+  // Build the nested Library from Dexie tables (avoids circular import with libraryAdapter)
+  const [banks, patches] = await Promise.all([db.banks.toArray(), db.patches.toArray()]);
+  const patchesByBank = {};
+  for (const p of patches) {
+    (patchesByBank[p.bankId] = patchesByBank[p.bankId] || []).push(p);
+  }
+  const library = {
+    banks: banks.map(b => ({
+      ...b,
+      patches: (patchesByBank[b.id] || []).sort((a, z) => a.index - z.index)
+    }))
+  };
+  const results = coreSearchPatches(library, { text: query });
+  return results.map(r => ({ ...r.patch, bankId: r.bankId, bankName: r.bankName }));
 }
 
 // ─── Tags M:N ───

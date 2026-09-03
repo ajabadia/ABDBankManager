@@ -18,7 +18,10 @@
  * Checksum: (128 - (sum of bytes[3..N-2] % 128)) & 0x7F
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import {
+  ModelContract, validateModelContract, type ContractFileParse
+} from '../ModelContract';
+import { yamahaChecksum, splitSysexMessages } from '../SysEx/codec';
 
 const DX7_PATCH_DATA_SIZE = 128;
 const DX7_PATCH_NAME_MAX_LENGTH = 10;
@@ -34,11 +37,188 @@ const CMD_BULK     = 0x09;
 const SUB_SINGLE   = 0x20;
 const SUB_BULK     = 0x20;
 
-function dx7Checksum(bytes: Uint8Array): number {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return (128 - (sum % 128)) & 0x7F;
+// ============================================================
+// DX7 Parameter validation (from NeuralDX7 constants.py)
+// ============================================================
+
+const N_OSC = 6;
+const GLOBAL_VALID_RANGES: Record<string, number[]> = {
+  'PR1':  Array.from({length: 100}, (_, i) => i),
+  'PR2':  Array.from({length: 100}, (_, i) => i),
+  'PR3':  Array.from({length: 100}, (_, i) => i),
+  'PR4':  Array.from({length: 100}, (_, i) => i),
+  'PL1':  Array.from({length: 100}, (_, i) => i),
+  'PL2':  Array.from({length: 100}, (_, i) => i),
+  'PL3':  Array.from({length: 100}, (_, i) => i),
+  'PL4':  Array.from({length: 100}, (_, i) => i),
+  'ALG':  Array.from({length: 32}, (_, i) => i),
+  'OKS':  Array.from({length: 2}, (_, i) => i),
+  'FB':   Array.from({length: 8}, (_, i) => i),
+  'LFS':  Array.from({length: 100}, (_, i) => i),
+  'LFD':  Array.from({length: 100}, (_, i) => i),
+  'LPMD': Array.from({length: 100}, (_, i) => i),
+  'LAMD': Array.from({length: 100}, (_, i) => i),
+  'LPMS': Array.from({length: 8}, (_, i) => i),
+  'LFW':  Array.from({length: 6}, (_, i) => i),
+  'LKS':  Array.from({length: 2}, (_, i) => i),
+  'TRNSP': Array.from({length: 49}, (_, i) => i),
+  'NAME CHAR 1':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 2':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 3':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 4':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 5':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 6':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 7':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 8':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 9':  Array.from({length: 128}, (_, i) => i),
+  'NAME CHAR 10': Array.from({length: 128}, (_, i) => i),
+};
+
+const OSCILLATOR_VALID_RANGES: Record<string, number[]> = {
+  'R1':  Array.from({length: 100}, (_, i) => i),
+  'R2':  Array.from({length: 100}, (_, i) => i),
+  'R3':  Array.from({length: 100}, (_, i) => i),
+  'R4':  Array.from({length: 100}, (_, i) => i),
+  'L1':  Array.from({length: 100}, (_, i) => i),
+  'L2':  Array.from({length: 100}, (_, i) => i),
+  'L3':  Array.from({length: 100}, (_, i) => i),
+  'L4':  Array.from({length: 100}, (_, i) => i),
+  'BP':  Array.from({length: 100}, (_, i) => i),
+  'LD':  Array.from({length: 100}, (_, i) => i),
+  'RD':  Array.from({length: 100}, (_, i) => i),
+  'RC':  Array.from({length: 4}, (_, i) => i),
+  'LC':  Array.from({length: 4}, (_, i) => i),
+  'DET': Array.from({length: 15}, (_, i) => i),
+  'RS':  Array.from({length: 8}, (_, i) => i),
+  'KVS': Array.from({length: 8}, (_, i) => i),
+  'AMS': Array.from({length: 4}, (_, i) => i),
+  'OL':  Array.from({length: 100}, (_, i) => i),
+  'FC':  Array.from({length: 32}, (_, i) => i),
+  'M':   Array.from({length: 2}, (_, i) => i),
+  'FF':  Array.from({length: 100}, (_, i) => i),
+};
+
+function buildOscKeys(): string[] {
+  const oscKeys = [
+    'R1', 'R2', 'R3', 'R4',
+    'L1', 'L2', 'L3', 'L4',
+    'BP', 'LD', 'RD', 'RC', 'LC',
+    'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF', 'DET', 'RS',
+  ];
+  const oscParams: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (const key of [
+      'R1', 'R2', 'R3', 'R4',
+      'L1', 'L2', 'L3', 'L4',
+      'BP', 'LD', 'RD', 'RC', 'LC',
+      'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+    ]) {
+      oscParams.push(`${i}_${key}`);
+    }
+  }
+  return oscParams;
 }
+
+const OSC_KEYS = [
+  'R1', 'R2', 'R3', 'R4',
+  'L1', 'L2', 'L3', 'L4',
+  'BP', 'LD', 'RD', 'RC', 'LC',
+  'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+];
+
+const GENERAL_KEYS = [
+  'PR1', 'PR2', 'PR3', 'PR4',
+  'PL1', 'PL2', 'PL3', 'PL4',
+  'ALG', 'OKS', 'FB',
+  'LFS', 'LFD', 'LPMD', 'LAMD', 'LPMS', 'LFW', 'LKS',
+  'TRNSP',
+  'NAME CHAR 1', 'NAME CHAR 2', 'NAME CHAR 3', 'NAME CHAR 4',
+  'NAME CHAR 5', 'NAME CHAR 6', 'NAME CHAR 7', 'NAME CHAR 8',
+  'NAME CHAR 9', 'NAME CHAR 10',
+];
+
+function buildVoiceKeys(): string[] {
+  const oscKeys = [
+    'R1', 'R2', 'R3', 'R4',
+    'L1', 'L2', 'L3', 'L4',
+    'BP', 'LD', 'RD', 'RC', 'LC',
+    'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+  ];
+  const oscParams: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (const key of [
+      'R1', 'R2', 'R3', 'R4',
+      'L1', 'L2', 'L3', 'L4',
+      'BP', 'LD', 'RD', 'RC', 'LC',
+      'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+    ]) {
+      oscParams.push(`${i}_${key}`);
+    }
+  }
+  return oscParams.concat([
+    'PR1', 'PR2', 'PR3', 'PR4',
+    'PL1', 'PL2', 'PL3', 'PL4',
+    'ALG', 'OKS', 'FB',
+    'LFS', 'LFD', 'LPMD', 'LAMD', 'LPMS', 'LFW', 'LKS',
+    'TRNSP',
+    'NAME CHAR 1', 'NAME CHAR 2', 'NAME CHAR 3', 'NAME CHAR 4',
+    'NAME CHAR 5', 'NAME CHAR 6', 'NAME CHAR 7', 'NAME CHAR 8',
+    'NAME CHAR 9', 'NAME CHAR 10',
+  ]);
+}
+
+const VOICE_KEYS = (() => {
+  const oscKeys = [
+    'R1', 'R2', 'R3', 'R4',
+    'L1', 'L2', 'L3', 'L4',
+    'BP', 'LD', 'RD', 'RC', 'LC',
+    'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+  ];
+  const oscParams: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (const key of [
+      'R1', 'R2', 'R3', 'R4',
+      'L1', 'L2', 'L3', 'L4',
+      'BP', 'LD', 'RD', 'RC', 'LC',
+      'DET', 'RS', 'KVS', 'AMS', 'OL', 'FC', 'M', 'FF'
+    ]) {
+      oscParams.push(`${i}_${key}`);
+    }
+  }
+  return oscParams.concat([
+    'PR1', 'PR2', 'PR3', 'PR4',
+    'PL1', 'PL2', 'PL3', 'PL4',
+    'ALG', 'OKS', 'FB',
+    'LFS', 'LFD', 'LPMD', 'LAMD', 'LPMS', 'LFW', 'LKS',
+    'TRNSP',
+    'NAME CHAR 1', 'NAME CHAR 2', 'NAME CHAR 3', 'NAME CHAR 4',
+    'NAME CHAR 5', 'NAME CHAR 6', 'NAME CHAR 7', 'NAME CHAR 8',
+    'NAME CHAR 9', 'NAME CHAR 10',
+  ]);
+})();
+
+const VOICE_PARAMETER_RANGES: Record<string, number[]> = {
+  ...Object.fromEntries(
+    Object.entries(OSCILLATOR_VALID_RANGES).flatMap(([key, range]) =>
+      Array.from({ length: N_OSC }, (_, i) => [`${i}_${key}`, range] as [string, number[]])
+    )
+  ),
+  ...GLOBAL_VALID_RANGES,
+};
+
+function verifyVoice(params: Record<string, number>): boolean {
+  for (const [key, value] of Object.entries(params)) {
+    const range = VOICE_PARAMETER_RANGES[key];
+    if (!range || !range.includes(value)) {
+      console.warn(`DX7 verify failed: ${key}=${value} not in range`);
+      return false;
+    }
+  }
+  return true;
+}
+
+// DX7 checksum is the standard Yamaha checksum (see SysEx/codec).
+const dx7Checksum = yamahaChecksum;
 
 /**
  * Unpack a DX7 VMEM (128 bytes, compressed) to VCED (155 bytes, uncompressed).
@@ -166,17 +346,6 @@ function buildDx7VoiceSysEx(ved: Uint8Array, channel: number): Uint8Array {
   return result;
 }
 
-function splitSysex(raw: Uint8Array): Uint8Array[] {
-  const msgs: Uint8Array[] = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 0xF0 && !inSysex) { inSysex = true; start = i; }
-    else if (raw[i] === 0xF7 && inSysex) { msgs.push(raw.slice(start, i + 1)); inSysex = false; }
-  }
-  return msgs;
-}
-
 /**
  * Header length helpers: detect whether a SysEx message uses
  * the standard 6-byte DX7 header or the legacy 7-byte header.
@@ -234,7 +403,7 @@ const yamahaDx7Contract: ModelContract = {
   displayName: 'Yamaha DX7',
   manufacturer: 'Yamaha',
   icon: 'yamaha-logo.svg',
-  thumbnail: 'yamaha-dx7.jpg',
+  thumbnail: 'yamaha-dx7.webp',
 
   bankCapacity: 32,
   banksCount: 1,
@@ -356,8 +525,13 @@ const yamahaDx7Contract: ModelContract = {
     return new Uint8Array([0xF0, 0x43, ch, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]);
   },
 
+  // ─── Validation (from NeuralDX7 constants.py) ───
+  verifyVoice(params: Record<string, number>): boolean {
+    return verifyVoice(params);
+  },
+
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
-    const msgs = splitSysex(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results: { rawData: Uint8Array; slot: number }[] = [];
 
     for (const msg of msgs) {
@@ -377,6 +551,64 @@ const yamahaDx7Contract: ModelContract = {
     return results;
   },
 
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const parsed = splitSysexMessages(data).flatMap(msg => {
+      const hdr = dx7HeaderLen(msg);
+      if (hdr === 0) return [];
+      if (isDx7Voice(msg, 0x00)) {
+        return [{ rawData: msg.slice(hdr, hdr + DX7_PATCH_DATA_SIZE), slot: 0 }];
+      }
+      if (isDx7Bulk(msg, 0x00)) {
+        const patchData = msg.slice(hdr, hdr + 32 * DX7_PATCH_DATA_SIZE);
+        const out: { rawData: Uint8Array; slot: number }[] = [];
+        for (let i = 0; i < 32; i++) {
+          const s = i * DX7_PATCH_DATA_SIZE;
+          out.push({ rawData: new Uint8Array(patchData.slice(s, s + DX7_PATCH_DATA_SIZE)), slot: i });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Yamaha ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    if (options.format === 'bank' && patches.length > 0) {
+      return this.buildBulkSysEx!(patches, options.midiChannel);
+    }
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /dx.?7|fm.?1|m.?wave|cuvave/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'Yamaha DX7', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Yamaha', modelId: this.modelId }
+      : null;
+  },
+
   legacySysEx: {
     modelIdByte: 0x00,
     buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x43, (ch - 1) & 0x0F, 0x00, CMD_BULK, SUB_SINGLE, 0x00, 0xF7]),
@@ -388,7 +620,7 @@ export const yamahaDx7iiContract: ModelContract = {
   ...yamahaDx7Contract,
   modelId: 'yamaha-dx7ii',
   displayName: 'Yamaha DX7II',
-  thumbnail: 'yamaha-dx7ii.jpg',
+  thumbnail: 'yamaha-dx7.webp',
   sysexModelId: { offset: 3, values: [0x01] },
   midiDetection: { portPattern: /dx.?7ii|dx7.?ii/i, displayName: 'DX7II' },
   parameterSchemaKey: 'yamaha-dx7ii',
@@ -469,5 +701,13 @@ allYamahaContracts.forEach(c => {
     console.error(`❌ ${c.modelId} validation failed:`, result.errors);
   }
 });
+
+// Export validation utilities for debugging
+export {
+  VOICE_KEYS,
+  VOICE_PARAMETER_RANGES,
+  verifyVoice,
+  dx7Checksum,
+};
 
 export default yamahaDx7Contract;

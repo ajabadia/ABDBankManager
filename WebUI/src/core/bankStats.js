@@ -3,6 +3,8 @@
  * Computes metrics for a bank's patches.
  */
 
+import { getParameterSchema, hasParameterSchema } from './modelRegistry.js';
+
 /**
  * @param {Array} patches - Array of patch objects
  * @param {object|null} contract - Model contract (optional, for parameter stats)
@@ -65,12 +67,12 @@ export function computeBankStats(patches, contract = null) {
     totalDataBytes += raw.length;
   }
 
-  // Parameter stats (if schema available)
+  // Parameter stats (if schema available via modelRegistry)
   let parameterStats = null;
-  if (contract && contract.getParameterSchema) {
+  if (contract?.modelId && hasParameterSchema(contract.modelId)) {
     try {
-      const schema = contract.getParameterSchema();
-      if (schema && schema.parameters) {
+      const schema = getParameterSchema(contract.modelId);
+      if (schema) {
         parameterStats = computeParameterStats(patches, schema);
       }
     } catch {
@@ -98,12 +100,16 @@ export function computeBankStats(patches, contract = null) {
 }
 
 function computeParameterStats(patches, schema) {
-  // Track min/max/avg for each parameter offset
-  const paramCount = schema.parameters?.length || 0;
-  if (paramCount === 0) return null;
+  // Use schema.getTable(rawData) to get [{ name, value }] rows per patch
+  // Collect all parameter names from the first patch
+  const firstRaw = patches[0]?.rawData;
+  if (!firstRaw) return null;
+  const firstRows = schema.getTable(firstRaw instanceof Uint8Array ? firstRaw : new Uint8Array(firstRaw || []));
+  if (!firstRows || firstRows.length === 0) return null;
 
-  const ranges = schema.parameters.map((param, i) => ({
-    name: param.name,
+  // Initialize accumulators per parameter
+  const ranges = firstRows.map(row => ({
+    name: row.name,
     min: 255,
     max: 0,
     sum: 0,
@@ -113,8 +119,9 @@ function computeParameterStats(patches, schema) {
 
   for (const p of patches) {
     const raw = p.rawData instanceof Uint8Array ? p.rawData : new Uint8Array(p.rawData || []);
-    for (let i = 0; i < paramCount && i < raw.length; i++) {
-      const val = raw[i];
+    const rows = schema.getTable(raw);
+    for (let i = 0; i < ranges.length && i < rows.length; i++) {
+      const val = rows[i].value ?? rows[i].rawByte ?? 0;
       ranges[i].min = Math.min(ranges[i].min, val);
       ranges[i].max = Math.max(ranges[i].max, val);
       ranges[i].sum += val;

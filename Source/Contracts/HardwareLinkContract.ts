@@ -3,6 +3,12 @@
  * Bidirectional MIDI SysEx communication with hardware synthesizers
  */
 
+import type { PatchData } from './PatchData.ts';
+import type { MidiOutputPortInfo } from './Midi.ts';
+
+// Re-export so existing `import { PatchData } from '../HardwareLinkContract'` keeps working
+export type { PatchData } from './PatchData.ts';
+
 export interface HardwareDevice {
   name: string;
   inputId: string;
@@ -15,7 +21,7 @@ export interface HardwareLinkContract {
   modelId: string;
 
   // ─── Discovery ───
-  detectHardware(midiOutputs: any[]): HardwareDevice | null;
+  detectHardware(midiOutputs: MidiOutputPortInfo[]): HardwareDevice | null;
 
   // ─── Dump TO Synth ───
   buildPatchDump(patch: PatchData, slot: number, channel: number): Uint8Array[];
@@ -32,20 +38,6 @@ export interface HardwareLinkContract {
   // ─── Timing ───
   interMessageDelayMs: number;
   dumpTimeoutMs: number;
-}
-
-export interface PatchData {
-  name: string;
-  category: string;
-  author: string;
-  tags: string[];
-  notes: string;
-  originAddress: string;
-  rawData: Uint8Array;
-  hardwareIds?: string[];        // Hardwares donde el blob es válido (canónico + compatibles); si falta, se deriva del contrato
-  parameters?: Record<string, number>; // RESERVADO para plugins/editores — el gestor nunca lo usa ni lo muestra
-  isFavorite: boolean;
-  creationDate: string;
 }
 
 export interface ImportResult {
@@ -70,7 +62,7 @@ export abstract class BaseHardwareLink implements HardwareLinkContract {
   abstract interMessageDelayMs: number;
   abstract dumpTimeoutMs: number;
 
-  detectHardware(midiOutputs: any[]): HardwareDevice | null {
+  detectHardware(midiOutputs: MidiOutputPortInfo[]): HardwareDevice | null {
     // Override in subclasses for specific detection logic
     return null;
   }

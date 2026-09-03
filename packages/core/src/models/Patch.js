@@ -2,7 +2,7 @@ export function createPatch(overrides = {}) {
   return {
     id: overrides.id || crypto.randomUUID(),
     name: overrides.name || 'Init',
-    category: overrides.category || 'Other',
+    category: overrides.category || 'UNK',
     author: overrides.author || '',
     tags: overrides.tags || [],
     notes: overrides.notes || '',

@@ -1,5 +1,5 @@
 ﻿<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -17,25 +17,58 @@
     }
     </script>
     <title>ABD Universal Bank Manager</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>ðŸŽ›ï¸</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='20' y='20' width='60' height='60' rx='12' fill='none' stroke='%23888' stroke-width='8'/><circle cx='50' cy='50' r='10' fill='%23888'/></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --bg-primary: var(--color-bg-base, #0d1117);
-            --bg-secondary: var(--color-panel-bg, #161b22);
-            --bg-tertiary: var(--color-panel-surface, #21262d);
-            --accent: var(--color-accent, #00d4ff);
-            --accent-dim: var(--color-accent-dim, rgba(0, 212, 255, 0.15));
-            --accent-strong: var(--color-accent-hover, #00d4ff);
-            --text-primary: var(--color-text-main, #e6edf3);
-            --text-secondary: var(--color-text-muted, #8b949e);
-            --border: var(--color-panel-border, #30363d);
-            --success: var(--color-success, #3fb950);
-            --warning: var(--color-warning, #d29922);
-            --error: var(--color-error, #f85149);
+        :root,
+        [data-theme="ms2000"],
+        body.skin-ms2000 {
+            --bg-primary: #0a1118;
+            --bg-secondary: #102130;
+            --bg-tertiary: #172d42;
+            --accent: #00c3ff;
+            --accent-dim: rgba(0, 195, 255, 0.15);
+            --accent-strong: #38d3ff;
+            --text-primary: #f0f7ff;
+            --text-secondary: #7e9bb5;
+            --border: rgba(0, 195, 255, 0.25);
+            --success: #54ff72;
+            --warning: #d29922;
+            --error: #ff3344;
+        }
+        [data-theme="microkorg"],
+        body.skin-microkorg {
+            --bg-primary: #14110e;
+            --bg-secondary: #1f1b16;
+            --bg-tertiary: #2b251f;
+            --accent: #d4af37;
+            --accent-dim: rgba(212, 175, 55, 0.18);
+            --accent-strong: #e5c158;
+            --text-primary: #fcf8ee;
+            --text-secondary: #a69888;
+            --border: rgba(212, 175, 55, 0.28);
+            --success: #54ff72;
+            --warning: #e5c158;
+            --error: #ff3344;
+        }
+        [data-theme="advanced"],
+        body.skin-advanced,
+        body.skin-cyberpunk {
+            --bg-primary: #08080c;
+            --bg-secondary: #101018;
+            --bg-tertiary: #181824;
+            --accent: #ff007f;
+            --accent-dim: rgba(255, 0, 127, 0.18);
+            --accent-strong: #ff3399;
+            --text-primary: #ffffff;
+            --text-secondary: #8c8ca0;
+            --border: rgba(255, 0, 127, 0.30);
+            --success: #00ffff;
+            --warning: #ffaa00;
+            --error: #ff0055;
         }
         body {
             font-family: 'Space Grotesk', sans-serif;
@@ -43,6 +76,7 @@
             color: var(--text-primary);
             min-height: 100vh;
             overflow: hidden;
+            transition: background 0.2s ease, color 0.2s ease;
         }
 
         /* Header */
@@ -1249,11 +1283,11 @@
     <header class="header">
         <h1>ABD Bank Manager</h1>
         <div class="header-actions">
-            <div class="midi-status" id="midi-status" title="Conectar MIDI">
+            <div class="midi-status" id="midi-status" title="Connect MIDI">
                 <span class="midi-dot"></span>
                 <span class="midi-label" id="midi-label">MIDI</span>
             </div>
-            <button class="btn btn-sm" id="btn-help" title="Atajos de teclado (?)">?</button>
+            <button class="btn btn-sm" id="btn-help" title="Keyboard shortcuts (?)">?</button>
             <span id="version" class="version-badge">v0.1.0</span>
         </div>
     </header>
@@ -1262,10 +1296,10 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-search">
-                    <input type="search" id="global-search" placeholder="Buscar...">
+                    <input type="search" id="global-search" placeholder="Search...">
                 </div>
-                <button class="btn btn-sm btn-ghost" id="tree-view-toggle" title="Vista Ã¡rbol (P0.5)" style="margin:0 0.5rem 0.5rem;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px; margin-right:4px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Vista Árbol
+                <button class="btn btn-sm btn-ghost" id="tree-view-toggle" title="Tree View" style="margin:0 0.5rem 0.5rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px; margin-right:4px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Tree View
                 </button>
             </div>
             <ul class="sidebar-list" id="nav-list"></ul>
@@ -1274,13 +1308,13 @@
         <main class="main-content" id="main-content">
             <div class="welcome" id="panel-welcome">
                 <h2>ABD Universal Bank Manager</h2>
-                <p>Selecciona un fabricante en la barra lateral para empezar, o conecta un hardware MIDI.</p>
+                <p>Select a manufacturer from the sidebar to get started, or connect MIDI hardware.</p>
             </div>
             <div id="panel-content" style="display:none;"></div>
             <div class="drop-zone" id="drop-zone" style="display:none;">
                 <div class="drop-zone-icon">${icons.upload}</div>
-                <div class="drop-zone-text">Arrastra archivos .syx, .abdbank, .abdlibrary, .json aquÃ­</div>
-                <div class="drop-zone-hint">o pega hex con Ctrl+V</div>
+                <div class="drop-zone-text">Drop .syx, .abdbank, .abdlibrary, or .json files here</div>
+                <div class="drop-zone-hint">or paste hex with Ctrl+V</div>
             </div>
         </main>
     </div>
@@ -1300,3 +1334,4 @@
     <script>/* ABDBankManager v0.1.0 */</script>
 </body>
 </html>
+

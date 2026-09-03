@@ -5,7 +5,7 @@ import { getModelContract } from '../../src/contracts/modelContracts.js';
 import { splitSysExMessages } from '../../src/core/sysexParser.js';
 import { buildSysExViewInfo } from '../../src/core/patchSysEx.js';
 
-const FIXTURE = path.resolve(process.cwd(), '..', 'fixtures/sysex/behringer-pro800/v1.4.4/PRO-800_Presets_v1.4.4.syx');
+const FIXTURE = path.resolve(process.cwd(), 'fixtures/sysex/behringer-pro800/v1.4.4/PRO-800_Presets_v1.4.4.syx');
 const pro800 = () => getModelContract('behringer-pro800');
 
 function firstPatch() {

@@ -36,7 +36,7 @@ function makePatch(index, overrides = {}) {
   return {
     id: `patch-${index}`,
     name: `Patch ${index}`,
-    category: 'Other',
+    category: 'UNK',
     author: '',
     tags: [],
     notes: '',

@@ -206,7 +206,6 @@ describe('DeepMind 12 — User fixtures', () => {
 });
 
 describe('DeepMind 12 — Commercial fixtures', () => {
-  const contract = getModelContract('behringer-deepmind12');
 
   it('parsea 5P Media DM12 bank', () => {
     const data = loadFixture('commercial/5P_Media_DM12.syx');

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ABD Bank Manager — Import Engine
  * Reads .abdbank (ZIP), .abdlibrary (ZIP multi-banco), .json, .syx files
  * and returns structured bank/patch data
@@ -11,11 +11,43 @@ import { getModelContract, getHardwareIds } from '../contracts/modelContracts.js
 import { generatePatchName } from './patchNaming.js';
 import { calculateFingerprint } from './fingerprint.js';
 
+const MAX_ZIP_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_PATCH_SIZE = 1 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024;
+const MAX_PATCHES_PER_BANK = 128;
+const MAX_BANKS_PER_LIBRARY = 64;
+const MAX_SYSEX_SIZE = 1 * 1024 * 1024;
+
+function getFileSize(file) {
+  return typeof file?.size === 'number' ? file.size : null;
+}
+
+function isSafePath(targetPath) {
+  if (typeof targetPath !== 'string' || targetPath.length === 0) return false;
+  const normalized = targetPath.replace(/\\/g, '/');
+  return !normalized.startsWith('/')
+    && !/^[A-Za-z]:\//.test(normalized)
+    && !normalized.split('/').includes('..');
+}
+
+function sanitizeString(value, fallback = '') {
+  if (typeof value !== 'string') return fallback;
+  return [...value].filter(character => {
+    const code = character.charCodeAt(0);
+    return code > 0x1f && code !== 0x7f;
+  }).join('').trim();
+}
+
 /**
  * Import a file — detects format by extension and content
  */
 export async function importFile(file) {
   const ext = file.name.split('.').pop().toLowerCase();
+
+  if (getFileSize(file) !== null && getFileSize(file) > MAX_FILE_SIZE && ext !== 'abdbank' && ext !== 'abdlibrary') {
+    return { success: false, error: `File too large: máximo ${MAX_FILE_SIZE / 1024 / 1024} MB` };
+  }
 
   switch (ext) {
     case 'abdbank':
@@ -37,17 +69,28 @@ export async function importFile(file) {
  */
 async function readAbdzip(file, expectedFormats) {
   const data = await file.arrayBuffer();
+  if (data.byteLength > MAX_ZIP_SIZE) {
+    return { error: `File too large: máximo ${MAX_ZIP_SIZE / 1024 / 1024} MB` };
+  }
+
   const zip = await JSZip.loadAsync(data);
   const manifestFile = zip.file('manifest.json');
   if (!manifestFile) {
-    return { error: 'Archivo inválido: falta manifest.json' };
+    return { error: 'Invalid file: falta manifest.json' };
   }
 
   const manifestText = await manifestFile.async('string');
   const manifest = JSON.parse(manifestText);
 
-  if (!manifest.version || !expectedFormats.includes(manifest.format)) {
+  if (!Number.isInteger(manifest.version) || !expectedFormats.includes(manifest.format)) {
     return { error: 'manifest.json tiene formato incorrecto' };
+  }
+
+  if (manifest.format === 'abdbank' && manifest.version !== 2 && manifest.version !== 3) {
+    return { error: '.abdbank version not supported' };
+  }
+  if (manifest.format === 'abdlibrary' && manifest.version !== 1) {
+    return { error: '.abdlibrary version not supported' };
   }
 
   return { zip, manifest };
@@ -61,60 +104,77 @@ async function parseBankEntry(zip, entry, sourceName) {
   const mb = entry.bank || {};
   // MF.5: Restore bank image from ZIP if present
   let imageUrl = null;
-  if (mb.imageUrl && zip.file(mb.imageUrl)) {
+  if (mb.imageUrl && isSafePath(mb.imageUrl) && zip.file(mb.imageUrl)) {
     const imgFile = zip.file(mb.imageUrl);
     const imgBuffer = await imgFile.async('arraybuffer');
-    const bytes = new Uint8Array(imgBuffer);
-    // Convert binary back to data URL (assume webp from export)
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const base64 = btoa(binary);
-    imageUrl = `data:image/webp;base64,${base64}`;
+    if (imgBuffer.byteLength <= MAX_IMAGE_SIZE) {
+      const extension = mb.imageUrl.split('.').pop().toLowerCase();
+      const mime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg'
+        : extension === 'png' ? 'image/png' : 'image/webp';
+      const bytes = new Uint8Array(imgBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      imageUrl = `data:${mime};base64,${base64}`;
+    }
   }
 
+  const modelId = sanitizeString(mb.modelId);
   const bank = {
     id: mb.id || crypto.randomUUID(),
-    name: mb.name || 'Sin nombre',
-    modelId: mb.modelId,
-    hardwareIds: mb.hardwareIds || (mb.modelId ? getHardwareIds(mb.modelId) : []),
-    manufacturer: mb.manufacturer,
+    name: sanitizeString(mb.name, 'Untitled'),
+    modelId,
+    hardwareIds: Array.isArray(mb.hardwareIds) ? mb.hardwareIds : (modelId ? getHardwareIds(modelId) : []),
+    manufacturer: sanitizeString(mb.manufacturer, 'Unknown'),
     isFactory: mb.isFactory || false,
     isLocked: mb.isLocked || false,
-    source: mb.source || sourceName,
+    includeInBundle: mb.includeInBundle ?? mb.isFactory ?? false,
+    source: sanitizeString(mb.source, sourceName),
     imageUrl,
     // MF.7: Restore metadata
-    description: mb.description || '',
-    bankAuthor: mb.bankAuthor || '',
-    license: mb.license || '',
-    tags: mb.tags || [],
-    bankNotes: mb.bankNotes || '',
-    firmwareCompat: mb.firmwareCompat || '',
-    knownIssues: mb.knownIssues || '',
+    description: sanitizeString(mb.description),
+    bankAuthor: sanitizeString(mb.bankAuthor),
+    license: sanitizeString(mb.license),
+    tags: Array.isArray(mb.tags) ? mb.tags.map(tag => sanitizeString(tag)).filter(Boolean) : [],
+    bankNotes: sanitizeString(mb.bankNotes),
+    firmwareCompat: sanitizeString(mb.firmwareCompat),
+    knownIssues: sanitizeString(mb.knownIssues),
     creationDate: mb.creationDate || new Date().toISOString()
   };
 
+  const patchEntries = Array.isArray(entry.patches) ? entry.patches : [];
   const patches = [];
-  for (const patchEntry of entry.patches || []) {
+  for (const patchEntry of patchEntries.slice(0, MAX_PATCHES_PER_BANK)) {
+    if (!isSafePath(patchEntry.rawDataFile)) {
+      console.warn(`[Import] Unsafe patch path rejected: ${patchEntry.rawDataFile}`);
+      continue;
+    }
+
     const rawDataFile = zip.file(patchEntry.rawDataFile);
     if (!rawDataFile) {
       console.warn(`[Import] Patch blob missing: ${patchEntry.rawDataFile}`);
       continue;
     }
     const rawDataBuffer = await rawDataFile.async('arraybuffer');
+    if (rawDataBuffer.byteLength > MAX_PATCH_SIZE) {
+      console.warn(`[Import] Patch blob too large: ${patchEntry.rawDataFile}`);
+      continue;
+    }
     const rawData = new Uint8Array(rawDataBuffer);
+    const contract = getModelContract(bank.modelId);
 
     patches.push({
       id: crypto.randomUUID(),
       index: patchEntry.index,
-      name: patchEntry.name || generatePatchName(getModelContract(bank.modelId), patchEntry.index),
-      category: patchEntry.category || 'Other',
-      author: patchEntry.author || '',
-      tags: patchEntry.tags || [],
-      notes: patchEntry.notes || '',
+      name: sanitizeString(patchEntry.name) || generatePatchName(contract, patchEntry.index),
+      category: sanitizeString(patchEntry.category, 'Other'),
+      author: sanitizeString(patchEntry.author),
+      tags: Array.isArray(patchEntry.tags) ? patchEntry.tags.map(tag => sanitizeString(tag)).filter(Boolean) : [],
+      notes: sanitizeString(patchEntry.notes),
       rawData,
-      hardwareIds: patchEntry.hardwareIds || bank.hardwareIds,
+      hardwareIds: Array.isArray(patchEntry.hardwareIds) ? patchEntry.hardwareIds : bank.hardwareIds,
       parameters: patchEntry.parameters || {},
-      fingerprint: patchEntry.fingerprint || await calculateFingerprint(rawData, getModelContract(bank.modelId)),
+      fingerprint: patchEntry.fingerprint || await calculateFingerprint(rawData, contract),
       isFavorite: patchEntry.isFavorite || false,
       rating: patchEntry.rating || 0,
       versionNumber: patchEntry.versionNumber || 1
@@ -138,12 +198,15 @@ async function importAbdbank(file) {
 
     // Multi-banco v3 (retrocompat — el formato de librería ahora es .abdlibrary)
     if (Array.isArray(manifest.banks) && manifest.banks.length > 0) {
+      if (manifest.banks.length > MAX_BANKS_PER_LIBRARY) {
+        return { success: false, error: `Too many banks: máximo ${MAX_BANKS_PER_LIBRARY}` };
+      }
       const banks = [];
       let patchCount = 0;
       for (const entry of manifest.banks) {
-        const { bank, patches } = await parseBankEntry(zip, entry, file.name);
-        banks.push({ bank, patches });
-        patchCount += patches.length;
+        const parsed = await parseBankEntry(zip, entry, file.name);
+        banks.push(parsed);
+        patchCount += parsed.patches.length;
       }
       return { success: true, banks, patchCount, warnings: [] };
     }
@@ -152,7 +215,7 @@ async function importAbdbank(file) {
     const { bank, patches } = await parseBankEntry(zip, { bank: manifest.bank, patches: manifest.patches }, file.name);
     return { success: true, bank, patches, warnings: [] };
   } catch (e) {
-    return { success: false, error: `Error leyendo .abdbank: ${e.message}` };
+    return { success: false, error: `Error reading .abdbank: ${e.message}` };
   }
 }
 
@@ -165,17 +228,21 @@ async function importLibrary(file) {
     const { zip, manifest } = await readAbdzip(file, ['abdlibrary']);
     if (!zip) return { success: false, error: manifest };
 
+    if (!Array.isArray(manifest.banks) || manifest.banks.length > MAX_BANKS_PER_LIBRARY) {
+      return { success: false, error: `Invalid bank count: máximo ${MAX_BANKS_PER_LIBRARY}` };
+    }
+
     const banks = [];
     let patchCount = 0;
     for (const entry of manifest.banks || []) {
-      const { bank, patches } = await parseBankEntry(zip, entry, file.name);
-      banks.push({ bank, patches });
-      patchCount += patches.length;
+      const parsed = await parseBankEntry(zip, entry, file.name);
+      banks.push(parsed);
+      patchCount += parsed.patches.length;
     }
 
     return { success: true, banks, patchCount, warnings: [] };
   } catch (e) {
-    return { success: false, error: `Error leyendo .abdlibrary: ${e.message}` };
+    return { success: false, error: `Error reading .abdlibrary: ${e.message}` };
   }
 }
 
@@ -184,13 +251,17 @@ async function importLibrary(file) {
  */
 async function importJson(file) {
   try {
+    const fileSize = getFileSize(file);
+    if (fileSize !== null && fileSize > MAX_FILE_SIZE) {
+      return { success: false, error: `File too large: máximo ${MAX_FILE_SIZE / 1024 / 1024} MB` };
+    }
     const text = await file.text();
     const data = JSON.parse(text);
 
     const modelId = data.modelId || data.bank?.modelId || 'unknown';
     const bank = {
       id: data.id || data.bank?.id || crypto.randomUUID(),
-      name: data.name || data.bank?.name || file.name.replace('.json', ''),
+      name: sanitizeString(data.name || data.bank?.name || file.name.replace('.json', ''), 'Untitled'),
       modelId,
       hardwareIds: data.hardwareIds || data.bank?.hardwareIds || (modelId !== 'unknown' ? getHardwareIds(modelId) : []),
       manufacturer: data.manufacturer || data.bank?.manufacturer || 'Unknown',
@@ -203,22 +274,26 @@ async function importJson(file) {
     if (!Array.isArray(rawPatches)) {
       return { success: false, error: 'JSON no contiene array de patches' };
     }
+    if (rawPatches.length > MAX_PATCHES_PER_BANK) {
+      return { success: false, error: `Too many patches: máximo ${MAX_PATCHES_PER_BANK}` };
+    }
 
+    const contract = getModelContract(modelId);
     const patches = await Promise.all(rawPatches.map(async (p, i) => {
       const rawData = p.rawData ? new Uint8Array(p.rawData) : new Uint8Array(0);
+      if (rawData.byteLength > MAX_PATCH_SIZE) throw new Error(`Patch too large at index ${i}`);
       return {
         id: crypto.randomUUID(),
         index: p.index ?? i,
-        // Nombre del archivo si lo trae; si no, generado según el contrato
-        name: p.name || generatePatchName(getModelContract(modelId), p.index ?? i),
-        category: p.category || 'Other',
-        author: p.author || '',
-        tags: p.tags || [],
-        notes: p.notes || '',
+        name: sanitizeString(p.name) || generatePatchName(contract, p.index ?? i),
+        category: sanitizeString(p.category, 'Other'),
+        author: sanitizeString(p.author),
+        tags: Array.isArray(p.tags) ? p.tags.map(tag => sanitizeString(tag)).filter(Boolean) : [],
+        notes: sanitizeString(p.notes),
         rawData,
         hardwareIds: p.hardwareIds || bank.hardwareIds,
         parameters: p.parameters || {},
-        fingerprint: p.fingerprint || await calculateFingerprint(rawData, getModelContract(modelId)),
+        fingerprint: p.fingerprint || await calculateFingerprint(rawData, contract),
         isFavorite: p.isFavorite || false,
         rating: p.rating || 0,
         versionNumber: p.versionNumber || 1
@@ -227,7 +302,7 @@ async function importJson(file) {
 
     return { success: true, bank, patches, warnings: [] };
   } catch (e) {
-    return { success: false, error: `Error leyendo JSON: ${e.message}` };
+    return { success: false, error: `Error reading JSON: ${e.message}` };
   }
 }
 
@@ -239,11 +314,14 @@ async function importJson(file) {
 async function importSyx(file) {
   try {
     const buffer = await file.arrayBuffer();
+    if (buffer.byteLength > MAX_FILE_SIZE) {
+      return { success: false, error: `File too large: máximo ${MAX_FILE_SIZE / 1024 / 1024} MB` };
+    }
     const raw = new Uint8Array(buffer);
 
     const messages = splitSysExMessages(raw);
     if (messages.length === 0) {
-      return { success: false, error: 'No se encontraron mensajes SysEx válidos (F0...F7)' };
+      return { success: false, error: 'No valid SysEx messages found (F0...F7)' };
     }
 
     // Parse each message using contracts
@@ -252,9 +330,13 @@ async function importSyx(file) {
     const modelCounts = new Map();
 
     for (const msg of messages) {
+      if (msg.byteLength > MAX_SYSEX_SIZE) {
+        warnings.push(`Mensaje SysEx demasiado grande (${msg.length} bytes), ignorado`);
+        continue;
+      }
       const result = getContractForSysex(msg);
       if (!result) {
-        warnings.push(`Mensaje SysEx sin contrato conocido (${msg.length} bytes, manufacturer 0x${msg[1]?.toString(16)})`);
+        warnings.push(`SysEx message with no known contract (${msg.length} bytes, manufacturer 0x${msg[1]?.toString(16)})`);
         continue;
       }
 
@@ -278,7 +360,7 @@ async function importSyx(file) {
     }
 
     if (parsed.length === 0) {
-      return { success: false, error: 'No se encontraron patches válidos en el archivo SysEx' };
+      return { success: false, error: 'No valid patches found in SysEx file' };
     }
 
     // Determine primary model (most frequent)
@@ -329,17 +411,17 @@ async function importSyx(file) {
 
     if (unnamedCount > 0) {
       warnings.push(
-        `${unnamedCount} patch(es) sin nombre — se generó un placeholder. Edítalos a mano en el panel del patch.`
+        `${unnamedCount} patch(es) unnamed — a placeholder was generated. Edit them manually in the patch panel.`
       );
     }
 
     if (modelCounts.size > 1) {
       const modelList = [...modelCounts.entries()].map(([m, c]) => `${m} (${c})`).join(', ');
-      warnings.push(`Múltiples modelos detectados: ${modelList}. Todos se importaron bajo el modelo principal.`);
+      warnings.push(`Multiple models detected: ${modelList}. All imported under the primary model.`);
     }
 
     return { success: true, bank, patches, warnings };
   } catch (e) {
-    return { success: false, error: `Error leyendo SysEx: ${e.message}` };
+    return { success: false, error: `Error reading SysEx: ${e.message}` };
   }
 }

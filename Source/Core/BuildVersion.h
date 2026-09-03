@@ -6,9 +6,9 @@
 namespace ABD::BankManager {
 
 constexpr const char* kVersion = "0.1.0";
-constexpr const char* kBuildNumber = "2026.08.27.1917";
-constexpr const char* kBuildTimestamp = "2026-08-27T19:17:32.565Z";
-constexpr const char* kGitCommit = "9955559";
+constexpr const char* kBuildNumber = "2026.09.03.1103";
+constexpr const char* kBuildTimestamp = "2026-09-03T11:03:26.338Z";
+constexpr const char* kGitCommit = "54cd388";
 constexpr const char* kGitBranch = "main";
 
 } // namespace ABD::BankManager

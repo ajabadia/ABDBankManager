@@ -4,7 +4,7 @@ import path from 'node:path';
 import { getModelContract } from '../../src/contracts/modelContracts.js';
 import { splitSysExMessages } from '../../src/core/sysexParser.js';
 
-const fixturePath = path.resolve(process.cwd(), '..', 'fixtures/sysex/behringer-pro800/legacy/Behringer_Pro-800_Factory_Presets.syx');
+const fixturePath = path.resolve(process.cwd(), 'fixtures/sysex/behringer-pro800/legacy/Behringer_Pro-800_Factory_Presets.syx');
 
 describe('Behringer Pro-800 legacy factory fixture', () => {
   it('parses the complete legacy dump and detects v109/v110 records', () => {

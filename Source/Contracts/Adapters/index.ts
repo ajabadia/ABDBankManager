@@ -1,48 +1,62 @@
 /**
- * Adapters barrel — re-exports all concrete Import/Export/HardwareLink adapters
+ * Adapters barrel — concrete Import/Export/HardwareLink adapters.
  */
 
 export { RolandJunoImportAdapter, RolandJunoExportAdapter, RolandJunoHardwareLink } from './rolandJunoAdapter';
 export { KorgMs2000ImportAdapter, KorgMs2000ExportAdapter, KorgMs2000HardwareLink } from './korgMs2000Adapter';
 export { YamahaDx7ImportAdapter, YamahaDx7ExportAdapter, YamahaDx7HardwareLink } from './yamahaDx7Adapter';
 export { CasioCzImportAdapter, CasioCzExportAdapter, CasioCzHardwareLink } from './casioCzAdapter';
-export { BehringerDm12ImportAdapter, BehringerDm12ExportAdapter, BehringerDm12HardwareLink } from './behringerDm12Adapter';
+export { BehringerDm12ImportAdapter, BehringerDm12ExportAdapter } from './behringerDm12Adapter';
+export { BehringerPro800ImportAdapter, BehringerPro800ExportAdapter, BehringerPro800HardwareLink } from './behringerPro800Adapter';
 export { BehringerDeepMind12HardwareLink } from './behringerDeepMindAdapter';
+export { RolandAiraImportAdapter, RolandAiraExportAdapter, RolandAiraHardwareLink } from './rolandAiraAdapter';
 
-// ─── Registry ───
-
-import { RolandJunoImportAdapter, RolandJunoExportAdapter } from './rolandJunoAdapter';
-import { KorgMs2000ImportAdapter, KorgMs2000ExportAdapter } from './korgMs2000Adapter';
-import { YamahaDx7ImportAdapter, YamahaDx7ExportAdapter } from './yamahaDx7Adapter';
-import { CasioCzImportAdapter, CasioCzExportAdapter } from './casioCzAdapter';
+import { RolandJunoImportAdapter, RolandJunoExportAdapter, RolandJunoHardwareLink } from './rolandJunoAdapter';
+import { KorgMs2000ImportAdapter, KorgMs2000ExportAdapter, KorgMs2000HardwareLink } from './korgMs2000Adapter';
+import { YamahaDx7ImportAdapter, YamahaDx7ExportAdapter, YamahaDx7HardwareLink } from './yamahaDx7Adapter';
+import { CasioCzImportAdapter, CasioCzExportAdapter, CasioCzHardwareLink } from './casioCzAdapter';
 import { BehringerDm12ImportAdapter, BehringerDm12ExportAdapter } from './behringerDm12Adapter';
-
+import { BehringerPro800ImportAdapter, BehringerPro800ExportAdapter, BehringerPro800HardwareLink } from './behringerPro800Adapter';
+import { BehringerDeepMind12HardwareLink } from './behringerDeepMindAdapter';
+import { RolandAiraImportAdapter, RolandAiraExportAdapter, RolandAiraHardwareLink } from './rolandAiraAdapter';
 import type { ImportAdapter } from '../ImportAdapter';
 import type { ExportAdapter } from '../ExportAdapter';
-import { BehringerDeepMind12HardwareLink } from './behringerDeepMindAdapter';
-
-export const allHardwareLinks = [new BehringerDeepMind12HardwareLink()];
+import type { HardwareLinkContract } from '../HardwareLinkContract';
 
 export const allImportAdapters: ImportAdapter[] = [
+  new RolandAiraImportAdapter(),
   new RolandJunoImportAdapter(),
   new KorgMs2000ImportAdapter(),
   new YamahaDx7ImportAdapter(),
   new CasioCzImportAdapter(),
   new BehringerDm12ImportAdapter(),
+  new BehringerPro800ImportAdapter()
 ];
 
 export const allExportAdapters: ExportAdapter[] = [
+  new RolandAiraExportAdapter(),
   new RolandJunoExportAdapter(),
   new KorgMs2000ExportAdapter(),
   new YamahaDx7ExportAdapter(),
   new CasioCzExportAdapter(),
   new BehringerDm12ExportAdapter(),
+  new BehringerPro800ExportAdapter()
+];
+
+export const allHardwareLinks: HardwareLinkContract[] = [
+  new RolandAiraHardwareLink(),
+  new RolandJunoHardwareLink(),
+  new KorgMs2000HardwareLink(),
+  new YamahaDx7HardwareLink(),
+  new CasioCzHardwareLink(),
+  new BehringerDeepMind12HardwareLink(),
+  new BehringerPro800HardwareLink()
 ];
 
 export function getImportAdapter(modelId: string): ImportAdapter | undefined {
-  return allImportAdapters.find(a => a.targetModelIds.includes(modelId));
+  return allImportAdapters.find(adapter => adapter.targetModelIds.includes(modelId));
 }
 
 export function getExportAdapter(modelId: string): ExportAdapter | undefined {
-  return allExportAdapters.find(a => a.targetModelIds.includes(modelId));
+  return allExportAdapters.find(adapter => adapter.targetModelIds.includes(modelId));
 }

@@ -50,9 +50,9 @@ export function applyRenameTemplate(template, ctx) {
  */
 export function validateRenameTemplate(template, count) {
   const t = (template || '').trim();
-  if (!t) return { valid: false, reason: 'Plantilla vacía' };
+  if (!t) return { valid: false, reason: 'Empty template' };
   if (count > 1 && !CSV_PLACEHOLDERS.some(p => t.includes(p))) {
-    return { valid: false, reason: `La plantilla no contiene placeholders: ${count} patches recibirían el mismo nombre` };
+    return { valid: false, reason: `Template contains no placeholders: ${count} patches would receive the same name` };
   }
   return { valid: true };
 }
@@ -99,10 +99,10 @@ export function parseNamesCsv(text) {
   const errors = [];
   const lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim() !== '');
 
-  if (lines.length === 0) return { rows: [], errors: ['CSV vacío'] };
+  if (lines.length === 0) return { rows: [], errors: ['Empty CSV'] };
 
   const header = parseCsvLine(lines[0]);
-  if (!header) return { rows: [], errors: ['Cabecera ilegible (comillas sin cerrar)'] };
+  if (!header) return { rows: [], errors: ['Unreadable header (unclosed quotes)'] };
 
   const col = {}; // nombre normalizado → índice de columna
   header.forEach((name, i) => { col[name.trim().toLowerCase()] = i; });
@@ -122,13 +122,13 @@ export function parseNamesCsv(text) {
   for (let i = 1; i < lines.length; i++) {
     const parsed = parseCsvLine(lines[i]);
     if (!parsed) {
-      errors.push(`Línea ${i + 1}: ignorada (comillas sin cerrar)`);
+      errors.push(`Línea ${i + 1}: skipped (unclosed quotes)`);
       continue;
     }
     const bankId = get(parsed, 'bankid');
     const index = parseInt(get(parsed, 'index'), 10);
     if (!bankId || Number.isNaN(index)) {
-      errors.push(`Línea ${i + 1}: ignorada (bankId o index inválido)`);
+      errors.push(`Línea ${i + 1}: skipped (invalid bankId or index)`);
       continue;
     }
     rows.push({ bankId, bankName: get(parsed, 'bankname'), index, name: get(parsed, 'name') });

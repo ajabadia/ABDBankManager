@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FINGERPRINT_VERSION } from './operations/fingerprint.js';
 
 const ByteArraySchema = z.instanceof(Uint8Array).refine(value => value.length > 0, 'rawData must not be empty');
 
@@ -35,10 +36,13 @@ export const BackupBankSchema = z.object({
 export const BackupManifestSchema = z.object({
   version: z.number().int().positive(),
   schemaVersion: z.number().int().positive().optional(),
+  fpVersion: z.number().int().positive().optional(),
   format: z.literal('abdlibrary'),
   library: z.object({ bankCount: z.number().int().nonnegative().optional() }).passthrough().optional(),
   banks: z.array(z.object({ bank: BackupBankSchema, patches: z.array(BackupPatchSchema) }))
 });
+
+export const CURRENT_FINGERPRINT_VERSION = FINGERPRINT_VERSION;
 
 export function assertBackupPatchData(patch: unknown, rawData: Uint8Array) {
   BackupPatchSchema.parse(patch);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ABD Bank Manager — Export Engine
  * Writes .abdbank (ZIP), .abdlibrary (ZIP multi-banco), .json, .syx files
  */
@@ -19,7 +19,7 @@ export async function exportToFile(bank, patches, format = 'abdbank') {
     case 'syx':
       return await exportSyx(bank, patches);
     default:
-      return { success: false, error: `Formato de exportación no soportado: ${format}` };
+      return { success: false, error: `Export format not supported: ${format}` };
   }
 }
 
@@ -40,7 +40,7 @@ export async function exportLibraryToFile(banks) {
 
     return { success: true, filename, size: blob.size, bankCount: banks.length };
   } catch (e) {
-    return { success: false, error: `Error exportando librería .abdlibrary: ${e.message}` };
+    return { success: false, error: `Error exporting library .abdlibrary: ${e.message}` };
   }
 }
 
@@ -86,10 +86,12 @@ export async function buildLibraryZip(banks) {
       });
     }
 
-    // MF.5: Export bank image if present (extract from data URL to file)
+    // MF.5: Export bank image if present, preserving the original MIME type.
     let imageFile = null;
     if (bank.imageUrl) {
-      const imgPath = `${prefix}/image.webp`;
+      const imageMime = bank.imageUrl.match(/^data:(image\/(?:jpeg|png|webp));/i)?.[1]?.toLowerCase() || 'image/webp';
+      const imageExtension = imageMime === 'image/jpeg' ? 'jpg' : imageMime.split('/')[1];
+      const imgPath = `${prefix}/image.${imageExtension}`;
       // Data URL → base64 → binary
       const base64 = bank.imageUrl.split(',')[1];
       if (base64) {
@@ -111,6 +113,7 @@ export async function buildLibraryZip(banks) {
         manufacturer: bank.manufacturer,
         isFactory: bank.isFactory || false,
         isLocked: bank.isLocked || false,
+        includeInBundle: bank.includeInBundle ?? bank.isFactory ?? false,
         creationDate: bank.creationDate || new Date().toISOString(),
         modifiedDate: new Date().toISOString(),
         patchCount: patches.length,
@@ -132,6 +135,8 @@ export async function buildLibraryZip(banks) {
   const manifest = {
     version: 1,
     format: 'abdlibrary',
+    // Must stay in sync with FINGERPRINT_VERSION in packages/core/src/operations/fingerprint.js
+    fpVersion: 1,
     library: {
       bankCount: banks.length,
       exportedAt: new Date().toISOString()
@@ -177,22 +182,26 @@ async function exportAbdbank(bank, patches) {
       });
     }
 
-    // MF.5: Export bank image
+    // MF.5: Export bank image preserving its original format.
     let imageFile = null;
     if (bank.imageUrl) {
+      const imageMime = bank.imageUrl.match(/^data:(image\/(?:jpeg|png|webp));/i)?.[1]?.toLowerCase() || 'image/webp';
+      const imageExtension = imageMime === 'image/jpeg' ? 'jpg' : imageMime.split('/')[1];
       const base64 = bank.imageUrl.split(',')[1];
       if (base64) {
         const binary = atob(base64);
         const bytes = new Uint8Array(binary.length);
         for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-        zip.file('image.webp', bytes);
-        imageFile = 'image.webp';
+        imageFile = `image.${imageExtension}`;
+        zip.file(imageFile, bytes);
       }
     }
 
     const manifest = {
       version: 1,
       format: 'abdbank',
+      // Must stay in sync with FINGERPRINT_VERSION in packages/core/src/operations/fingerprint.js
+      fpVersion: 1,
       bank: {
         id: bank.id,
         name: bank.name,
@@ -202,6 +211,7 @@ async function exportAbdbank(bank, patches) {
         manufacturer: bank.manufacturer,
         isFactory: bank.isFactory || false,
         isLocked: bank.isLocked || false,
+        includeInBundle: bank.includeInBundle ?? bank.isFactory ?? false,
         creationDate: bank.creationDate || new Date().toISOString(),
         modifiedDate: new Date().toISOString(),
         patchCount: patches.length,
@@ -217,13 +227,16 @@ async function exportAbdbank(bank, patches) {
         imageUrl: imageFile || null
       },
       patches: patchEntries,
-      contract: {
-        modelId: bank.modelId,
-        patchDataSize: patches[0]?.rawData?.length || 0,
-        bankCapacity: patches.length,
-        banksCount: 1,
-        programsPerBank: patches.length
-      }
+      contract: (() => {
+        const modelContract = bank.modelId ? getModelContract(bank.modelId) : null;
+        return {
+          modelId: bank.modelId,
+          patchDataSize: modelContract?.patchDataSize ?? patches[0]?.rawData?.length ?? 0,
+          bankCapacity: modelContract?.bankCapacity ?? patches.length,
+          banksCount: modelContract?.banksCount ?? 1,
+          programsPerBank: modelContract?.programsPerBank ?? patches.length
+        };
+      })()
     };
 
     zip.file('manifest.json', JSON.stringify(manifest, null, 2));
@@ -234,7 +247,7 @@ async function exportAbdbank(bank, patches) {
 
     return { success: true, filename, size: blob.size };
   } catch (e) {
-    return { success: false, error: `Error exportando .abdbank: ${e.message}` };
+    return { success: false, error: `Error exporting .abdbank: ${e.message}` };
   }
 }
 
@@ -274,7 +287,7 @@ async function exportJson(bank, patches) {
 
     return { success: true, filename, size: blob.size };
   } catch (e) {
-    return { success: false, error: `Error exportando JSON: ${e.message}` };
+    return { success: false, error: `Error exporting JSON: ${e.message}` };
   }
 }
 
@@ -311,7 +324,7 @@ async function exportSyx(bank, patches) {
     }
 
     if (sysexParts.length === 0) {
-      return { success: false, error: 'No hay datos SysEx para exportar' };
+      return { success: false, error: 'No SysEx data to export' };
     }
 
     const combined = new Uint8Array(totalSize);
@@ -326,12 +339,12 @@ async function exportSyx(bank, patches) {
 
     const warnings = [];
     if (skippedCount > 0) {
-      warnings.push(`${skippedCount} patch(es) sin rawData — omitidos del export SysEx.`);
+      warnings.push(`${skippedCount} patch(es) without rawData — skipped from SysEx export.`);
     }
 
     saveAs(blob, filename);
     return { success: true, filename, size: blob.size, warnings };
   } catch (e) {
-    return { success: false, error: `Error exportando SysEx: ${e.message}` };
+    return { success: false, error: `Error exporting SysEx: ${e.message}` };
   }
 }

@@ -19,7 +19,7 @@ const SPECS = {
     display: 'LCD 24×2 characters',
     midi: 'In / Out / Thru',
     audio: '2× mono out (L/R)',
-    connections: ['MIDI In/Out/Thru', 'Phones', 'Foot控制器', 'Audio Out L/R'],
+    connections: ['MIDI In/Out/Thru', 'Phones', 'Foot Control', 'Audio Out L/R'],
     effects: 'None (external)',
     arpeggiator: 'No',
     sequencer: 'No',

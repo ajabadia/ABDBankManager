@@ -1,26 +1,26 @@
-/**
+﻿/**
  * MF.5 — Bank Custom Image Utility
  *
- * Handles image upload, resize, and storage for bank thumbnails.
- * Images are stored as data URLs in the bank object (IndexedDB).
+ * Stores the original image as a data URL. The UI controls its presentation
+ * with CSS, so user artwork is not cropped or recompressed on upload.
  */
 
-const TARGET_WIDTH = 400;
-const TARGET_HEIGHT = 240;
-const MAX_SIZE_BYTES = 500 * 1024; // 500KB
+const MAX_SIZE_BYTES = 1 * 1024 * 1024; // 1 MB
+const MAX_WIDTH = 2048;
+const MAX_HEIGHT = 1536;
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
- * Load an image from a File object and resize it to TARGET_WIDTH × TARGET_HEIGHT.
+ * Load an image from a File object without changing its pixels.
  * Returns a data URL string, or null on error.
  */
 export async function processBankImage(file) {
   if (!file) return null;
   if (!ACCEPTED_TYPES.includes(file.type)) {
-    throw new Error(`Formato no soportado: ${file.type}. Usa JPEG, PNG o WebP.`);
+    throw new Error(`Unsupported format: ${file.type}. Use JPEG, PNG or WebP.`);
   }
   if (file.size > MAX_SIZE_BYTES) {
-    throw new Error(`Archivo demasiado grande (${(file.size / 1024).toFixed(0)}KB). Máximo 500KB.`);
+    throw new Error(`File too large (${(file.size / 1024).toFixed(0)}KB). Maximum 1MB.`);
   }
 
   return new Promise((resolve, reject) => {
@@ -28,41 +28,18 @@ export async function processBankImage(file) {
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = TARGET_WIDTH;
-          canvas.height = TARGET_HEIGHT;
-          const ctx = canvas.getContext('2d');
-
-          // Cover-fit: fill the canvas, cropping excess
-          const imgRatio = img.width / img.height;
-          const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
-          let sx, sy, sw, sh;
-          if (imgRatio > canvasRatio) {
-            // Image is wider — crop sides
-            sh = img.height;
-            sw = img.height * canvasRatio;
-            sx = (img.width - sw) / 2;
-            sy = 0;
-          } else {
-            // Image is taller — crop top/bottom
-            sw = img.width;
-            sh = img.width / canvasRatio;
-            sx = 0;
-            sy = (img.height - sh) / 2;
-          }
-
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
-          const dataUrl = canvas.toDataURL('image/webp', 0.85);
-          resolve(dataUrl);
-        } catch (err) {
-          reject(err);
+        if (img.width > MAX_WIDTH || img.height > MAX_HEIGHT) {
+          reject(new Error(`Unsupported dimensions (${img.width}×${img.height}). Maximum ${MAX_WIDTH}×${MAX_HEIGHT}.`));
+          return;
         }
+        // Keep the original MIME type and bytes. CSS applies contain/cover at
+        // render time; the bank file remains suitable for future re-use.
+        resolve(String(e.target.result));
       };
-      img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
+      img.onerror = () => reject(new Error('Could not load image'));
       img.src = e.target.result;
     };
-    reader.onerror = () => reject(new Error('Error leyendo el archivo'));
+    reader.onerror = () => reject(new Error('Error reading file'));
     reader.readAsDataURL(file);
   });
 }

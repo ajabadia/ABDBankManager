@@ -1,4 +1,4 @@
-/** Calculate the canonical SHA-256 fingerprint for patch payload bytes. */
+﻿/** Calculate the canonical SHA-256 fingerprint for patch payload bytes. */
 export async function calculateFingerprint(rawData, contract) {
   if (!rawData || rawData.length === 0) return '';
 
@@ -12,7 +12,7 @@ export async function calculateFingerprint(rawData, contract) {
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  throw new Error('SHA-256 no disponible en este entorno');
+  throw new Error('SHA-256 not available in this environment');
 }
 
 export function checkDuplicate(fingerprint, existingPatches) {
@@ -20,3 +20,8 @@ export function checkDuplicate(fingerprint, existingPatches) {
   const existingPatch = existingPatches.find(patch => patch.fingerprint === fingerprint) || null;
   return { isDuplicate: !!existingPatch, existingPatch };
 }
+
+// Version of the fingerprint recipe. Bump when the hashing input changes
+// (e.g. extractSoundBytes scoping) so older libraries can be re-hashed.
+// Must stay in sync with packages/core/src/operations/fingerprint.js.
+export const FINGERPRINT_VERSION = 1;

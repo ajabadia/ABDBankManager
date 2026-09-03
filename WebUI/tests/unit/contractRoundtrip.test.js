@@ -28,12 +28,22 @@ function randomBytes(size, seed = 42) {
 }
 
 /** Generate a payload appropriate for the contract's patchDataSize.
- * DX7 VMEM uses 7-bit data; mask to 0x7F for roundtrip fidelity. */
+ * DX7 VMEM uses 7-bit data; mask to 0x7F for roundtrip fidelity.
+ * Prophecy 535-byte patches have 3-byte tail without control byte; mask tail to 7-bit. */
 function patchPayload(contract) {
   const data = randomBytes(contract.patchDataSize);
   // DX7 VMEM bytes are 7-bit; mask to preserve roundtrip fidelity
   if (contract.modelId === 'yamaha-dx7') {
     for (let i = 0; i < data.length; i++) data[i] &= 0x7F;
+  }
+  // Prophecy: 535 = 76*7 + 3, last 3 bytes have no control byte → mask to 7-bit
+  if (contract.modelId === 'korg-prophecy') {
+    const rem = contract.patchDataSize % 7;
+    if (rem > 0) {
+      for (let i = contract.patchDataSize - rem; i < contract.patchDataSize; i++) {
+        data[i] &= 0x7F;
+      }
+    }
   }
   return data;
 }
@@ -125,7 +135,7 @@ describe('getContractForSysex — contract identification', () => {
   // getContractForSysex returns the canonical contract for these
   const VARIANT_TO_CANONICAL = {
     'korg-microkorg': 'korg-ms2000',
-    'korg-prophecy': 'korg-ms2000',
+    'abd-sm002': 'korg-ms2000', // softsynth; byte-identical MS2000 SysEx, not detectable
     'casio-cz1': 'casio-cz101',
     'casio-cz1000': 'casio-cz101',
     'casio-cz5000': 'casio-cz101',
@@ -135,6 +145,7 @@ describe('getContractForSysex — contract identification', () => {
     'roland-juno-gt': 'roland-juno106',
     'roland-hs60': 'roland-juno106',
     'behringer-deepmind6': 'behringer-deepmind12',
+    'behringer-deepmind12d': 'behringer-deepmind12',
   };
 
   for (const contract of contractsWithSysEx) {

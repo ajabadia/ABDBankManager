@@ -6,27 +6,39 @@
 import { allCasioContracts } from './casio-cz.ts';
 import { allRolandJunoContracts } from './roland-juno.ts';
 import { allKorgContracts } from './korg-ms2000.ts';
+import { allKorgProphecyContracts } from './korg-prophecy.ts';
 import { allBehringerDm12Contracts } from './behringer-dm12.ts';
+import { allBehringerDm6Contracts } from './behringer-dm6.ts';
+import { allBehringerDm12dContracts } from './behringer-dm12d.ts';
 import { allBehringerPro800Contracts } from './behringer-pro800.ts';
 import { allYamahaContracts } from './yamaha-dx7.ts';
+import { allRolandAiraContracts } from './roland-aira.ts';
 import { HARDWARE_QUEUE_CONFIGS } from '../../Core/MidiSysExQueue.ts';
 
 // Re-export individual contracts
 export * from './casio-cz.ts';
 export * from './roland-juno.ts';
 export * from './korg-ms2000.ts';
+export * from './korg-prophecy.ts';
 export * from './behringer-dm12.ts';
+export * from './behringer-dm6.ts';
+export * from './behringer-dm12d.ts';
 export * from './behringer-pro800.ts';
 export * from './yamaha-dx7.ts';
+export * from './roland-aira.ts';
 
 // All contracts combined
 export const allModelContracts = [
   ...allCasioContracts,
   ...allRolandJunoContracts,
   ...allKorgContracts,
+  ...allKorgProphecyContracts,
   ...allBehringerDm12Contracts,
+  ...allBehringerDm6Contracts,
+  ...allBehringerDm12dContracts,
   ...allBehringerPro800Contracts,
-  ...allYamahaContracts
+  ...allYamahaContracts,
+  ...allRolandAiraContracts
 ];
 
 // Lookup by modelId

@@ -2,7 +2,8 @@
  * ABD Universal Bank Manager — Behringer DeepMind 12 ModelContract
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import { ModelContract, validateModelContract, type ContractFileParse } from '../ModelContract';
+import { pack8to7Dm, unpack7to8Dm, splitSysexMessages } from '../SysEx/codec';
 
 const DM12_PATCH_DATA_SIZE = 242;
 const DM12_PATCH_NAME_MAX_LENGTH = 16;
@@ -16,44 +17,6 @@ const PACKED_SIZE = 278;
 const PROGRAMS_PER_BANK = 128;
 const CATEGORIES = ['Bass', 'Lead', 'Pad', 'FX', 'Keys', 'Perc', 'Synth', 'Other'];
 
-function pack8to7(data: Uint8Array): Uint8Array {
-  const packed: number[] = [];
-  for (let offset = 0; offset < data.length; offset += 7) {
-    const count = Math.min(7, data.length - offset);
-    let control = 0;
-    for (let i = 0; i < count; i++) {
-      if ((data[offset + i] & 0x80) !== 0) control |= 1 << i;
-    }
-    packed.push(control);
-    for (let i = 0; i < 7; i++) packed.push(i < count ? data[offset + i] & 0x7F : 0);
-  }
-  return new Uint8Array(packed);
-}
-
-function unpack7to8(data: Uint8Array): Uint8Array {
-  const unpacked: number[] = [];
-  for (let offset = 0; offset < data.length; offset += 8) {
-    const control = data[offset];
-    for (let i = 0; i < 7 && offset + i + 1 < data.length; i++) {
-      unpacked.push((data[offset + i + 1] & 0x7F) | (((control >> i) & 1) << 7));
-    }
-  }
-  return new Uint8Array(unpacked);
-}
-
-function splitSysex(data: Uint8Array): Uint8Array[] {
-  const result: Uint8Array[] = [];
-  let start = -1;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 0xF0 && start < 0) start = i;
-    if (data[i] === 0xF7 && start >= 0) {
-      result.push(data.slice(start, i + 1));
-      start = -1;
-    }
-  }
-  return result;
-}
-
 function isDeepMindMessage(message: Uint8Array): boolean {
   return message.length >= 13 &&
     message[0] === 0xF0 && message[1] === MANUFACTURER_ID[0] && message[2] === MANUFACTURER_ID[1] && message[3] === MANUFACTURER_ID[2] &&
@@ -66,7 +29,7 @@ const behringerDm12Contract: ModelContract = {
   displayName: 'Behringer DeepMind 12',
   manufacturer: 'Behringer',
   icon: 'behringer-logo.svg',
-  thumbnail: 'behringer-deepmind12.svg',
+  thumbnail: 'behringer-deepmind12.webp',
   bankCapacity: 1024,
   banksCount: 8,
   programsPerBank: 128,
@@ -105,7 +68,7 @@ const behringerDm12Contract: ModelContract = {
   buildPatchSysEx(rawData: Uint8Array, slot: number, _channel: number): Uint8Array {
     const data = new Uint8Array(DM12_PATCH_DATA_SIZE);
     data.set(rawData.slice(0, DM12_PATCH_DATA_SIZE));
-    const packed = pack8to7(data);
+    const packed = pack8to7Dm(data);
     const padded = new Uint8Array(PACKED_SIZE);
     padded.set(packed.slice(0, PACKED_SIZE));
     const bank = Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK)));
@@ -115,7 +78,7 @@ const behringerDm12Contract: ModelContract = {
   parsePatchSysEx(sysex: Uint8Array): { rawData: Uint8Array; slot: number } | null {
     if (!isDeepMindMessage(sysex)) return null;
     const slot = (sysex[8] & 0x07) * PROGRAMS_PER_BANK + (sysex[9] & 0x7F);
-    return { rawData: unpack7to8(sysex.slice(10, 10 + PACKED_SIZE)).slice(0, DM12_PATCH_DATA_SIZE), slot };
+    return { rawData: unpack7to8Dm(sysex.slice(10, 10 + PACKED_SIZE)).slice(0, DM12_PATCH_DATA_SIZE), slot };
   },
   buildDumpRequest(slot: number | 'all', _channel: number): Uint8Array {
     const bank = slot === 'all' ? 0 : Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK)));
@@ -123,11 +86,53 @@ const behringerDm12Contract: ModelContract = {
     return new Uint8Array([0xF0, ...MANUFACTURER_ID, MODEL_ID, DEVICE_ID, CMD_REQUEST, bank, program, 0xF7]);
   },
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
-    return splitSysex(sysex).flatMap(message => {
+    return splitSysexMessages(sysex).flatMap(message => {
       const parsed = this.parsePatchSysEx?.(message);
       return parsed ? [parsed] : [];
     });
   },
+
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const parsed = splitSysexMessages(data)
+      .map(m => this.parsePatchSysEx?.(m))
+      .filter((p): p is { rawData: Uint8Array; slot: number } => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map(p => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /deep.?mind|dm.?12/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'DeepMind 12', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Behringer', modelId: this.modelId }
+      : null;
+  },
+
   legacySysEx: {
     modelIdByte: MODEL_ID,
     buildDumpRequest: channel => new Uint8Array([0xF0, ...MANUFACTURER_ID, MODEL_ID, DEVICE_ID, CMD_REQUEST, 0x00, 0x00, 0xF7]),

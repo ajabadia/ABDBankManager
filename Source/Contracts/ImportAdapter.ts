@@ -3,19 +3,10 @@
  * Parses external formats (SysEx, MIDI, Tape, JSON) into internal PatchData
  */
 
-export interface PatchData {
-  name: string;
-  category: string;
-  author: string;
-  tags: string[];
-  notes: string;
-  originAddress: string;
-  rawData: Uint8Array;
-  hardwareIds?: string[];        // Hardwares donde el blob es válido (canónico + compatibles); si falta, se deriva del contrato
-  parameters?: Record<string, number>; // RESERVADO para plugins/editores — el gestor nunca lo usa ni lo muestra
-  isFavorite: boolean;
-  creationDate: string;
-}
+import type { PatchData } from './PatchData.ts';
+
+// Re-export so existing `import { PatchData } from '../ImportAdapter'` keeps working
+export type { PatchData } from './PatchData.ts';
 
 export interface ImportResult {
   success: boolean;

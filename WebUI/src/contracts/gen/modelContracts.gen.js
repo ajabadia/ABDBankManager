@@ -53,6 +53,169 @@ function validateModelContract(contract) {
   return { valid: errors.length === 0, errors };
 }
 
+// Source/Contracts/SysEx/codec.ts
+function pack8to7(data) {
+  const packed = [];
+  for (let i = 0; i < data.length; i += 7) {
+    const group = data.slice(i, Math.min(i + 7, data.length));
+    let control = 0;
+    for (let j = 0; j < 7; j++) {
+      const byte = j < group.length ? group[j] : 0;
+      control |= (byte >> 7 & 1) << 6 - j;
+    }
+    packed.push(control);
+    for (let j = 0; j < 7; j++) {
+      packed.push((j < group.length ? group[j] : 0) & 127);
+    }
+  }
+  return new Uint8Array(packed);
+}
+function pack8to7Dm(data) {
+  const packed = [];
+  for (let offset = 0; offset < data.length; offset += 7) {
+    const count = Math.min(7, data.length - offset);
+    let control = 0;
+    for (let i = 0; i < count; i++) {
+      if ((data[offset + i] & 128) !== 0) control |= 1 << i;
+    }
+    packed.push(control);
+    for (let i = 0; i < 7; i++) packed.push(i < count ? data[offset + i] & 127 : 0);
+  }
+  return new Uint8Array(packed);
+}
+function unpack7to8Dm(packed) {
+  const unpacked = [];
+  for (let offset = 0; offset < packed.length; offset += 8) {
+    const control = packed[offset];
+    for (let i = 0; i < 7 && offset + i + 1 < packed.length; i++) {
+      unpacked.push(packed[offset + i + 1] & 127 | (control >> i & 1) << 7);
+    }
+  }
+  return new Uint8Array(unpacked);
+}
+function unpack7to8(packed) {
+  const unpacked = [];
+  for (let i = 0; i < packed.length; i += 8) {
+    if (i + 8 > packed.length) break;
+    const group = packed.slice(i, i + 8);
+    const control = group[0];
+    for (let j = 0; j < 7; j++) {
+      const highBit = control >> 6 - j & 1;
+      unpacked.push((highBit << 7 | group[j + 1] & 127) & 255);
+    }
+  }
+  return new Uint8Array(unpacked);
+}
+function pack7to8NoPad(data) {
+  const packed = [];
+  let srcIdx = 0;
+  while (srcIdx < data.length) {
+    const chunkSize = Math.min(7, data.length - srcIdx);
+    let msbCollector = 0;
+    for (let i = 0; i < chunkSize; i++) {
+      if ((data[srcIdx + i] & 128) !== 0) msbCollector |= 1 << i;
+    }
+    packed.push(msbCollector);
+    for (let i = 0; i < chunkSize; i++) packed.push(data[srcIdx + i] & 127);
+    srcIdx += chunkSize;
+  }
+  return new Uint8Array(packed);
+}
+function unpack7to8NoPad(packed) {
+  const unpacked = [];
+  let srcIdx = 0;
+  while (srcIdx < packed.length) {
+    const msbCollector = packed[srcIdx++];
+    for (let i = 0; i < 7 && srcIdx < packed.length; i++) {
+      const bit7 = msbCollector >> i & 1;
+      unpacked.push(packed[srcIdx++] & 127 | bit7 << 7);
+    }
+  }
+  return new Uint8Array(unpacked);
+}
+function packProphecy7to8(data) {
+  const packed = [];
+  const fullGroups = Math.floor(data.length / 7);
+  const rem = data.length % 7;
+  for (let g = 0; g < fullGroups; g++) {
+    const i = g * 7;
+    let control = 0;
+    for (let j = 0; j < 7; j++) {
+      const byte = data[i + j];
+      control |= (byte >> 7 & 1) << 6 - j;
+      packed.push(byte & 127);
+    }
+    packed.push(control);
+  }
+  if (rem > 0) {
+    const i = fullGroups * 7;
+    for (let j = 0; j < rem; j++) {
+      packed.push(data[i + j] & 127);
+    }
+  }
+  return new Uint8Array(packed);
+}
+function unpackProphecy8to7(packed) {
+  const out = [];
+  for (let i = 0; i + 8 <= packed.length; i += 8) {
+    const control = packed[i + 7];
+    for (let j = 0; j < 7; j++) {
+      const highBit = control >> 6 - j & 1;
+      out.push((highBit << 7 | packed[i + j] & 127) & 255);
+    }
+  }
+  const rem = packed.length % 8;
+  for (let i = packed.length - rem; i < packed.length; i++) out.push(packed[i] & 127);
+  return new Uint8Array(out);
+}
+function decodeNibble(nibbles) {
+  const decoded = [];
+  for (let i = 0; i + 1 < nibbles.length; i += 2) {
+    const high = (nibbles[i] & 15) << 4;
+    const low = nibbles[i + 1] & 15;
+    decoded.push((high | low) & 255);
+  }
+  return new Uint8Array(decoded);
+}
+function encodeNibble(data) {
+  const nibbles = [];
+  for (const byte of data) {
+    nibbles.push(byte >> 4 & 15);
+    nibbles.push(byte & 15);
+  }
+  return new Uint8Array(nibbles);
+}
+function bulkChecksum(bytes) {
+  let sum = 0;
+  for (const b of bytes) sum += b;
+  return -sum & 127;
+}
+function yamahaChecksum(bytes) {
+  let sum = 0;
+  for (const b of bytes) sum += b;
+  return 128 - sum % 128 & 127;
+}
+function casioChecksum(bytes) {
+  let sum = 0;
+  for (const b of bytes) sum += b;
+  return sum & 127;
+}
+function splitSysexMessages(raw) {
+  const messages = [];
+  let inSysex = false;
+  let start = -1;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 240 && !inSysex) {
+      inSysex = true;
+      start = i;
+    } else if (raw[i] === 247 && inSysex) {
+      messages.push(raw.slice(start, i + 1));
+      inSysex = false;
+    }
+  }
+  return messages;
+}
+
 // Source/Contracts/Models/casio-cz.ts
 var BANK_CAPACITY = 16;
 var BANKS_COUNT = 1;
@@ -71,41 +234,6 @@ var MODEL_IDS = {
   "casio-cz5000": 20,
   "casio-cz1": 21
 };
-function casioChecksum(bytes) {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return sum & 127;
-}
-function encodeNibble(data) {
-  const nibbles = [];
-  for (const byte of data) {
-    nibbles.push(byte >> 4 & 15);
-    nibbles.push(byte & 15);
-  }
-  return new Uint8Array(nibbles);
-}
-function decodeNibble(nibbles) {
-  const decoded = [];
-  for (let i = 0; i + 1 < nibbles.length; i += 2) {
-    decoded.push((nibbles[i] & 15) << 4 | nibbles[i + 1] & 15);
-  }
-  return new Uint8Array(decoded);
-}
-function splitSysex(raw) {
-  const msgs = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 240 && !inSysex) {
-      inSysex = true;
-      start = i;
-    } else if (raw[i] === 247 && inSysex) {
-      msgs.push(raw.slice(start, i + 1));
-      inSysex = false;
-    }
-  }
-  return msgs;
-}
 function isCasioSysEx(msg, modelId) {
   return msg.length >= 9 && msg[0] === 240 && msg[1] === 68 && msg[2] === 0 && msg[3] === 0 && msg[4] === modelId && msg[5] === CMD_DUMP && msg[msg.length - 1] === 247;
 }
@@ -120,7 +248,7 @@ var casioCzContract = {
   displayName: "Casio CZ-101",
   manufacturer: "Casio",
   icon: "casio-logo.svg",
-  thumbnail: "casio-cz101.jpg",
+  thumbnail: "casio-cz101.webp",
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
   programsPerBank: PROGRAMS_PER_BANK,
@@ -195,7 +323,7 @@ var casioCzContract = {
   },
   parseDumpResponse(sysex) {
     const modelId = MODEL_IDS[this.modelId] || 18;
-    const msgs = splitSysex(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results = [];
     for (const msg of msgs) {
       if (isCasioSysEx(msg, modelId)) {
@@ -205,6 +333,44 @@ var casioCzContract = {
       }
     }
     return results;
+  },
+  parseFile(data, _filename) {
+    const modelId = MODEL_IDS[this.modelId] || 18;
+    const parsed = splitSysexMessages(data).filter((m) => isCasioSysEx(m, modelId)).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Casio ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /casio|cz/i.test(p.name || ""));
+    return port ? { name: port.name || "Casio CZ", inputId: port.id || "", outputId: port.id || "", manufacturer: "Casio", modelId: this.modelId } : null;
   },
   legacySysEx: {
     modelIdByte: 18,
@@ -216,14 +382,14 @@ var casioCz1000Contract = {
   ...casioCzContract,
   modelId: "casio-cz1000",
   displayName: "Casio CZ-1000",
-  thumbnail: "casio-cz101.jpg",
+  thumbnail: "casio-cz1000.webp",
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 19 }
 };
 var casioCz5000Contract = {
   ...casioCzContract,
   modelId: "casio-cz5000",
   displayName: "Casio CZ-5000",
-  thumbnail: "casio-cz101.jpg",
+  thumbnail: "casio-cz5000.webp",
   bankCapacity: 32,
   banksCount: 2,
   legacySysEx: { ...casioCzContract.legacySysEx, modelIdByte: 20 }
@@ -232,7 +398,7 @@ var casioCz1Contract = {
   ...casioCzContract,
   modelId: "casio-cz1",
   displayName: "Casio CZ-1",
-  thumbnail: "casio-cz101.jpg",
+  thumbnail: "casio-cz1.webp",
   bankCapacity: 64,
   banksCount: 4,
   patchDataSize: 288,
@@ -264,26 +430,6 @@ var FORMAT_VERSION2 = 1;
 var DEVICE_ID = 24;
 var CMD_PATCH_DUMP = 48;
 var CMD_BULK_FUNC = 1;
-function bulkChecksum(bytes) {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return -sum & 127;
-}
-function splitSysex2(raw) {
-  const msgs = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 240 && !inSysex) {
-      inSysex = true;
-      start = i;
-    } else if (raw[i] === 247 && inSysex) {
-      msgs.push(raw.slice(start, i + 1));
-      inSysex = false;
-    }
-  }
-  return msgs;
-}
 function isJunoSinglePatch(msg) {
   return msg.length === 23 && msg[0] === 240 && msg[1] === 65 && msg[2] === CMD_PATCH_DUMP && msg[22] === 247;
 }
@@ -305,7 +451,7 @@ var rolandJuno106Contract = {
   displayName: "Roland Juno-106",
   manufacturer: "Roland",
   icon: "roland-logo.svg",
-  thumbnail: "roland-juno106.jpg",
+  thumbnail: "roland-juno-106.webp",
   bankCapacity: BANK_CAPACITY2,
   banksCount: BANKS_COUNT2,
   programsPerBank: PROGRAMS_PER_BANK2,
@@ -359,7 +505,7 @@ var rolandJuno106Contract = {
     return new Uint8Array([240, 65, channel & 15, 62, 17, 0, 247]);
   },
   parseDumpResponse(sysex) {
-    const msgs = splitSysex2(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results = [];
     for (const msg of msgs) {
       if (isJunoSinglePatch(msg)) {
@@ -375,6 +521,64 @@ var rolandJuno106Contract = {
     }
     return results;
   },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).flatMap((msg) => {
+      if (isJunoSinglePatch(msg)) {
+        return [{ rawData: msg.slice(4, 4 + PATCH_DATA_SIZE2), slot: 0 }];
+      }
+      if (isJunoBulkDump(msg)) {
+        const patchData = msg.slice(5, msg.length - 2);
+        const count = Math.floor(patchData.length / PATCH_DATA_SIZE2);
+        const out = [];
+        for (let i = 0; i < count; i++) {
+          const s = i * PATCH_DATA_SIZE2;
+          out.push({ rawData: new Uint8Array(patchData.slice(s, s + PATCH_DATA_SIZE2)), slot: i });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Roland ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    if (options.format === "bank" && patches.length > 0) {
+      const payload = new Uint8Array(patches.length * PATCH_DATA_SIZE2);
+      patches.forEach((p, i) => payload.set(p.rawData.slice(0, PATCH_DATA_SIZE2), i * PATCH_DATA_SIZE2));
+      const checksum = bulkChecksum(payload);
+      return new Uint8Array([240, 65, CMD_PATCH_DUMP, 2, CMD_BULK_FUNC, ...payload, checksum, 247]);
+    }
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /juno/i.test(p.name || ""));
+    return port ? { name: port.name || "Roland Juno", inputId: port.id || "", outputId: port.id || "", manufacturer: "Roland", modelId: this.modelId } : null;
+  },
   legacySysEx: {
     modelIdByte: 62,
     buildDumpRequest: (ch) => new Uint8Array([240, 65, ch & 15, 62, 17, 0, 247]),
@@ -385,7 +589,7 @@ var rolandJuno60Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-juno60",
   displayName: "Roland Juno-60",
-  thumbnail: "roland-juno106.jpg",
+  thumbnail: "roland-juno-60.webp",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 61
@@ -395,7 +599,7 @@ var rolandJuno6Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-juno6",
   displayName: "Roland Juno-6",
-  thumbnail: "roland-juno106.jpg",
+  thumbnail: "roland-juno-6.webp",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 60
@@ -405,7 +609,7 @@ var rolandHs60Contract = {
   ...rolandJuno106Contract,
   modelId: "roland-hs60",
   displayName: "Roland HS-60",
-  thumbnail: "roland-juno106.jpg",
+  thumbnail: "roland-hs60.webp",
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 62
@@ -443,7 +647,7 @@ var MODEL_IDS2 = {
   "korg-ms2000": 88,
   "korg-microkorg": 88,
   // identical SysEx format to MS2000
-  "korg-prophecy": 90
+  "korg-prophecy": 65
 };
 function getBankLetter3(index) {
   return BANK_LETTERS[Math.floor(index / 16)];
@@ -451,56 +655,15 @@ function getBankLetter3(index) {
 function getProgramNumber3(index) {
   return index % 16 + 1;
 }
-function pack8to7(data) {
-  const packed = [];
-  for (let i = 0; i < data.length; i += 7) {
-    const group = data.slice(i, Math.min(i + 7, data.length));
-    let control = 0;
-    for (let j = 0; j < 7; j++) {
-      const byte = j < group.length ? group[j] : 0;
-      control |= (byte >> 7 & 1) << 6 - j;
-    }
-    packed.push(control);
-    for (let j = 0; j < 7; j++) packed.push((j < group.length ? group[j] : 0) & 127);
-  }
-  return new Uint8Array(packed);
-}
-function unpack7to8(packed) {
-  const unpacked = [];
-  for (let i = 0; i < packed.length; i += 8) {
-    if (i + 8 > packed.length) break;
-    const control = packed[i];
-    for (let j = 0; j < 7; j++) {
-      const highBit = control >> 6 - j & 1;
-      unpacked.push((highBit << 7 | packed[i + 1 + j] & 127) & 255);
-    }
-  }
-  return new Uint8Array(unpacked);
-}
 function isKorgSysEx(msg, modelIdByte) {
   return msg.length >= 5 && msg[0] === 240 && msg[1] === 66 && msg[3] === modelIdByte && (msg[4] === CMD_DUMP2 || msg[4] === CMD_ALL_DUMP);
-}
-function splitSysex3(raw) {
-  const msgs = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 240 && !inSysex) {
-      inSysex = true;
-      start = i;
-    } else if (raw[i] === 247 && inSysex) {
-      msgs.push(raw.slice(start, i + 1));
-      inSysex = false;
-    }
-  }
-  return msgs;
 }
 var korgMs2000Contract = {
   modelId: "korg-ms2000",
   displayName: "Korg MS2000",
   manufacturer: "Korg",
   icon: "korg-logo.svg",
-  thumbnail: "korg-ms2000.jpg",
+  thumbnail: "korg-ms2000.webp",
   bankCapacity: BANK_CAPACITY3,
   banksCount: BANKS_COUNT3,
   programsPerBank: PROGRAMS_PER_BANK3,
@@ -577,13 +740,51 @@ var korgMs2000Contract = {
   },
   parseDumpResponse(sysex) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
-    const msgs = splitSysex3(sysex).filter((m) => isKorgSysEx(m, modelId));
+    const msgs = splitSysexMessages(sysex).filter((m) => isKorgSysEx(m, modelId));
     const results = [];
     for (const msg of msgs) {
       const parsed = korgMs2000Contract.parsePatchSysEx?.call(this, msg);
       if (parsed) results.push(parsed);
     }
     return results;
+  },
+  parseFile(data, _filename) {
+    const modelId = MODEL_IDS2[this.modelId] || 88;
+    const parsed = splitSysexMessages(data).filter((m) => isKorgSysEx(m, modelId)).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Korg ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /ms.?2000|microkorg/i.test(p.name || ""));
+    return port ? { name: port.name || "Korg MS2000", inputId: port.id || "", outputId: port.id || "", manufacturer: "Korg", modelId: this.modelId } : null;
   },
   legacySysEx: {
     modelIdByte: 88,
@@ -595,32 +796,241 @@ var korgMicrokorgContract = {
   ...korgMs2000Contract,
   modelId: "korg-microkorg",
   displayName: "Korg microKORG",
-  thumbnail: "korg-microkorg.jpg"
+  thumbnail: "korg-microkorg.webp"
 };
-var korgProphecyContract = {
-  ...korgMs2000Contract,
-  modelId: "korg-prophecy",
-  displayName: "Korg Prophecy",
-  thumbnail: "korg-ms2000.jpg",
-  patchDataSize: 256,
-  // Prophecy has a larger program data size
-  extractPatchName(data) {
-    const nameOffset = 28;
-    if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
-    const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
-    return new TextDecoder().decode(nameBytes).replace(/\0/g, "").trim();
-  },
-  legacySysEx: {
-    ...korgMs2000Contract.legacySysEx,
-    modelIdByte: 90
-  }
+var korgAbdSm002Contract = {
+  ...korgMicrokorgContract,
+  modelId: "abd-sm002",
+  displayName: "ABD MS2000 (SM002)",
+  manufacturer: "ABDSynths",
+  isSoftsynth: true,
+  compatibleModels: ["korg-ms2000", "korg-microkorg"],
+  midiDetection: void 0
 };
 var allKorgContracts = [
   korgMs2000Contract,
   korgMicrokorgContract,
-  korgProphecyContract
+  korgAbdSm002Contract
 ];
 allKorgContracts.forEach((c) => {
+  const result = validateModelContract(c);
+  if (!result.valid) {
+    console.error(`\u274C ${c.modelId} validation failed:`, result.errors);
+  }
+});
+
+// Source/Contracts/Models/korg-prophecy.ts
+var PROPHECY_BANK_CAPACITY = 128;
+var PROPHECY_BANKS_COUNT = 2;
+var PROPHECY_PROGRAMS_PER_BANK = 64;
+var PROPHECY_RAW_PATCH_SIZE = 535;
+var PROPHECY_NAME_MAX_LENGTH = 16;
+var PROPHECY_CMD_SINGLE = 64;
+var PROPHECY_CMD_BANK = 76;
+var PROPHECY_CMD_REQ = 16;
+var PROPHECY_CMD_ALLREQ = 14;
+var PROPHECY_BANK_A = 16;
+var PROPHECY_BANK_B = 17;
+var PROPHECY_SINGLE_ADDR = [1, 0];
+var CATEGORIES4 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var DEFAULT_CATEGORY4 = "Other";
+var SYSEX_MANUFACTURER_ID4 = [66];
+var FORMAT_VERSION4 = 1;
+function isProphecySysEx(msg) {
+  return msg.length >= 6 && msg[0] === 240 && msg[1] === 66 && msg[3] === 65 && (msg[4] === PROPHECY_CMD_SINGLE || msg[4] === PROPHECY_CMD_BANK);
+}
+function getBankFromSlot(slot) {
+  return slot < 64 ? 0 : 1;
+}
+function getBankAddrByte(bank) {
+  return bank === 0 ? PROPHECY_BANK_A : PROPHECY_BANK_B;
+}
+function unpackProphecyStream(packed) {
+  return unpackProphecy8to7(packed);
+}
+function extractPatchNameFromRaw(raw) {
+  const nameBytes = raw.slice(0, PROPHECY_NAME_MAX_LENGTH);
+  return new TextDecoder().decode(nameBytes).replace(/[\0\s]+$/, "");
+}
+var korgProphecyContract = {
+  modelId: "korg-prophecy",
+  displayName: "Korg Prophecy",
+  manufacturer: "Korg",
+  icon: "korg-logo.svg",
+  thumbnail: "korg-prophecy.webp",
+  bankCapacity: PROPHECY_BANK_CAPACITY,
+  banksCount: PROPHECY_BANKS_COUNT,
+  programsPerBank: PROPHECY_PROGRAMS_PER_BANK,
+  getProgramAddress(globalIndex) {
+    if (globalIndex < 0 || globalIndex >= PROPHECY_BANK_CAPACITY) return "";
+    const bank = globalIndex < 64 ? "A" : "B";
+    const num = globalIndex % 64 + 1;
+    return `${bank}${String(num).padStart(2, "0")}`;
+  },
+  parseProgramAddress(address) {
+    const match = address.match(/^([AB])(\d{1,2})$/i);
+    if (!match) return null;
+    const bank = match[1].toUpperCase();
+    const num = parseInt(match[2], 10);
+    if (num < 1 || num > 64) return null;
+    return (bank === "A" ? 0 : 64) + (num - 1);
+  },
+  patchDataSize: PROPHECY_RAW_PATCH_SIZE,
+  patchNameMaxLength: PROPHECY_NAME_MAX_LENGTH,
+  extractPatchName(data) {
+    return extractPatchNameFromRaw(data);
+  },
+  categories: CATEGORIES4,
+  defaultCategory: DEFAULT_CATEGORY4,
+  compatibleModels: [],
+  sysexManufacturerId: SYSEX_MANUFACTURER_ID4,
+  formatVersion: FORMAT_VERSION4,
+  sysexModelId: { offset: 3, values: [65] },
+  midiDetection: { portPattern: /prophecy|proph/i, displayName: "Korg Prophecy" },
+  midi: {
+    defaultChannel: 1,
+    defaultDeviceId: 65
+  },
+  supportsEditBuffer: false,
+  interMessageDelayMs: 50,
+  dumpTimeoutMs: 5e3,
+  computeChecksum() {
+    return 0;
+  },
+  verifyChecksum(sysex) {
+    if (sysex.length < 8) return false;
+    if (sysex[0] !== 240 || sysex[1] !== 66 || sysex[3] !== 65) return false;
+    if (sysex[sysex.length - 1] !== 247) return false;
+    if (sysex[4] !== PROPHECY_CMD_SINGLE && sysex[4] !== PROPHECY_CMD_BANK) return false;
+    const bodyStart = sysex[4] === PROPHECY_CMD_SINGLE ? 7 : 9;
+    const body = sysex.slice(bodyStart, sysex.length - 1);
+    if (sysex[4] === PROPHECY_CMD_SINGLE) {
+      if (body.length !== 611 && body.length !== 612) return false;
+    } else {
+      if (body.length !== 39131) return false;
+    }
+    return body.length % 8 === 3;
+  },
+  buildPatchSysEx(rawData, _slot, channel) {
+    const size = this.patchDataSize;
+    const data = rawData.slice(0, size);
+    const padded = new Uint8Array(size);
+    padded.set(data);
+    const packed = packProphecy7to8(padded);
+    const hdr = [240, 66, 48 | channel & 15, 65, PROPHECY_CMD_SINGLE, ...PROPHECY_SINGLE_ADDR];
+    return new Uint8Array([...hdr, ...packed, 247]);
+  },
+  parsePatchSysEx(sysex) {
+    if (!isProphecySysEx(sysex)) return null;
+    if (sysex[4] !== PROPHECY_CMD_SINGLE) return null;
+    if (sysex[sysex.length - 1] !== 247) return null;
+    const body = sysex.slice(7, sysex.length - 1);
+    const raw = unpackProphecyStream(body);
+    const patch = raw.slice(0, PROPHECY_RAW_PATCH_SIZE);
+    return { rawData: new Uint8Array(patch), slot: 0 };
+  },
+  buildBulkSysEx(patches, channel) {
+    const byBank = /* @__PURE__ */ new Map();
+    for (const p of patches) {
+      const b = getBankFromSlot(p.slot);
+      if (!byBank.has(b)) byBank.set(b, []);
+      byBank.get(b).push(p.rawData.slice(0, PROPHECY_RAW_PATCH_SIZE));
+    }
+    const messages = [];
+    for (const [bank, list] of byBank) {
+      const concat = new Uint8Array(list.reduce((sum, p) => sum + p.length, 0));
+      let off = 0;
+      for (const p of list) {
+        concat.set(p, off);
+        off += p.length;
+      }
+      const packed = packProphecy7to8(concat);
+      const hdr = [240, 66, 48 | channel & 15, 65, PROPHECY_CMD_BANK, getBankAddrByte(bank), 0, 0, 0];
+      messages.push(new Uint8Array([...hdr, ...packed, 247]));
+    }
+    if (messages.length === 1) return messages[0];
+    const total = messages.reduce((sum, m) => sum + m.length, 0);
+    const combined = new Uint8Array(total);
+    let o = 0;
+    for (const m of messages) {
+      combined.set(m, o);
+      o += m.length;
+    }
+    return combined;
+  },
+  parseDumpResponse(sysex) {
+    const results = [];
+    for (const msg of splitSysexMessages(sysex).filter(isProphecySysEx)) {
+      if (msg[4] === PROPHECY_CMD_SINGLE) {
+        const parsed = korgProphecyContract.parsePatchSysEx?.call(this, msg);
+        if (parsed) results.push(parsed);
+      } else if (msg[4] === PROPHECY_CMD_BANK) {
+        const body = msg.slice(9, msg.length - 1);
+        const bankAddr = msg[5];
+        const baseSlot = bankAddr === PROPHECY_BANK_A ? 0 : 64;
+        const raw = unpackProphecyStream(body);
+        for (let i = 0; i + PROPHECY_RAW_PATCH_SIZE <= raw.length; i += PROPHECY_RAW_PATCH_SIZE) {
+          const patch = raw.slice(i, i + PROPHECY_RAW_PATCH_SIZE);
+          results.push({ rawData: new Uint8Array(patch), slot: baseSlot + Math.floor(i / PROPHECY_RAW_PATCH_SIZE) });
+        }
+      }
+    }
+    return results;
+  },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).filter(isProphecySysEx).flatMap((msg) => {
+      if (msg[4] === PROPHECY_CMD_SINGLE) {
+        const p = this.parsePatchSysEx?.(msg);
+        return p ? [p] : [];
+      }
+      const body = msg.slice(9, msg.length - 1);
+      const bankAddr = msg[5];
+      const baseSlot = bankAddr === PROPHECY_BANK_A ? 0 : 64;
+      const raw = unpackProphecyStream(body);
+      const out = [];
+      for (let i = 0; i + PROPHECY_RAW_PATCH_SIZE <= raw.length; i += PROPHECY_RAW_PATCH_SIZE) {
+        out.push({ rawData: new Uint8Array(raw.slice(i, i + PROPHECY_RAW_PATCH_SIZE)), slot: baseSlot + Math.floor(i / PROPHECY_RAW_PATCH_SIZE) });
+      }
+      return out;
+    });
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Korg ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    return this.buildBulkSysEx(patches, options.midiChannel);
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /prophecy|proph/i.test(p.name || ""));
+    return port ? { name: port.name || "Korg Prophecy", inputId: port.id || "", outputId: port.id || "", manufacturer: "Korg", modelId: this.modelId } : null;
+  },
+  buildDumpRequest(slot, channel) {
+    const cmd = slot === "all" ? PROPHECY_CMD_ALLREQ : PROPHECY_CMD_REQ;
+    return new Uint8Array([240, 66, 48 | channel & 15, 65, cmd, 247]);
+  },
+  legacySysEx: {
+    modelIdByte: 65,
+    buildDumpRequest: (ch) => new Uint8Array([240, 66, 48 | ch & 15, 65, PROPHECY_CMD_REQ, 247]),
+    validateSysEx: (bytes) => bytes.length >= 6 && bytes[0] === 240 && bytes[1] === 66 && bytes[3] === 65
+  }
+};
+var allKorgProphecyContracts = [korgProphecyContract];
+allKorgProphecyContracts.forEach((c) => {
   const result = validateModelContract(c);
   if (!result.valid) {
     console.error(`\u274C ${c.modelId} validation failed:`, result.errors);
@@ -638,42 +1048,7 @@ var CMD_DUMP3 = 2;
 var CMD_REQUEST3 = 1;
 var PACKED_SIZE = 278;
 var PROGRAMS_PER_BANK4 = 128;
-var CATEGORIES4 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
-function pack8to72(data) {
-  const packed = [];
-  for (let offset = 0; offset < data.length; offset += 7) {
-    const count = Math.min(7, data.length - offset);
-    let control = 0;
-    for (let i = 0; i < count; i++) {
-      if ((data[offset + i] & 128) !== 0) control |= 1 << i;
-    }
-    packed.push(control);
-    for (let i = 0; i < 7; i++) packed.push(i < count ? data[offset + i] & 127 : 0);
-  }
-  return new Uint8Array(packed);
-}
-function unpack7to82(data) {
-  const unpacked = [];
-  for (let offset = 0; offset < data.length; offset += 8) {
-    const control = data[offset];
-    for (let i = 0; i < 7 && offset + i + 1 < data.length; i++) {
-      unpacked.push(data[offset + i + 1] & 127 | (control >> i & 1) << 7);
-    }
-  }
-  return new Uint8Array(unpacked);
-}
-function splitSysex4(data) {
-  const result = [];
-  let start = -1;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 240 && start < 0) start = i;
-    if (data[i] === 247 && start >= 0) {
-      result.push(data.slice(start, i + 1));
-      start = -1;
-    }
-  }
-  return result;
-}
+var CATEGORIES5 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
 function isDeepMindMessage(message) {
   return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID[0] && message[2] === MANUFACTURER_ID[1] && message[3] === MANUFACTURER_ID[2] && message[4] === MODEL_ID && message[6] === CMD_DUMP3 && message[message.length - 1] === 247;
 }
@@ -682,7 +1057,7 @@ var behringerDm12Contract = {
   displayName: "Behringer DeepMind 12",
   manufacturer: "Behringer",
   icon: "behringer-logo.svg",
-  thumbnail: "behringer-deepmind12.svg",
+  thumbnail: "behringer-deepmind12.webp",
   bankCapacity: 1024,
   banksCount: 8,
   programsPerBank: 128,
@@ -702,7 +1077,7 @@ var behringerDm12Contract = {
     if (data.length < 239) return "";
     return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
   },
-  categories: CATEGORIES4,
+  categories: CATEGORIES5,
   defaultCategory: "Other",
   compatibleModels: [],
   sysexManufacturerId: MANUFACTURER_ID,
@@ -721,7 +1096,7 @@ var behringerDm12Contract = {
   buildPatchSysEx(rawData, slot, _channel) {
     const data = new Uint8Array(DM12_PATCH_DATA_SIZE);
     data.set(rawData.slice(0, DM12_PATCH_DATA_SIZE));
-    const packed = pack8to72(data);
+    const packed = pack8to7Dm(data);
     const padded = new Uint8Array(PACKED_SIZE);
     padded.set(packed.slice(0, PACKED_SIZE));
     const bank = Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK4)));
@@ -731,7 +1106,7 @@ var behringerDm12Contract = {
   parsePatchSysEx(sysex) {
     if (!isDeepMindMessage(sysex)) return null;
     const slot = (sysex[8] & 7) * PROGRAMS_PER_BANK4 + (sysex[9] & 127);
-    return { rawData: unpack7to82(sysex.slice(10, 10 + PACKED_SIZE)).slice(0, DM12_PATCH_DATA_SIZE), slot };
+    return { rawData: unpack7to8Dm(sysex.slice(10, 10 + PACKED_SIZE)).slice(0, DM12_PATCH_DATA_SIZE), slot };
   },
   buildDumpRequest(slot, _channel) {
     const bank = slot === "all" ? 0 : Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK4)));
@@ -739,10 +1114,47 @@ var behringerDm12Contract = {
     return new Uint8Array([240, ...MANUFACTURER_ID, MODEL_ID, DEVICE_ID2, CMD_REQUEST3, bank, program, 247]);
   },
   parseDumpResponse(sysex) {
-    return splitSysex4(sysex).flatMap((message) => {
+    return splitSysexMessages(sysex).flatMap((message) => {
       const parsed = this.parsePatchSysEx?.(message);
       return parsed ? [parsed] : [];
     });
+  },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /deep.?mind|dm.?12/i.test(p.name || ""));
+    return port ? { name: port.name || "DeepMind 12", inputId: port.id || "", outputId: port.id || "", manufacturer: "Behringer", modelId: this.modelId } : null;
   },
   legacySysEx: {
     modelIdByte: MODEL_ID,
@@ -752,6 +1164,270 @@ var behringerDm12Contract = {
 };
 var allBehringerDm12Contracts = [behringerDm12Contract];
 allBehringerDm12Contracts.forEach((contract) => {
+  const result = validateModelContract(contract);
+  if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
+});
+
+// Source/Contracts/Models/behringer-dm6.ts
+var PATCH_DATA_SIZE4 = 242;
+var PATCH_NAME_MAX_LENGTH4 = 16;
+var MODEL_ID2 = 32;
+var MANUFACTURER_ID2 = [0, 32, 50];
+var DEVICE_ID3 = 0;
+var PROTOCOL_VERSION2 = 6;
+var CMD_DUMP4 = 2;
+var CMD_REQUEST4 = 1;
+var PACKED_SIZE2 = 278;
+var PROGRAMS_PER_BANK5 = 128;
+var CATEGORIES6 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "UNK"];
+function isDeepMindMessage2(message) {
+  return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID2[0] && message[2] === MANUFACTURER_ID2[1] && message[3] === MANUFACTURER_ID2[2] && message[4] === MODEL_ID2 && message[6] === CMD_DUMP4 && message[message.length - 1] === 247;
+}
+var behringerDm6Contract = {
+  modelId: "behringer-deepmind6",
+  displayName: "Behringer DeepMind 6",
+  manufacturer: "Behringer",
+  icon: "behringer-logo.svg",
+  thumbnail: "behringer-deepmind6.webp",
+  bankCapacity: 1024,
+  banksCount: 8,
+  programsPerBank: 128,
+  getProgramAddress(index) {
+    return `${"ABCDEFGH"[Math.floor(index / 128)]}${String(index % 128 + 1).padStart(3, "0")}`;
+  },
+  parseProgramAddress(address) {
+    const match = address.match(/^([A-H])(\d{3})$/i);
+    if (!match) return null;
+    const bank = "ABCDEFGH".indexOf(match[1].toUpperCase());
+    const program = Number(match[2]);
+    return bank >= 0 && program >= 1 && program <= 128 ? bank * 128 + program - 1 : null;
+  },
+  patchDataSize: PATCH_DATA_SIZE4,
+  patchNameMaxLength: PATCH_NAME_MAX_LENGTH4,
+  extractPatchName(data) {
+    if (data.length < 239) return "";
+    return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
+  },
+  categories: CATEGORIES6,
+  defaultCategory: "UNK",
+  compatibleModels: ["behringer-deepmind12", "behringer-deepmind12d"],
+  sysexManufacturerId: MANUFACTURER_ID2,
+  formatVersion: 1,
+  sysexModelId: { offset: 4, values: [32] },
+  midiDetection: { portPattern: /deep.?mind.?6|dm.?6/i, displayName: "DeepMind 6" },
+  parameterSchemaKey: "behringer-deepmind12",
+  // Same parameters as DM12
+  midi: { defaultChannel: 1, defaultDeviceId: DEVICE_ID3 },
+  supportsEditBuffer: false,
+  interMessageDelayMs: 50,
+  dumpTimeoutMs: 5e3,
+  computeChecksum: () => 0,
+  verifyChecksum(sysex) {
+    return isDeepMindMessage2(sysex) && sysex.length === 291;
+  },
+  buildPatchSysEx(rawData, slot, _channel) {
+    const data = new Uint8Array(PATCH_DATA_SIZE4);
+    data.set(rawData.slice(0, PATCH_DATA_SIZE4));
+    const packed = pack8to7Dm(data);
+    const padded = new Uint8Array(PACKED_SIZE2);
+    padded.set(packed.slice(0, PACKED_SIZE2));
+    const bank = Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK5)));
+    const program = Math.max(0, Math.min(127, slot % PROGRAMS_PER_BANK5));
+    return new Uint8Array([240, ...MANUFACTURER_ID2, MODEL_ID2, DEVICE_ID3, CMD_DUMP4, PROTOCOL_VERSION2, bank, program, ...padded, 0, 0, 247]);
+  },
+  parsePatchSysEx(sysex) {
+    if (!isDeepMindMessage2(sysex)) return null;
+    const slot = (sysex[8] & 7) * PROGRAMS_PER_BANK5 + (sysex[9] & 127);
+    return { rawData: unpack7to8Dm(sysex.slice(10, 10 + PACKED_SIZE2)).slice(0, PATCH_DATA_SIZE4), slot };
+  },
+  buildDumpRequest(slot, _channel) {
+    const bank = slot === "all" ? 0 : Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK5)));
+    const program = slot === "all" ? 0 : Math.max(0, Math.min(127, slot % PROGRAMS_PER_BANK5));
+    return new Uint8Array([240, ...MANUFACTURER_ID2, MODEL_ID2, DEVICE_ID3, CMD_REQUEST4, bank, program, 247]);
+  },
+  parseDumpResponse(sysex) {
+    return splitSysexMessages(sysex).flatMap((message) => {
+      const parsed = this.parsePatchSysEx?.(message);
+      return parsed ? [parsed] : [];
+    });
+  },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /deep.?mind.?6|dm.?6/i.test(p.name || ""));
+    return port ? { name: port.name || "DeepMind 6", inputId: port.id || "", outputId: port.id || "", manufacturer: "Behringer", modelId: this.modelId } : null;
+  },
+  legacySysEx: {
+    modelIdByte: MODEL_ID2,
+    buildDumpRequest: () => new Uint8Array([240, ...MANUFACTURER_ID2, MODEL_ID2, DEVICE_ID3, CMD_REQUEST4, 0, 0, 247]),
+    validateSysEx: (bytes) => isDeepMindMessage2(bytes)
+  }
+};
+var allBehringerDm6Contracts = [behringerDm6Contract];
+allBehringerDm6Contracts.forEach((contract) => {
+  const result = validateModelContract(contract);
+  if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
+});
+
+// Source/Contracts/Models/behringer-dm12d.ts
+var PATCH_DATA_SIZE5 = 242;
+var PATCH_NAME_MAX_LENGTH5 = 16;
+var MODEL_ID3 = 32;
+var MANUFACTURER_ID3 = [0, 32, 50];
+var DEVICE_ID4 = 0;
+var PROTOCOL_VERSION3 = 7;
+var CMD_DUMP5 = 2;
+var CMD_REQUEST5 = 1;
+var PACKED_SIZE3 = 278;
+var PROGRAMS_PER_BANK6 = 128;
+var CATEGORIES7 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "UNK"];
+function isDeepMindMessage3(message) {
+  return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID3[0] && message[2] === MANUFACTURER_ID3[1] && message[3] === MANUFACTURER_ID3[2] && message[4] === MODEL_ID3 && message[6] === CMD_DUMP5 && message[message.length - 1] === 247;
+}
+var behringerDm12dContract = {
+  modelId: "behringer-deepmind12d",
+  displayName: "Behringer DeepMind 12D",
+  manufacturer: "Behringer",
+  icon: "behringer-logo.svg",
+  thumbnail: "behringer-deepmind12d.webp",
+  bankCapacity: 1024,
+  banksCount: 8,
+  programsPerBank: 128,
+  getProgramAddress(index) {
+    return `${"ABCDEFGH"[Math.floor(index / 128)]}${String(index % 128 + 1).padStart(3, "0")}`;
+  },
+  parseProgramAddress(address) {
+    const match = address.match(/^([A-H])(\d{3})$/i);
+    if (!match) return null;
+    const bank = "ABCDEFGH".indexOf(match[1].toUpperCase());
+    const program = Number(match[2]);
+    return bank >= 0 && program >= 1 && program <= 128 ? bank * 128 + program - 1 : null;
+  },
+  patchDataSize: PATCH_DATA_SIZE5,
+  patchNameMaxLength: PATCH_NAME_MAX_LENGTH5,
+  extractPatchName(data) {
+    if (data.length < 239) return "";
+    return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
+  },
+  categories: CATEGORIES7,
+  defaultCategory: "UNK",
+  compatibleModels: ["behringer-deepmind12", "behringer-deepmind6"],
+  sysexManufacturerId: MANUFACTURER_ID3,
+  formatVersion: 1,
+  sysexModelId: { offset: 4, values: [32] },
+  midiDetection: { portPattern: /deep.?mind.?12d|dm.?12d/i, displayName: "DeepMind 12D" },
+  parameterSchemaKey: "behringer-deepmind12",
+  // Same parameters as DM12
+  midi: { defaultChannel: 1, defaultDeviceId: DEVICE_ID4 },
+  supportsEditBuffer: false,
+  interMessageDelayMs: 50,
+  dumpTimeoutMs: 5e3,
+  computeChecksum: () => 0,
+  verifyChecksum(sysex) {
+    return isDeepMindMessage3(sysex) && sysex.length === 291;
+  },
+  buildPatchSysEx(rawData, slot, _channel) {
+    const data = new Uint8Array(PATCH_DATA_SIZE5);
+    data.set(rawData.slice(0, PATCH_DATA_SIZE5));
+    const packed = pack8to7Dm(data);
+    const padded = new Uint8Array(PACKED_SIZE3);
+    padded.set(packed.slice(0, PACKED_SIZE3));
+    const bank = Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK6)));
+    const program = Math.max(0, Math.min(127, slot % PROGRAMS_PER_BANK6));
+    return new Uint8Array([240, ...MANUFACTURER_ID3, MODEL_ID3, DEVICE_ID4, CMD_DUMP5, PROTOCOL_VERSION3, bank, program, ...padded, 0, 0, 247]);
+  },
+  parsePatchSysEx(sysex) {
+    if (!isDeepMindMessage3(sysex)) return null;
+    const slot = (sysex[8] & 7) * PROGRAMS_PER_BANK6 + (sysex[9] & 127);
+    return { rawData: unpack7to8Dm(sysex.slice(10, 10 + PACKED_SIZE3)).slice(0, PATCH_DATA_SIZE5), slot };
+  },
+  buildDumpRequest(slot, _channel) {
+    const bank = slot === "all" ? 0 : Math.max(0, Math.min(7, Math.floor(slot / PROGRAMS_PER_BANK6)));
+    const program = slot === "all" ? 0 : Math.max(0, Math.min(127, slot % PROGRAMS_PER_BANK6));
+    return new Uint8Array([240, ...MANUFACTURER_ID3, MODEL_ID3, DEVICE_ID4, CMD_REQUEST5, bank, program, 247]);
+  },
+  parseDumpResponse(sysex) {
+    return splitSysexMessages(sysex).flatMap((message) => {
+      const parsed = this.parsePatchSysEx?.(message);
+      return parsed ? [parsed] : [];
+    });
+  },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /deep.?mind.?12d|dm.?12d/i.test(p.name || ""));
+    return port ? { name: port.name || "DeepMind 12D", inputId: port.id || "", outputId: port.id || "", manufacturer: "Behringer", modelId: this.modelId } : null;
+  },
+  legacySysEx: {
+    modelIdByte: MODEL_ID3,
+    buildDumpRequest: () => new Uint8Array([240, ...MANUFACTURER_ID3, MODEL_ID3, DEVICE_ID4, CMD_REQUEST5, 0, 0, 247]),
+    validateSysEx: (bytes) => isDeepMindMessage3(bytes)
+  }
+};
+var allBehringerDm12dContracts = [behringerDm12dContract];
+allBehringerDm12dContracts.forEach((contract) => {
   const result = validateModelContract(contract);
   if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
 });
@@ -768,43 +1444,16 @@ var PRO800_FORMAT_VERSIONS = {
   111: { firmwareRange: { min: "1.3.6" }, rawDataSize: 173, label: "v111" }
 };
 var PRO800_NAME_OFFSET = 150;
-var CATEGORIES5 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
-var DEFAULT_CATEGORY4 = "Other";
-var SYSEX_MANUFACTURER_ID4 = [0, 32, 50];
-var FORMAT_VERSION4 = 1;
+var CATEGORIES8 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var DEFAULT_CATEGORY5 = "Other";
+var SYSEX_MANUFACTURER_ID5 = [0, 32, 50];
+var FORMAT_VERSION5 = 1;
 var PRO800_CMD_REQUEST = 119;
 var PRO800_CMD_RESPONSE = 120;
 var PRO800_HEADER_BYTES = [0, 32, 50, 0, 1, 36, 0];
-function pack8to73(data) {
-  const packed = [];
-  let srcIdx = 0;
-  while (srcIdx < data.length) {
-    const chunkSize = Math.min(7, data.length - srcIdx);
-    let msbCollector = 0;
-    for (let i = 0; i < chunkSize; i++) {
-      if ((data[srcIdx + i] & 128) !== 0) msbCollector |= 1 << i;
-    }
-    packed.push(msbCollector);
-    for (let i = 0; i < chunkSize; i++) packed.push(data[srcIdx + i] & 127);
-    srcIdx += chunkSize;
-  }
-  return new Uint8Array(packed);
-}
 function getFormatVersion(rawData) {
   const version = rawData[4];
   return PRO800_FORMAT_VERSIONS[version] ? version : null;
-}
-function unpack7to83(packed) {
-  const unpacked = [];
-  let srcIdx = 0;
-  while (srcIdx < packed.length) {
-    const msbCollector = packed[srcIdx++];
-    for (let i = 0; i < 7 && srcIdx < packed.length; i++) {
-      const bit7 = msbCollector >> i & 1;
-      unpacked.push(packed[srcIdx++] & 127 | bit7 << 7);
-    }
-  }
-  return new Uint8Array(unpacked);
 }
 function isPro800SysEx(msg, cmd) {
   if (msg.length < 12) return false;
@@ -815,21 +1464,6 @@ function isPro800SysEx(msg, cmd) {
   if (msg[8] !== cmd) return false;
   if (msg[msg.length - 1] !== 247) return false;
   return true;
-}
-function splitSysex5(raw) {
-  const msgs = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 240 && !inSysex) {
-      inSysex = true;
-      start = i;
-    } else if (raw[i] === 247 && inSysex) {
-      msgs.push(raw.slice(start, i + 1));
-      inSysex = false;
-    }
-  }
-  return msgs;
 }
 function getPro800BankLetter(index) {
   return "ABCD"[Math.floor(index / 100)];
@@ -846,7 +1480,7 @@ var behringerPro800Contract = {
   displayName: "Behringer Pro-800",
   manufacturer: "Behringer",
   icon: "behringer-logo.svg",
-  thumbnail: "behringer-pro800.svg",
+  thumbnail: "behringer-pro800.webp",
   bankCapacity: PRO800_BANK_CAPACITY,
   banksCount: PRO800_BANKS_COUNT,
   programsPerBank: PRO800_PROGRAMS_PER_BANK,
@@ -875,11 +1509,11 @@ var behringerPro800Contract = {
     }
     return chars.join("");
   },
-  categories: CATEGORIES5,
-  defaultCategory: DEFAULT_CATEGORY4,
+  categories: CATEGORIES8,
+  defaultCategory: DEFAULT_CATEGORY5,
   compatibleModels: [],
-  sysexManufacturerId: SYSEX_MANUFACTURER_ID4,
-  formatVersion: FORMAT_VERSION4,
+  sysexManufacturerId: SYSEX_MANUFACTURER_ID5,
+  formatVersion: FORMAT_VERSION5,
   sysexModelId: { offset: 4, values: [0], multiByte: [1, 36] },
   midiDetection: { portPattern: /pro.?800/i, displayName: "Pro-800" },
   parameterSchemaKey: "behringer-pro800",
@@ -893,7 +1527,7 @@ var behringerPro800Contract = {
   verifyChecksum(sysex) {
     if (!isPro800SysEx(sysex, PRO800_CMD_RESPONSE)) return false;
     const packed = sysex.slice(11, sysex.length - 1);
-    const unpacked = unpack7to83(packed);
+    const unpacked = unpack7to8NoPad(packed);
     return packed.length > 0 && isPro800SysEx(sysex, PRO800_CMD_RESPONSE);
   },
   buildPatchSysEx(rawData, slot, _channel) {
@@ -903,7 +1537,7 @@ var behringerPro800Contract = {
     const data = rawData.slice(0, size);
     const padded = new Uint8Array(size);
     padded.set(data);
-    const packed = pack8to73(padded);
+    const packed = pack7to8NoPad(padded);
     const lsb = s % 128;
     const msb = Math.floor(s / 128);
     return new Uint8Array([
@@ -919,7 +1553,7 @@ var behringerPro800Contract = {
   parsePatchSysEx(sysex) {
     if (!isPro800SysEx(sysex, PRO800_CMD_RESPONSE)) return null;
     const packed = sysex.slice(11, sysex.length - 1);
-    const unpacked = unpack7to83(packed);
+    const unpacked = unpack7to8NoPad(packed);
     const version = getFormatVersion(unpacked);
     const versionSize = version === null ? this.patchDataSize : PRO800_FORMAT_VERSIONS[version].rawDataSize;
     const slot = sysex[9] + (sysex[10] << 7);
@@ -940,13 +1574,49 @@ var behringerPro800Contract = {
     ]);
   },
   parseDumpResponse(sysex) {
-    const msgs = splitSysex5(sysex);
     const results = [];
-    for (const msg of msgs) {
+    for (const msg of splitSysexMessages(sysex)) {
       const parsed = behringerPro800Contract.parsePatchSysEx?.(msg);
       if (parsed) results.push(parsed);
     }
     return results;
+  },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(p.slot),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Behringer ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /pro.?800/i.test(p.name || ""));
+    return port ? { name: port.name || "Pro-800", inputId: port.id || "", outputId: port.id || "", manufacturer: "Behringer", modelId: this.modelId } : null;
   },
   legacySysEx: {
     // Real Pro-800 identity is the multi-byte sequence 00 01 24 — a single
@@ -972,17 +1642,170 @@ var DX7_PATCH_DATA_SIZE = 128;
 var DX7_PATCH_NAME_MAX_LENGTH = 10;
 var DX7II_PATCH_DATA_SIZE = 155;
 var DX7II_PATCH_NAME_MAX_LENGTH = 10;
-var CATEGORIES6 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
-var DEFAULT_CATEGORY5 = "Other";
-var SYSEX_MANUFACTURER_ID5 = [67];
-var FORMAT_VERSION5 = 1;
+var CATEGORIES9 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var DEFAULT_CATEGORY6 = "Other";
+var SYSEX_MANUFACTURER_ID6 = [67];
+var FORMAT_VERSION6 = 1;
 var CMD_BULK = 9;
 var SUB_SINGLE = 32;
-function dx7Checksum(bytes) {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return 128 - sum % 128 & 127;
+var N_OSC = 6;
+var GLOBAL_VALID_RANGES = {
+  "PR1": Array.from({ length: 100 }, (_, i) => i),
+  "PR2": Array.from({ length: 100 }, (_, i) => i),
+  "PR3": Array.from({ length: 100 }, (_, i) => i),
+  "PR4": Array.from({ length: 100 }, (_, i) => i),
+  "PL1": Array.from({ length: 100 }, (_, i) => i),
+  "PL2": Array.from({ length: 100 }, (_, i) => i),
+  "PL3": Array.from({ length: 100 }, (_, i) => i),
+  "PL4": Array.from({ length: 100 }, (_, i) => i),
+  "ALG": Array.from({ length: 32 }, (_, i) => i),
+  "OKS": Array.from({ length: 2 }, (_, i) => i),
+  "FB": Array.from({ length: 8 }, (_, i) => i),
+  "LFS": Array.from({ length: 100 }, (_, i) => i),
+  "LFD": Array.from({ length: 100 }, (_, i) => i),
+  "LPMD": Array.from({ length: 100 }, (_, i) => i),
+  "LAMD": Array.from({ length: 100 }, (_, i) => i),
+  "LPMS": Array.from({ length: 8 }, (_, i) => i),
+  "LFW": Array.from({ length: 6 }, (_, i) => i),
+  "LKS": Array.from({ length: 2 }, (_, i) => i),
+  "TRNSP": Array.from({ length: 49 }, (_, i) => i),
+  "NAME CHAR 1": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 2": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 3": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 4": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 5": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 6": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 7": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 8": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 9": Array.from({ length: 128 }, (_, i) => i),
+  "NAME CHAR 10": Array.from({ length: 128 }, (_, i) => i)
+};
+var OSCILLATOR_VALID_RANGES = {
+  "R1": Array.from({ length: 100 }, (_, i) => i),
+  "R2": Array.from({ length: 100 }, (_, i) => i),
+  "R3": Array.from({ length: 100 }, (_, i) => i),
+  "R4": Array.from({ length: 100 }, (_, i) => i),
+  "L1": Array.from({ length: 100 }, (_, i) => i),
+  "L2": Array.from({ length: 100 }, (_, i) => i),
+  "L3": Array.from({ length: 100 }, (_, i) => i),
+  "L4": Array.from({ length: 100 }, (_, i) => i),
+  "BP": Array.from({ length: 100 }, (_, i) => i),
+  "LD": Array.from({ length: 100 }, (_, i) => i),
+  "RD": Array.from({ length: 100 }, (_, i) => i),
+  "RC": Array.from({ length: 4 }, (_, i) => i),
+  "LC": Array.from({ length: 4 }, (_, i) => i),
+  "DET": Array.from({ length: 15 }, (_, i) => i),
+  "RS": Array.from({ length: 8 }, (_, i) => i),
+  "KVS": Array.from({ length: 8 }, (_, i) => i),
+  "AMS": Array.from({ length: 4 }, (_, i) => i),
+  "OL": Array.from({ length: 100 }, (_, i) => i),
+  "FC": Array.from({ length: 32 }, (_, i) => i),
+  "M": Array.from({ length: 2 }, (_, i) => i),
+  "FF": Array.from({ length: 100 }, (_, i) => i)
+};
+var VOICE_KEYS = (() => {
+  const oscKeys = [
+    "R1",
+    "R2",
+    "R3",
+    "R4",
+    "L1",
+    "L2",
+    "L3",
+    "L4",
+    "BP",
+    "LD",
+    "RD",
+    "RC",
+    "LC",
+    "DET",
+    "RS",
+    "KVS",
+    "AMS",
+    "OL",
+    "FC",
+    "M",
+    "FF"
+  ];
+  const oscParams = [];
+  for (let i = 0; i < 6; i++) {
+    for (const key of [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+      "BP",
+      "LD",
+      "RD",
+      "RC",
+      "LC",
+      "DET",
+      "RS",
+      "KVS",
+      "AMS",
+      "OL",
+      "FC",
+      "M",
+      "FF"
+    ]) {
+      oscParams.push(`${i}_${key}`);
+    }
+  }
+  return oscParams.concat([
+    "PR1",
+    "PR2",
+    "PR3",
+    "PR4",
+    "PL1",
+    "PL2",
+    "PL3",
+    "PL4",
+    "ALG",
+    "OKS",
+    "FB",
+    "LFS",
+    "LFD",
+    "LPMD",
+    "LAMD",
+    "LPMS",
+    "LFW",
+    "LKS",
+    "TRNSP",
+    "NAME CHAR 1",
+    "NAME CHAR 2",
+    "NAME CHAR 3",
+    "NAME CHAR 4",
+    "NAME CHAR 5",
+    "NAME CHAR 6",
+    "NAME CHAR 7",
+    "NAME CHAR 8",
+    "NAME CHAR 9",
+    "NAME CHAR 10"
+  ]);
+})();
+var VOICE_PARAMETER_RANGES = {
+  ...Object.fromEntries(
+    Object.entries(OSCILLATOR_VALID_RANGES).flatMap(
+      ([key, range]) => Array.from({ length: N_OSC }, (_, i) => [`${i}_${key}`, range])
+    )
+  ),
+  ...GLOBAL_VALID_RANGES
+};
+function verifyVoice(params) {
+  for (const [key, value] of Object.entries(params)) {
+    const range = VOICE_PARAMETER_RANGES[key];
+    if (!range || !range.includes(value)) {
+      console.warn(`DX7 verify failed: ${key}=${value} not in range`);
+      return false;
+    }
+  }
+  return true;
 }
+var dx7Checksum = yamahaChecksum;
 function unpackProgram(ved, vmem) {
   const bulk = vmem;
   for (let op = 0; op < 6; op++) {
@@ -1061,21 +1884,6 @@ function buildDx7VoiceSysEx(ved, channel) {
   result[6 + 155 + 1] = 247;
   return result;
 }
-function splitSysex6(raw) {
-  const msgs = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 240 && !inSysex) {
-      inSysex = true;
-      start = i;
-    } else if (raw[i] === 247 && inSysex) {
-      msgs.push(raw.slice(start, i + 1));
-      inSysex = false;
-    }
-  }
-  return msgs;
-}
 function dx7HeaderLen(msg) {
   if (msg.length >= 8 && msg[3] === CMD_BULK && msg[4] === SUB_SINGLE && msg[5] === 0) return 6;
   if (msg.length >= 9 && msg[4] === CMD_BULK && msg[5] === SUB_SINGLE) return 7;
@@ -1115,7 +1923,7 @@ var yamahaDx7Contract = {
   displayName: "Yamaha DX7",
   manufacturer: "Yamaha",
   icon: "yamaha-logo.svg",
-  thumbnail: "yamaha-dx7.jpg",
+  thumbnail: "yamaha-dx7.webp",
   bankCapacity: 32,
   banksCount: 1,
   programsPerBank: 32,
@@ -1141,11 +1949,11 @@ var yamahaDx7Contract = {
     }
     return name.trimEnd();
   },
-  categories: CATEGORIES6,
-  defaultCategory: DEFAULT_CATEGORY5,
+  categories: CATEGORIES9,
+  defaultCategory: DEFAULT_CATEGORY6,
   compatibleModels: ["yamaha-dx7ii"],
-  sysexManufacturerId: SYSEX_MANUFACTURER_ID5,
-  formatVersion: FORMAT_VERSION5,
+  sysexManufacturerId: SYSEX_MANUFACTURER_ID6,
+  formatVersion: FORMAT_VERSION6,
   // DX7 uses byte[3] = device byte (0x00=DX7, 0x01=DX7II) for disambiguation
   sysexModelId: { offset: 3, values: [0] },
   midiDetection: { portPattern: /dx.?7|fm.?1|m.?wave|cuvave/i, displayName: "DX7" },
@@ -1210,8 +2018,12 @@ var yamahaDx7Contract = {
     const ch = channel - 1 & 15;
     return new Uint8Array([240, 67, ch, CMD_BULK, SUB_SINGLE, 0, 247]);
   },
+  // ─── Validation (from NeuralDX7 constants.py) ───
+  verifyVoice(params) {
+    return verifyVoice(params);
+  },
   parseDumpResponse(sysex) {
-    const msgs = splitSysex6(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results = [];
     for (const msg of msgs) {
       const hdr = dx7HeaderLen(msg);
@@ -1228,6 +2040,62 @@ var yamahaDx7Contract = {
     }
     return results;
   },
+  parseFile(data, _filename) {
+    const parsed = splitSysexMessages(data).flatMap((msg) => {
+      const hdr = dx7HeaderLen(msg);
+      if (hdr === 0) return [];
+      if (isDx7Voice(msg, 0)) {
+        return [{ rawData: msg.slice(hdr, hdr + DX7_PATCH_DATA_SIZE), slot: 0 }];
+      }
+      if (isDx7Bulk(msg, 0)) {
+        const patchData = msg.slice(hdr, hdr + 32 * DX7_PATCH_DATA_SIZE);
+        const out = [];
+        for (let i = 0; i < 32; i++) {
+          const s = i * DX7_PATCH_DATA_SIZE;
+          out.push({ rawData: new Uint8Array(patchData.slice(s, s + DX7_PATCH_DATA_SIZE)), slot: i });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Yamaha ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    if (options.format === "bank" && patches.length > 0) {
+      return this.buildBulkSysEx(patches, options.midiChannel);
+    }
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware(ports) {
+    const port = ports.find((p) => /dx.?7|fm.?1|m.?wave|cuvave/i.test(p.name || ""));
+    return port ? { name: port.name || "Yamaha DX7", inputId: port.id || "", outputId: port.id || "", manufacturer: "Yamaha", modelId: this.modelId } : null;
+  },
   legacySysEx: {
     modelIdByte: 0,
     buildDumpRequest: (ch) => new Uint8Array([240, 67, ch - 1 & 15, 0, CMD_BULK, SUB_SINGLE, 0, 247]),
@@ -1238,7 +2106,7 @@ var yamahaDx7iiContract = {
   ...yamahaDx7Contract,
   modelId: "yamaha-dx7ii",
   displayName: "Yamaha DX7II",
-  thumbnail: "yamaha-dx7ii.jpg",
+  thumbnail: "yamaha-dx7.webp",
   sysexModelId: { offset: 3, values: [1] },
   midiDetection: { portPattern: /dx.?7ii|dx7.?ii/i, displayName: "DX7II" },
   parameterSchemaKey: "yamaha-dx7ii",
@@ -1309,6 +2177,102 @@ allYamahaContracts.forEach((c) => {
   }
 });
 
+// Source/Contracts/Models/roland-aira.ts
+var AIRA_MAIN_PARAM_COUNT = 10;
+var AIRA_SLOT_COUNT = 6;
+var AIRA_PARAMS_PER_SLOT = 4;
+var AIRA_CONDITION_SOURCES = 22;
+var AIRA_CONDITION_BYTES_PER_SOURCE = 6;
+var AIRA_MAX_CABLES = 64;
+var AIRA_PATCH_DATA_SIZE = 1 + AIRA_MAIN_PARAM_COUNT + AIRA_SLOT_COUNT + AIRA_SLOT_COUNT * AIRA_PARAMS_PER_SLOT + 1 + AIRA_MAX_CABLES * 2 + AIRA_CONDITION_SOURCES * AIRA_CONDITION_BYTES_PER_SOURCE;
+var CATEGORIES10 = ["Patch", "Other"];
+var DEFAULT_CATEGORY7 = "Patch";
+function buildAiraContract(modelId, displayName, modelIdByte, thumbnail) {
+  return {
+    modelId,
+    displayName,
+    manufacturer: "Roland",
+    icon: "roland-logo.svg",
+    thumbnail,
+    bankCapacity: 1,
+    banksCount: 1,
+    programsPerBank: 1,
+    getProgramAddress: () => "10 00 00 00",
+    parseProgramAddress: (address) => address === "10 00 00 00" ? 0 : null,
+    patchDataSize: AIRA_PATCH_DATA_SIZE,
+    patchNameMaxLength: 0,
+    extractPatchName: () => "",
+    categories: CATEGORIES10,
+    defaultCategory: DEFAULT_CATEGORY7,
+    compatibleModels: ["roland-aira-bitrazer", "roland-aira-torcido", "roland-aira-demora", "roland-aira-scooper"],
+    sysexManufacturerId: [65],
+    formatVersion: 1,
+    sysexModelId: {
+      offset: 6,
+      values: [modelIdByte],
+      multiByte: [0, 0, 0]
+    },
+    midiDetection: {
+      portPattern: new RegExp(
+        modelId.replace("roland-aira-", "") + "|aira",
+        "i"
+      ),
+      displayName: displayName.replace("Roland AIRA ", "")
+    },
+    midi: {
+      defaultChannel: 1,
+      defaultDeviceId: 16
+    },
+    computeChecksum(data) {
+      let sum = 0;
+      for (const b of data) sum += b;
+      return 128 - (sum & 127) & 127;
+    },
+    verifyChecksum(sysex) {
+      if (sysex.length < 14) return false;
+      if (sysex[0] !== 240 || sysex[1] !== 65 || sysex[2] !== 16) return false;
+      if (sysex[6] !== modelIdByte || sysex[7] !== 18) return false;
+      const body = sysex.slice(8, sysex.length - 2);
+      const expected = this.computeChecksum(body);
+      return sysex[sysex.length - 2] === expected;
+    },
+    detectHardware(ports) {
+      const port = ports.find((p) => new RegExp(modelId.replace("roland-aira-", "") + "|aira", "i").test(p.name || ""));
+      return port ? { name: port.name || displayName, inputId: port.id || "", outputId: port.id || "", manufacturer: "Roland", modelId } : null;
+    }
+  };
+}
+var rolandAiraBitrazerContract = buildAiraContract(
+  "roland-aira-bitrazer",
+  "Roland AIRA Bitrazer",
+  21,
+  "roland-bitrazer.webp"
+);
+var rolandAiraTorcidoContract = buildAiraContract(
+  "roland-aira-torcido",
+  "Roland AIRA Torcido",
+  22,
+  "roland-torcido.webp"
+);
+var rolandAiraDemoraContract = buildAiraContract(
+  "roland-aira-demora",
+  "Roland AIRA Demora",
+  23,
+  "roland-demora.webp"
+);
+var rolandAiraScooperContract = buildAiraContract(
+  "roland-aira-scooper",
+  "Roland AIRA Scooper",
+  24,
+  "roland-scooper.webp"
+);
+var allRolandAiraContracts = [
+  rolandAiraBitrazerContract,
+  rolandAiraTorcidoContract,
+  rolandAiraDemoraContract,
+  rolandAiraScooperContract
+];
+
 // Source/Core/MidiSysExQueue.ts
 var HARDWARE_QUEUE_CONFIGS = {
   "casio-cz": { interMessageDelayMs: 100, dumpTimeoutMs: 5e3 },
@@ -1323,9 +2287,13 @@ var allModelContracts = [
   ...allCasioContracts,
   ...allRolandJunoContracts,
   ...allKorgContracts,
+  ...allKorgProphecyContracts,
   ...allBehringerDm12Contracts,
+  ...allBehringerDm6Contracts,
+  ...allBehringerDm12dContracts,
   ...allBehringerPro800Contracts,
-  ...allYamahaContracts
+  ...allYamahaContracts,
+  ...allRolandAiraContracts
 ];
 var modelContractMap = new Map(allModelContracts.map((c) => [c.modelId, c]));
 function getModelContract(modelId) {
@@ -1334,7 +2302,6 @@ function getModelContract(modelId) {
 function getCompatibleModels(modelId) {
   const contract = modelContractMap.get(modelId);
   const compat = new Set(contract?.compatibleModels || []);
-  // Also include models whose compatibleModels list this modelId (reverse)
   for (const [id, c] of modelContractMap) {
     if (id !== modelId && c.compatibleModels?.includes(modelId)) compat.add(id);
   }
@@ -1343,12 +2310,10 @@ function getCompatibleModels(modelId) {
 function getHardwareIds(modelId) {
   const contract = modelContractMap.get(modelId);
   if (!contract) return [modelId];
-  const ids = new Set([modelId]);
-  // Forward: models listed in this contract's compatibleModels
+  const ids = /* @__PURE__ */ new Set([modelId]);
   if (contract.compatibleModels) {
     for (const id of contract.compatibleModels) ids.add(id);
   }
-  // Reverse: models whose compatibleModels include this modelId
   for (const [id, c] of modelContractMap) {
     if (id !== modelId && c.compatibleModels?.includes(modelId)) ids.add(id);
   }
@@ -1376,26 +2341,39 @@ function getMidiConfig(modelId) {
   };
 }
 export {
+  VOICE_KEYS,
+  VOICE_PARAMETER_RANGES,
   allBehringerDm12Contracts,
+  allBehringerDm12dContracts,
+  allBehringerDm6Contracts,
   allBehringerPro800Contracts,
   allCasioContracts,
   allKorgContracts,
+  allKorgProphecyContracts,
   allModelContracts,
+  allRolandAiraContracts,
   allRolandJunoContracts,
   allYamahaContracts,
   casioCz1000Contract,
   casioCz1Contract,
   casioCz5000Contract,
+  dx7Checksum,
   getCompatibleModels,
   getContractsForManufacturer,
   getHardwareIds,
   getMidiConfig,
   getModelContract,
+  korgAbdSm002Contract,
   korgMicrokorgContract,
   korgProphecyContract,
   modelContractMap,
+  rolandAiraBitrazerContract,
+  rolandAiraDemoraContract,
+  rolandAiraScooperContract,
+  rolandAiraTorcidoContract,
   rolandHs60Contract,
   rolandJuno60Contract,
   rolandJuno6Contract,
+  verifyVoice,
   yamahaDx7iiContract
 };

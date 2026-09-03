@@ -49,7 +49,7 @@ describe('validateRenameTemplate', () => {
   it('rechaza plantillas sin placeholders cuando hay varios patches', () => {
     const r = validateRenameTemplate('BRASS', 5);
     expect(r.valid).toBe(false);
-    expect(r.reason).toContain('mismo nombre');
+    expect(r.reason).toContain('same name');
   });
 
   it('permite plantilla sin placeholders para un solo patch', () => {

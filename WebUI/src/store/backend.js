@@ -1,26 +1,49 @@
 /**
- * ABD Bank Manager — Storage backend factory (P2.2 WebUI↔Tauri bridge)
+ * ABD Bank Manager — Storage backend factory (JUCE WebView2 bridge)
  *
  * Devuelve un objeto Dexie-compatible con el subconjunto de API que usan
  * `persistence.js` y `libraryAdapter.js`:
- *   - En navegador (o tests): la instancia Dexie real registrada vía `setDexieDb`.
- *   - En la WebUI embebida en Tauri: una facade que persiste banks+patches en
- *     SQLite a través de `load_library`/`save_library` (ids preservados).
+ *   - En navegador (o tests): la instancia Dexie real registrada via `setDexieDb`.
+ *   - En la WebUI embebida en JUCE: una facade que persiste banks+patches en
+ *     XML a traves de `window.__JUCE__.backend.invoke` (loadLibrary/saveLibrary).
  *
- * Tablas auxiliares (tags M:N, history) se mantienen en memoria de sesión en
- * Tauri; son datos no críticos y no se persisten aún en SQLite.
+ * Tablas auxiliares (tags M:N, history) se mantienen en memoria de sesion.
  */
 
-// Detecta un runtime Tauri v2 (WebView). API interna estable del framework.
-export const isTauri = () =>
-  typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__ &&
-  typeof window.__TAURI_INTERNALS__.invoke === 'function';
+// Detecta un runtime JUCE WebView2 (bridge interno).
+export const isJuce = () =>
+  typeof window !== 'undefined' && !!window.__JUCE__ &&
+  typeof window.__JUCE__.backend === 'object' &&
+  typeof window.__JUCE__.backend.invoke === 'function';
 
-export function tauriInvoke(cmd, args = {}) {
-  if (!isTauri()) {
-    throw new Error(`invoke('${cmd}') solo disponible dentro de Tauri`);
+export async function juceInvoke(cmd, args = {}) {
+  if (!isJuce()) {
+    throw new Error(`invoke('${cmd}') only available within JUCE WebView2`);
   }
-  return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  return new Promise((resolve, reject) => {
+    const requestId = Math.random().toString(36).substring(7);
+    const handler = (event) => {
+      if (event.detail?.requestId === requestId) {
+        window.removeEventListener('juceResponse', handler);
+        if (event.detail.error) {
+          reject(new Error(event.detail.error));
+        } else {
+          resolve(event.detail.data);
+        }
+      }
+    };
+    window.addEventListener('juceResponse', handler);
+    window.__JUCE__.backend.emitEvent('juceRequest', {
+      requestId,
+      cmd,
+      args
+    });
+    // Timeout de seguridad
+    setTimeout(() => {
+      window.removeEventListener('juceResponse', handler);
+      reject(new Error(`Timeout invoking ${cmd}`));
+    }, 30000);
+  });
 }
 
 // IndexedDB almacena `isFavorite` en ocasiones como 0/1 y en otras como
@@ -100,9 +123,9 @@ class WhereClause {
   }
 }
 
-// ─── Facade Tauri (SQLite) ──────────────────────────────────────────────────
+// ─── Facade JUCE (XML) ──────────────────────────────────────────────────
 
-class TauriTable {
+class JuceTable {
   constructor(facade, key) {
     this.facade = facade;
     this.key = key;
@@ -141,13 +164,13 @@ class TauriTable {
   }
 }
 
-export class TauriFacade {
+export class JuceFacade {
   constructor() {
-    this.banks = new TauriTable(this, 'banks');
-    this.patches = new TauriTable(this, 'patches');
-    this.tags = new TauriTable(this, 'tags');
-    this.patchTags = new TauriTable(this, 'patchTags');
-    this.history = new TauriTable(this, 'history');
+    this.banks = new JuceTable(this, 'banks');
+    this.patches = new JuceTable(this, 'patches');
+    this.tags = new JuceTable(this, 'tags');
+    this.patchTags = new JuceTable(this, 'patchTags');
+    this.history = new JuceTable(this, 'history');
     this._banks = [];
     this._patches = [];
     this._tags = [];
@@ -161,14 +184,14 @@ export class TauriFacade {
     return this['_' + key];
   }
 
-  // Tablas SQLite (persistentes) frente a tablas de sesión (en memoria).
+  // Tablas XML (persistentes) frente a tablas de sesion (en memoria).
   persistent(key) {
     return key === 'banks' || key === 'patches';
   }
 
   async _ensureLoaded() {
     if (this._loaded) return;
-    const library = await tauriInvoke('load_library');
+    const library = await juceInvoke('loadLibrary');
     this._banks = [];
     this._patches = [];
     for (const bank of (library || [])) {
@@ -212,14 +235,14 @@ export class TauriFacade {
         .map(p => this._flushedPatch(p));
       return { ...b, patches };
     });
-    await tauriInvoke('save_library', { library });
+    await juceInvoke('saveLibrary', { library });
   }
 
   async add(key, row) {
     await this._ensureLoaded();
     const arr = this.rows(key);
     if (arr.some(r => r.id != null && r.id === row.id)) {
-      throw new Error(`ConstraintError: id ya existe en '${key}'`);
+      throw new Error(`ConstraintError: id already exists in '${key}'`);
     }
     const copy = { ...row };
     copy.dbId = ++this._seq[key];
@@ -288,17 +311,21 @@ export function setDexieDb(db) {
   dexieDbInstance = db;
 }
 
-let tauriFacadeInstance = null;
+let juceFacadeInstance = null;
 
 export function getDb() {
-  if (isTauri()) {
-    if (!tauriFacadeInstance) {
-      tauriFacadeInstance = new TauriFacade();
+  if (isJuce()) {
+    if (!juceFacadeInstance) {
+      juceFacadeInstance = new JuceFacade();
     }
-    return tauriFacadeInstance;
+    return juceFacadeInstance;
   }
   if (!dexieDbInstance) {
-    throw new Error('backend.js: getDb() llamado antes de setDexieDb() en modo navegador');
+    throw new Error('backend.js: getDb() called before setDexieDb() in browser mode');
   }
   return dexieDbInstance;
+}
+
+export function setJuceFacade(instance) {
+  juceFacadeInstance = instance;
 }

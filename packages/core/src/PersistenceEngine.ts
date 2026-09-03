@@ -10,7 +10,7 @@ import JSZip from 'jszip';
 import { calculateFingerprint } from './operations/fingerprint.js';
 import type { PatchData, Bank, Library, ImportResult, ExportOptions } from './validationSchemas.js';
 import type { ImportAdapter, ExportAdapter } from '../../contracts/src/index.js';
-import { BackupManifestSchema, assertBackupPatchData } from './backupValidation.js';
+import { BackupManifestSchema, assertBackupPatchData, CURRENT_FINGERPRINT_VERSION } from './backupValidation.js';
 import {
   addBank,
   removeBank,
@@ -81,7 +81,6 @@ class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
       const idb = tx.idbtrans.db;
       if (idb.objectStoreNames.contains('settings')) {
         idb.deleteObjectStore('settings');
-        console.log('[UnifiedPersistence] Object store "settings" purged (migration v4)');
       }
     });
 
@@ -198,7 +197,7 @@ class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
       bankId,
       index: nextIndex,
       name: patchData.name || 'Init Patch',
-      category: patchData.category || 'Other',
+      category: patchData.category || 'UNK',
       author: patchData.author || '',
       tags: patchData.tags || [],
       notes: patchData.notes || '',
@@ -399,6 +398,7 @@ class UnifiedDexiePersistence extends Dexie implements PersistenceEngine {
     zip.file('manifest.json', JSON.stringify({
       version: 1,
       schemaVersion: this.verno,
+      fpVersion: CURRENT_FINGERPRINT_VERSION,
       format: 'abdlibrary',
       library: { bankCount: banks.length, exportedAt: new Date().toISOString(), reason },
       banks

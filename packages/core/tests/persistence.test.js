@@ -35,7 +35,7 @@ function makeLibrary() {
       isFactory: false, isLocked: false, source: null,
       creationDate: new Date().toISOString(), modifiedDate: new Date().toISOString(),
       patches: [{
-        id: 'patch-1', name: 'Init', category: 'Other', author: '', tags: [], notes: '',
+        id: 'patch-1', name: 'Init', category: 'UNK', author: '', tags: [], notes: '',
         originAddress: '0:0', rawData: new Uint8Array([1, 2, 3]), hardwareIds: ['generic'],
         parameters: {}, isFavorite: false, rating: 0, versionNumber: 1,
         creationDate: new Date().toISOString(), modifiedDate: new Date().toISOString()
@@ -69,7 +69,7 @@ describe('DexiePersistence backup format', () => {
     engine.loadLibrary = async () => library;
     const backup = await engine.createBackup('test');
 
-    const stubs = stubRestore(engine);
+    stubRestore(engine);
     expect(await engine.restoreFromBackup(backup)).toBe(true);
     restored = restored || { banks: [{ patches: [{ rawData: new Uint8Array([1, 2, 3]), fingerprint: '0'.repeat(64) }] }] };
     expect(restored.banks).toHaveLength(1);

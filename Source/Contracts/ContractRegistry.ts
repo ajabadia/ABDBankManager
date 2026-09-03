@@ -22,6 +22,7 @@ import type { ExportAdapter } from './ExportAdapter.ts';
 import type { HardwareLinkContract } from './HardwareLinkContract.ts';
 import { getMidiConfig as deriveMidiConfig, type MidiConfig } from './Models/index.ts';
 import { allModelContracts } from './Models/index.ts';
+import { allImportAdapters, allExportAdapters, allHardwareLinks } from './Adapters/index.ts';
 
 export type DeploymentMode = 'standalone' | 'plugin';
 
@@ -108,11 +109,18 @@ export class ContractRegistry {
     return this.models.get(modelId)?.compatibleModels || [];
   }
 
-  /** Asociación multi-hardware: [canónico, ...compatibles]. */
+  /** Asociación multi-hardware: [canónico, ...compatibles] (forward + reverse). */
   getHardwareIds(modelId: string): string[] {
     const contract = this.models.get(modelId);
     if (!contract) return [modelId];
-    return [modelId, ...(contract.compatibleModels || [])];
+    const ids = new Set<string>([modelId]);
+    if (contract.compatibleModels) {
+      for (const id of contract.compatibleModels) ids.add(id);
+    }
+    for (const [id, c] of this.models) {
+      if (id !== modelId && c.compatibleModels?.includes(modelId)) ids.add(id);
+    }
+    return Array.from(ids);
   }
 
   getImportAdapters(modelId?: string): ImportAdapter[] {
@@ -133,6 +141,25 @@ export class ContractRegistry {
     return all.filter(l => l.modelId === modelId);
   }
 
+  /**
+   * Devuelve la cobertura real del bundle: cada modelo y las capacidades
+   * registradas para él. Los booleanos distinguen ausencia de implementación
+   * de un fallo de consulta.
+   */
+  getCoverage(): Array<{
+    modelId: string;
+    importAdapters: string[];
+    exportAdapters: string[];
+    hardwareLinks: boolean;
+  }> {
+    return this.getModels().map(model => ({
+      modelId: model.modelId,
+      importAdapters: this.getImportAdapters(model.modelId).map(adapter => adapter.adapterId),
+      exportAdapters: this.getExportAdapters(model.modelId).map(adapter => adapter.adapterId),
+      hardwareLinks: this.getHardwareLinks(model.modelId).length > 0
+    }));
+  }
+
   /** Canal/device + timing de la cola MIDI, derivados (no editables). */
   getMidiConfig(modelId: string): MidiConfig {
     return deriveMidiConfig(modelId);
@@ -150,13 +177,23 @@ export class ContractRegistry {
 
 /**
  * Registry para el despliegue standalone: registra todos los ModelContracts
- * del monorepo. (Los adapters/hardware links reales por fabricante aún no
- * existen — se registrarán aquí cuando se implementen.)
+ * del monorepo, junto con los adapters y HardwareLinks concretos disponibles.
+ * Los formatos aún no implementados (por ejemplo tape/clipboard) no se
+ * registran hasta disponer de una implementación verificable.
  */
 export function createStandaloneRegistry(): ContractRegistry {
   const registry = new ContractRegistry();
   for (const contract of allModelContracts) {
     registry.registerModel(contract);
+  }
+  for (const adapter of allImportAdapters) {
+    registry.registerImportAdapter(adapter);
+  }
+  for (const adapter of allExportAdapters) {
+    registry.registerExportAdapter(adapter);
+  }
+  for (const link of allHardwareLinks) {
+    registry.registerHardwareLink(link);
   }
   return registry;
 }

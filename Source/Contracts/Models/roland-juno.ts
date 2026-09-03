@@ -11,7 +11,10 @@
  * 18-byte body: 16 slider params (0-127) + SW1 + SW2
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import {
+  ModelContract, validateModelContract, type ContractFileParse
+} from '../ModelContract';
+import { bulkChecksum, splitSysexMessages } from '../SysEx/codec';
 
 const BANK_CAPACITY = 128;
 const BANKS_COUNT = 2;
@@ -27,23 +30,6 @@ const DEVICE_ID = 0x18;
 
 const CMD_PATCH_DUMP   = 0x30;
 const CMD_BULK_FUNC    = 0x01;
-
-function bulkChecksum(bytes: Uint8Array): number {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return (-sum) & 0x7F;
-}
-
-function splitSysex(raw: Uint8Array): Uint8Array[] {
-  const msgs: Uint8Array[] = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 0xF0 && !inSysex) { inSysex = true; start = i; }
-    else if (raw[i] === 0xF7 && inSysex) { msgs.push(raw.slice(start, i + 1)); inSysex = false; }
-  }
-  return msgs;
-}
 
 function isJunoSinglePatch(msg: Uint8Array): boolean {
   return msg.length === 23
@@ -74,7 +60,7 @@ const rolandJuno106Contract: ModelContract = {
   displayName: 'Roland Juno-106',
   manufacturer: 'Roland',
   icon: 'roland-logo.svg',
-  thumbnail: 'roland-juno106.jpg',
+  thumbnail: 'roland-juno-106.webp',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
@@ -145,7 +131,7 @@ const rolandJuno106Contract: ModelContract = {
   },
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
-    const msgs = splitSysex(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results: { rawData: Uint8Array; slot: number }[] = [];
     for (const msg of msgs) {
       if (isJunoSinglePatch(msg)) {
@@ -162,6 +148,66 @@ const rolandJuno106Contract: ModelContract = {
     return results;
   },
 
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const parsed = splitSysexMessages(data).flatMap(msg => {
+      if (isJunoSinglePatch(msg)) {
+        return [{ rawData: msg.slice(4, 4 + PATCH_DATA_SIZE), slot: 0 }];
+      }
+      if (isJunoBulkDump(msg)) {
+        const patchData = msg.slice(5, msg.length - 2);
+        const count = Math.floor(patchData.length / PATCH_DATA_SIZE);
+        const out: { rawData: Uint8Array; slot: number }[] = [];
+        for (let i = 0; i < count; i++) {
+          const s = i * PATCH_DATA_SIZE;
+          out.push({ rawData: new Uint8Array(patchData.slice(s, s + PATCH_DATA_SIZE)), slot: i });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Roland ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    if (options.format === 'bank' && patches.length > 0) {
+      const payload = new Uint8Array(patches.length * PATCH_DATA_SIZE);
+      patches.forEach((p, i) => payload.set(p.rawData.slice(0, PATCH_DATA_SIZE), i * PATCH_DATA_SIZE));
+      const checksum = bulkChecksum(payload);
+      return new Uint8Array([0xF0, 0x41, CMD_PATCH_DUMP, 0x02, CMD_BULK_FUNC, ...payload, checksum, 0xF7]);
+    }
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /juno/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'Roland Juno', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Roland', modelId: this.modelId }
+      : null;
+  },
+
   legacySysEx: {
     modelIdByte: 0x3E,
     buildDumpRequest: (ch) => new Uint8Array([0xF0, 0x41, ch & 0x0F, 0x3E, 0x11, 0x00, 0xF7]),
@@ -174,7 +220,7 @@ export const rolandJuno60Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-juno60',
   displayName: 'Roland Juno-60',
-  thumbnail: 'roland-juno106.jpg',
+  thumbnail: 'roland-juno-60.webp',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3D
@@ -186,7 +232,7 @@ export const rolandJuno6Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-juno6',
   displayName: 'Roland Juno-6',
-  thumbnail: 'roland-juno106.jpg',
+  thumbnail: 'roland-juno-6.webp',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3C
@@ -198,7 +244,7 @@ export const rolandHs60Contract: ModelContract = {
   ...rolandJuno106Contract,
   modelId: 'roland-hs60',
   displayName: 'Roland HS-60',
-  thumbnail: 'roland-juno106.jpg',
+  thumbnail: 'roland-hs60.webp',
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3E

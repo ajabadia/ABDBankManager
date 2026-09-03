@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ABD Bank Manager — Generic MIDI Transport
  *
  * Creates MIDI transports driven entirely by ModelContract fields.
@@ -8,9 +8,8 @@
 import { getModelContract } from '../contracts/modelContracts.js';
 import { splitSysExMessages } from './sysexParser.js';
 
-
 export async function requestMidiAccess() {
-  if (!navigator.requestMIDIAccess) throw new Error('Web MIDI no está disponible en este navegador');
+  if (!navigator.requestMIDIAccess) throw new Error('Web MIDI is not available in this browser');
   return navigator.requestMIDIAccess({ sysex: true });
 }
 
@@ -28,12 +27,11 @@ export function listMidiPorts(access) {
  * @param {number} maxSize - Maximum chunk size in bytes
  * @returns {Uint8Array[]} Array of smaller SysEx messages
  */
-function splitSysExMessage(msg, maxSize) {
+export function splitSysExMessage(msg, maxSize) {
   if (msg.length <= maxSize) return [msg];
   
   const chunks = [];
   const header = msg.slice(0, 6); // F0 43 gg 09 20 00
-  const checksum = msg[msg.length - 2];
   const payload = msg.slice(6, msg.length - 2); // Data between header and checksum
   
   // Each chunk gets its own header and checksum
@@ -64,15 +62,19 @@ function splitSysExMessage(msg, maxSize) {
  * @returns {object} Transport with fetchPatch, sendPatch, close, capabilities
  */
 export function createMidiTransport({ modelId, input, output, timeoutMs, onActivity } = {}) {
-  if (!output?.send) throw new Error('Se requiere una salida MIDI');
+  if (!output?.send) throw new Error('A MIDI output is required');
   const contract = getModelContract(modelId);
-  if (!contract) throw new Error(`Contrato no encontrado: ${modelId}`);
+  if (!contract) throw new Error(`Contract not found: ${modelId}`);
   const effectiveTimeout = timeoutMs || contract.dumpTimeoutMs || 5000;
   let pending = null;
 
   // Activity callback: onActivity({ direction: 'in'|'out', bytes, label })
   const notify = (direction, bytes, label) => {
-    try { onActivity?.({ direction, bytes, label }); } catch {}
+    try {
+      onActivity?.({ direction, bytes, label });
+    } catch {
+      // Activity reporting must never interrupt MIDI transport.
+    }
   };
 
   const onMessage = event => {
@@ -104,12 +106,12 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
   input?.addEventListener?.('midimessage', onMessage);
 
   async function fetchPatch(slot, signal) {
-    if (pending) throw new Error(`Ya hay una petición en curso para ${contract.displayName}`);
-    if (signal?.aborted) throw new DOMException('Operación cancelada', 'AbortError');
+    if (pending) throw new Error(`A request is already pending for ${contract.displayName}`);
+    if (signal?.aborted) throw new DOMException('Operation cancelled', 'AbortError');
     const request = contract.buildDumpRequest(slot, contract.midi?.defaultChannel ?? 1);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending = null; reject(new Error(`Timeout esperando slot ${slot} de ${contract.displayName}`)); }, effectiveTimeout);
-      const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operación cancelada', 'AbortError')); };
+      const timer = setTimeout(() => { pending = null; reject(new Error(`Timeout waiting for slot ${slot} de ${contract.displayName}`)); }, effectiveTimeout);
+      const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operation cancelled', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       pending = { slot, resolve: value => { clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(value); } };
       try { notify('out', request, `Fetch slot ${slot}`); output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
@@ -117,12 +119,12 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
   }
 
   async function fetchAll(signal) {
-    if (pending) throw new Error(`Ya hay una petición en curso para ${contract.displayName}`);
-    if (signal?.aborted) throw new DOMException('Operación cancelada', 'AbortError');
+    if (pending) throw new Error(`A request is already pending for ${contract.displayName}`);
+    if (signal?.aborted) throw new DOMException('Operation cancelled', 'AbortError');
     const request = contract.buildDumpRequest('all', contract.midi?.defaultChannel ?? 1);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending = null; reject(new Error(`Timeout esperando bulk dump de ${contract.displayName}`)); }, effectiveTimeout);
-      const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operación cancelada', 'AbortError')); };
+      const timer = setTimeout(() => { pending = null; reject(new Error(`Timeout waiting for bulk dump from ${contract.displayName}`)); }, effectiveTimeout);
+      const abort = () => { clearTimeout(timer); pending = null; reject(new DOMException('Operation cancelled', 'AbortError')); };
       signal?.addEventListener('abort', abort, { once: true });
       pending = { resolve: value => { clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(value); } };
       try { notify('out', request, `Fetch all`); output.send(request); } catch (error) { clearTimeout(timer); pending = null; reject(error); }
@@ -138,14 +140,14 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
     fetchPatch,
     fetchAll,
     sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1) {
-      if (!contract.buildPatchSysEx) throw new Error(`El contrato ${contract.displayName} no permite exportación SysEx`);
+      if (!contract.buildPatchSysEx) throw new Error(`The contract ${contract.displayName} does not allow SysEx export`);
       const msg = contract.buildPatchSysEx(patch.rawData, slot, channel);
       notify('out', msg, `Patch → ${output.name || 'MIDI'}`);
       output.send(msg);
       return contract.interMessageDelayMs || 0;
     },
     sendBulk(patches, channel = contract.midi?.defaultChannel ?? 1) {
-      if (!contract.buildBulkSysEx) throw new Error(`El contrato ${contract.displayName} no permite envío bulk`);
+      if (!contract.buildBulkSysEx) throw new Error(`The contract ${contract.displayName} does not allow bulk send`);
       const msg = contract.buildBulkSysEx(patches, channel);
       const delay = contract.interMessageDelayMs || 50;
       notify('out', msg, `Bank (${patches.length} patches) → ${output.name || 'MIDI'}`);
@@ -171,7 +173,7 @@ export const createBehringerMidiTransport = createMidiTransport;
 export async function fetchBank(transport, { start = 0, count, signal, onProgress } = {}) {
   const patches = [];
   for (let offset = 0; offset < count; offset++) {
-    if (signal?.aborted) throw new DOMException('Operación cancelada', 'AbortError');
+    if (signal?.aborted) throw new DOMException('Operation cancelled', 'AbortError');
     const patch = await transport.fetchPatch(start + offset, signal);
     patches.push(patch);
     onProgress?.({ completed: offset + 1, total: count, slot: patch.slot });

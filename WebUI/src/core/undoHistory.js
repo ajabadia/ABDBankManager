@@ -76,7 +76,11 @@ class UndoHistory {
 
   _notify() {
     for (const l of this.listeners) {
-      try { l({ canUndo: this.canUndo(), canRedo: this.canRedo() }); } catch {}
+      try {
+        l({ canUndo: this.canUndo(), canRedo: this.canRedo() });
+      } catch {
+        // A listener failure must not break history notifications.
+      }
     }
   }
 

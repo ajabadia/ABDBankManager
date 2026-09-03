@@ -15,7 +15,7 @@ const models = [
 ];
 
 function runTests() {
-  for (const { modelId, modelByte, patchSize, banks } of models) {
+  for (const { modelId, patchSize, banks } of models) {
     describe(`Casio ${modelId.toUpperCase()} — Roundtrip`, () => {
       const contract = getModelContract(modelId);
 

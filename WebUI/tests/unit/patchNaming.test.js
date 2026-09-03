@@ -60,7 +60,7 @@ describe('generatePatchName — placeholders cuando no hay nombre', () => {
 
   it('marks formats with names as "(sin nombre)" when the blob came empty', () => {
     const ms2000 = getModelContract('korg-ms2000');
-    expect(generatePatchName(ms2000, 0)).toBe('(sin nombre)');
+    expect(generatePatchName(ms2000, 0)).toBe('(unnamed)');
   });
 
   it('falls back to a generic name without a known contract', () => {

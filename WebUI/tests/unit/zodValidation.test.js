@@ -3,9 +3,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  validatePatchData,
+  validateImportResult,
+  BankSchema,
+  AbdbankManifestSchema
+} from '@core/validationSchemas';
 
-// @core/validationSchemas not compiled to WebUI — skip
-describe.skip('Zod Validation Schemas', () => {
+describe('Zod Validation Schemas', () => {
   const validPatchData = {
     name: 'Test Patch',
     category: 'Bass',

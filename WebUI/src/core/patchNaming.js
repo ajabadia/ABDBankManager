@@ -12,7 +12,7 @@
  * Genera un nombre de patch cuando el formato no lo provee.
  *
  * - contract con patchNameMaxLength > 0 (el formato tiene nombres, pero este
- *   patch vino vacío): '(sin nombre)' — el usuario lo edita a mano.
+ *   patch vino vacío): '(unnamed)' — el usuario lo edita a mano.
  * - contract sin nombres en el formato (patchNameMaxLength === 0): usa el
  *   addressing del contrato → "Casio CZ-101 A1".
  * - sin contrato conocido: fallback genérico "Patch N".
@@ -23,7 +23,7 @@
  */
 export function generatePatchName(contract, index) {
   if (!contract) return `Patch ${index + 1}`;
-  if (contract.patchNameMaxLength > 0) return '(sin nombre)';
+  if (contract.patchNameMaxLength > 0) return '(unnamed)';
   try {
     const address = contract.getProgramAddress(index);
     return `${contract.displayName} ${address}`;

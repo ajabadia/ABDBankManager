@@ -16,9 +16,11 @@ import {
 import { createStandaloneRegistry } from '../../../Source/Contracts/index.ts';
 
 describe('WebUI ModelContracts wrapper (fuente canónica TS)', () => {
-  it('should expose all 15 models including korg-prophecy', () => {
-    expect(MODEL_CONTRACTS.length).toBe(15);
+  it('should expose all 22 models including korg-prophecy and abd-sm002', () => {
+    expect(MODEL_CONTRACTS.length).toBe(22);
     expect(getModelContract('korg-prophecy')).toBeDefined();
+    expect(getModelContract('behringer-deepmind6')).toBeDefined();
+    expect(getModelContract('behringer-deepmind12d')).toBeDefined();
   });
 
   it('should keep unique modelIds', () => {
@@ -48,21 +50,21 @@ describe('WebUI ModelContracts wrapper (fuente canónica TS)', () => {
 
   it('should return compatible models', () => {
     expect(getCompatibleModels('casio-cz101')).toEqual(['casio-cz1000', 'casio-cz5000', 'casio-cz1']);
-    expect(getCompatibleModels('korg-prophecy')).toEqual(['korg-microkorg']);
+    expect(getCompatibleModels('korg-prophecy')).toEqual([]);
   });
 });
 
 describe('Asociación multi-hardware (wrapper) + ContractRegistry (fuente TS)', () => {
   it('should derive hardwareIds = canonical + compatibleModels', () => {
-    expect(getHardwareIds('korg-ms2000')).toEqual(['korg-ms2000', 'korg-microkorg']);
+    expect(getHardwareIds('korg-ms2000')).toEqual(['korg-ms2000', 'korg-microkorg', 'abd-sm002']);
     expect(getHardwareIds('casio-cz101')).toEqual(['casio-cz101', 'casio-cz1000', 'casio-cz5000', 'casio-cz1']);
     expect(getHardwareIds('unknown-model')).toEqual(['unknown-model']);
   });
 
-  it('should expose a standalone registry with all 15 models (canonical TS source)', () => {
+  it('should expose a standalone registry with all 22 models (canonical TS source)', () => {
     const registry = createStandaloneRegistry();
     expect(registry.mode).toBe('standalone');
-    expect(registry.getModels()).toHaveLength(15);
+    expect(registry.getModels()).toHaveLength(22);
     expect(registry.getHardwareIds('roland-juno106')).toEqual([
       'roland-juno106',
       'roland-juno60',

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ABD Bank Manager — App Entry Point (MF.8 cascade navigation)
  * Navigation: Manufacturer → Model → Bank → Patch
  */
@@ -19,7 +19,10 @@ import { hexDump } from './core/hexDump.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import icons from './ui/icons.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
+import { isBridgeMidiAvailable, createBridgeMidiPorts } from './bridge/hardwareMidi.js';
 import { undoHistory } from './core/undoHistory.js';
+import { initAutoExport, recordChange } from './core/autoExport.js';
+import { renderCategoryBadge, getCategoryStyle } from './ui/categoryStyles.js';
 import { createHexEditor } from './core/hexEditor.js';
 import { computeBankStats } from './core/bankStats.js';
 import { renderModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
@@ -67,15 +70,15 @@ async function checkBackupReminder() {
 
   const header = document.getElementById('app-header');
   if (!header) return;
-  const daysText = lastExport ? `Hace ${Math.floor(daysSince)} días` : 'Nunca';
+  const daysText = lastExport ? `${Math.floor(daysSince)} days ago` : 'Never';
   const el = document.createElement('div');
   el.id = 'backup-reminder';
   el.className = 'backup-reminder';
   el.innerHTML = `
     <span class="backup-reminder-icon">${icons.warning}</span>
-    <span class="backup-reminder-text">Tienes <strong>${stats.patchCount} patches</strong> sin backup reciente (último: ${daysText}).</span>
-    <button class="btn btn-sm btn-primary" id="backup-reminder-export">${icons.exportIcon} Exportar librería</button>
-    <button class="btn btn-sm" id="backup-reminder-dismiss">Ocultar 24h</button>`;
+    <span class="backup-reminder-text">You have <strong>${stats.patchCount} patches</strong> without a recent backup (last: ${daysText}).</span>
+    <button class="btn btn-sm btn-primary" id="backup-reminder-export">${icons.exportIcon} Export Library</button>
+    <button class="btn btn-sm" id="backup-reminder-dismiss">Dismiss 24h</button>`;
   header.after(el);
 
   el.querySelector('#backup-reminder-export').onclick = () => handleExportLibrary();
@@ -108,7 +111,10 @@ async function init() {
   document.getElementById('version').textContent = `v${BUILD_VERSION.version}`;
   await runPreMigrationBackup();
   renderNav();
-  setStatus('connected', 'Listo');
+  setStatus('connected', 'Ready');
+
+  // Auto-export: track changes and save .abdlibrary periodically
+  initAutoExport(bridge);
 
   // MF.17 Global Search
   const searchInput = document.getElementById('global-search');
@@ -180,7 +186,8 @@ async function init() {
           if (!selectedBankId && r.bankId) { selectedBankId = r.bankId; navLevel = 'patches'; }
         }
         await renderNav(); await renderContent();
-        if (total) toast(`Importado: ${total} patches`, 'success');
+        if (total) toast(`Imported: ${total} patches`, 'success');
+        recordChange();
       }
     });
   }
@@ -232,7 +239,7 @@ function flashMidiActivity({ direction, bytes, label }) {
   midiActivityTimer = setTimeout(() => {
     dot.style.background = '';
     dot.style.boxShadow = '';
-    statusEl.title = 'Conectar MIDI';
+    statusEl.title = 'Connect MIDI';
   }, 400);
 }
 
@@ -271,7 +278,7 @@ function renderManufacturerNav(list, filter) {
   const filtered = filter ? mfrs.filter(m => m.toLowerCase().includes(filter.toLowerCase())) : mfrs;
 
   if (filtered.length === 0) {
-    list.innerHTML = '<li class="list-empty">Sin resultados</li>';
+    list.innerHTML = '<li class="list-empty">No results</li>';
     return;
   }
 
@@ -281,7 +288,7 @@ function renderManufacturerNav(list, filter) {
     const modelCount = manufacturers[mfr].length;
     li.innerHTML = `
       <span class="item-name">${escHtml(mfr)}</span>
-      <span class="item-badge">${modelCount} modelo${modelCount > 1 ? 's' : ''}</span>`;
+      <span class="item-badge">${modelCount} model${modelCount > 1 ? 's' : ''}</span>`;
     li.onclick = () => selectManufacturer(mfr);
     list.appendChild(li);
   }
@@ -291,7 +298,7 @@ function renderModelNav(list, filter) {
   // Back button
   const back = document.createElement('li');
   back.className = 'list-item';
-  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Fabricantes</span>`;
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Manufacturers</span>`;
   back.onclick = () => { navLevel = 'manufacturers'; selectedManufacturer = null; renderNav(); renderContent(); };
   list.appendChild(back);
 
@@ -358,7 +365,7 @@ async function renderPatchNav(list, filter) {
   const myVersion = ++renderVersion;
   const bank = await getBank(selectedBankId);
   if (myVersion !== renderVersion) return;
-  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} ${escHtml(bank?.name || 'Banco')}</span>`;
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} ${escHtml(bank?.name || 'Bank')}</span>`;
   back.onclick = () => { navLevel = 'banks'; selectedPatchId = null; renderNav(); renderContent(); };
   list.appendChild(back);
 
@@ -370,7 +377,7 @@ async function renderPatchNav(list, filter) {
     const li = document.createElement('li');
     li.className = 'list-item' + (patch.id === selectedPatchId ? ' active' : '');
     const fav = patch.isFavorite ? ` ${icons.star}` : '';
-    li.innerHTML = `<span class="item-name">${escHtml(patch.name)}${fav}</span><span class="item-badge">${patch.category}</span>`;
+    li.innerHTML = `<span class="item-name">${escHtml(patch.name)}${fav}</span>${renderCategoryBadge(patch.category, 'item-badge')}`;
     li.onclick = () => selectPatch(patch.id);
     list.appendChild(li);
   }
@@ -381,14 +388,14 @@ function renderTreeNav(list, filter) {
   // Back button (go to cascade mode)
   const back = document.createElement('li');
   back.className = 'list-item';
-  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Vista en cascada</span>`;
+  back.innerHTML = `<span class="item-name" style="color:var(--accent);">${icons.arrowLeft} Cascade View</span>`;
   back.onclick = () => { treeViewMode = false; renderNav(); };
   list.appendChild(back);
 
   // Header
   const header = document.createElement('li');
   header.className = 'list-section-header';
-  header.innerHTML = `<span class="arrow">${icons.chevronDown}</span> Todos los modelos (${Object.values(manufacturers).flat().length})`;
+  header.innerHTML = `<span class="arrow">${icons.chevronDown}</span> All models (${Object.values(manufacturers).flat().length})`;
   list.appendChild(header);
 
   const mfrs = Object.keys(manufacturers).sort();
@@ -433,7 +440,7 @@ function renderTreeNav(list, filter) {
 
 function handleNativeLibraryState(state) {
   if (!state || !Array.isArray(state.banks)) return;
-  setStatus('connected', `Estado JUCE: ${state.banks.length} bancos`);
+  setStatus('connected', `JUCE state: ${state.banks.length} banks`);
 }
 
 function selectManufacturer(mfr) {
@@ -530,17 +537,17 @@ async function showComparison(container) {
   container.innerHTML = `
     <div class="panel" style="margin-top:1rem;">
       <div class="panel-header">
-        <span class="panel-title">Comparación: ${escHtml(patchA.name)} ↔ ${escHtml(patchB.name)}</span>
+        <span class="panel-title">Comparison: ${escHtml(patchA.name)} ↔ ${escHtml(patchB.name)}</span>
         <div style="display:flex;gap:0.3rem;">
-          <button class="btn btn-sm" id="btn-compare-swap">${icons.swap} Intercambiar</button>
-          <button class="btn btn-sm" id="btn-compare-copy">Copiar B → A</button>
+          <button class="btn btn-sm" id="btn-compare-swap">${icons.swap} Swap</button>
+          <button class="btn btn-sm" id="btn-compare-copy">Copy B → A</button>
           <button class="btn btn-sm" id="btn-compare-csv">CSV</button>
-          <button class="btn btn-sm" id="btn-compare-close">${icons.close} Cerrar</button>
+          <button class="btn btn-sm" id="btn-compare-close">${icons.close} Close</button>
         </div>
       </div>
       <div class="parameter-table-wrap">
         <table class="parameter-table">
-          <thead><tr><th>Parámetro</th><th style="color:var(--accent);">${escHtml(patchA.name)}</th><th style="color:var(--warning);">${escHtml(patchB.name)}</th><th>Diff</th></tr></thead>
+          <thead><tr><th>Parameter</th><th style="color:var(--accent);">${escHtml(patchA.name)}</th><th style="color:var(--warning);">${escHtml(patchB.name)}</th><th>Diff</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -550,7 +557,7 @@ async function showComparison(container) {
   container.querySelector('#btn-compare-swap').onclick = () => { const tmp = Array.from(compareIds); compareIds.clear(); compareIds.add(tmp[1]); compareIds.add(tmp[0]); showComparison(container); };
   container.querySelector('#btn-compare-copy').onclick = async () => {
     await updatePatch(idA, { rawData: rawB });
-    toast(`Parámetros copiados de "${patchB.name}" a "${patchA.name}"`, 'success');
+    toast(`Parameters copied from "${patchB.name}" to "${patchA.name}"`, 'success');
     compareIds.clear();
     renderNav();
     renderContent();
@@ -563,7 +570,7 @@ async function showComparison(container) {
     a.href = URL.createObjectURL(blob);
     a.download = `compare-${patchA.name}-vs-${patchB.name}.csv`;
     a.click();
-    toast('Comparación exportada como CSV', 'success');
+    toast('Comparison exported as CSV', 'success');
   };
 }
 
@@ -607,9 +614,9 @@ function renderSearchPanel(query) {
   const total = searchResults.length;
 
   const tabs = [
-    { key: 'all', label: `Todos (${total})` },
-    { key: 'models', label: `Modelos (${counts.models})` },
-    { key: 'banks', label: `Bancos (${counts.banks})` },
+    { key: 'all', label: `All (${total})` },
+    { key: 'models', label: `Models (${counts.models})` },
+    { key: 'banks', label: `Banks (${counts.banks})` },
     { key: 'patches', label: `Patches (${counts.patches})` },
   ];
 
@@ -634,13 +641,13 @@ function renderSearchPanel(query) {
           ${r.badge ? `<span class="search-result-badge">${escHtml(r.badge)}</span>` : ''}
         </div>`;
       }).join('')
-    : `<div class="search-empty">Sin resultados para "${escHtml(query)}"</div>`;
+    : `<div class="search-empty">No results for "${escHtml(query)}"</div>`;
 
   content.innerHTML = `
     <div class="search-panel">
       <div class="search-panel-header">
-        <span class="search-panel-title">${icons.search} Resultados para "${escHtml(query)}"</span>
-        <span class="search-panel-count">${total} resultado${total !== 1 ? 's' : ''}</span>
+        <span class="search-panel-title">${icons.search} Results for "${escHtml(query)}"</span>
+        <span class="search-panel-count">${total} result${total !== 1 ? 's' : ''}</span>
       </div>
       <div class="search-tabs">
         ${tabs.map(t => `<button class="search-tab${searchFilter === t.key ? ' active' : ''}" data-filter="${t.key}">${t.label}</button>`).join('')}
@@ -690,7 +697,7 @@ async function navigateToResult(nav) {
 
   await renderNav();
   await renderContent();
-  toast(`Navegando a resultado`, 'info');
+  toast(`Navigating to result`, 'info');
 }
 
 async function renderContent() {
@@ -749,7 +756,7 @@ function renderManufacturerContent(el) {
 
 async function renderModelContent(el) {
   const contract = getModelContract(selectedModelId);
-  if (!contract) { el.innerHTML = '<p>Contrato no encontrado</p>'; return; }
+  if (!contract) { el.innerHTML = '<p>Contract not found</p>'; return; }
 
   const thumbUrl = getModelThumbnail(selectedModelId);
   const logoUrl = getManufacturerLogo(contract.manufacturer);
@@ -769,8 +776,8 @@ async function renderModelContent(el) {
       </div>
     </div>
     <div class="action-bar">
-      <button class="btn btn-primary" id="btn-new-bank-m">+ Nuevo Banco</button>
-      <button class="btn" id="btn-midi-fetch-m">Fetch del hardware</button>
+      <button class="btn btn-primary" id="btn-new-bank-m">+ New Bank</button>
+      <button class="btn" id="btn-midi-fetch-m">Fetch from hardware</button>
     </div>
     <div class="bank-grid" id="bank-grid"></div>`;
 
@@ -790,7 +797,7 @@ async function renderModelContent(el) {
     const card = document.createElement('div');
     card.className = 'bank-card' + (bank.id === selectedBankId ? ' active' : '');
     const patchCount = (await getPatchesForBank(bank.id)).length;
-    const factoryLabel = bank.isFactory ? `${icons.lock} Fábrica` : `${icons.user} Usuario`;
+    const factoryLabel = bank.isFactory ? `${icons.lock} Factory` : `${icons.user} User`;
     const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
     const compatBadge = compatModels.length > 0
       ? `<div class="bank-compat">${icons.link} ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
@@ -806,14 +813,14 @@ async function renderModelContent(el) {
   // New bank card
   const newCard = document.createElement('div');
   newCard.className = 'bank-card bank-card-new';
-  newCard.innerHTML = '+ Nuevo Banco';
+  newCard.innerHTML = '+ New Bank';
   newCard.onclick = () => promptNewBank(selectedModelId);
   grid.appendChild(newCard);
 }
 
 async function renderBankContent(el) {
   const bank = await getBank(selectedBankId);
-  if (!bank) { el.innerHTML = '<p>Banco no encontrado</p>'; return; }
+  if (!bank) { el.innerHTML = '<p>Bank not found</p>'; return; }
 
   const contract = getModelContract(bank.modelId);
   const thumbUrl = bank.imageUrl || getBankImage(bank);
@@ -822,7 +829,7 @@ async function renderBankContent(el) {
   // MF.18: Show compatible models in header
   const compatModels = getBankCompatibleModels(bank).filter(id => id !== bank.modelId);
   const compatHtml = compatModels.length > 0
-    ? `<div class="bk-compat">${icons.link} Compatible con: ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
+    ? `<div class="bk-compat">${icons.link} Compatible with: ${compatModels.map(id => { const c = getModelContract(id); return escHtml(c?.displayName || id); }).join(', ')}</div>`
     : '';
 
   el.innerHTML = `
@@ -830,29 +837,29 @@ async function renderBankContent(el) {
       <div class="bank-thumb-wrapper" id="bank-thumb-wrapper">
         <img class="bank-thumb-lg" id="bank-thumb-img" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-bank.svg'">
         <div class="bank-thumb-overlay" id="bank-thumb-overlay">
-          <span>${icons.camera} Cambiar imagen</span>
+          <span>${icons.camera} Change image</span>
         </div>
       </div>
       <div class="bank-info">
         <h2>${escHtml(bank.name)}</h2>
-        <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? `${icons.lock} Fábrica` : `${icons.user} Usuario`}</div>
+        <div class="bk-meta">${escHtml(contract?.displayName || bank.modelId)} · ${patches.length} patches · ${bank.isFactory ? `${icons.lock} Factory` : `${icons.user} User`}</div>
         ${compatHtml}
       </div>
     </div>
     <div class="action-bar">
       <button class="btn" id="btn-fetch-bank">${icons.download} Fetch</button>
       <div class="send-dropdown" id="send-dropdown">
-        <button class="btn btn-primary" id="btn-send-bank">${icons.upload} Enviar banco</button>
+        <button class="btn btn-primary" id="btn-send-bank">${icons.upload} Send bank</button>
         <div class="send-dropdown-menu" id="send-dropdown-menu"></div>
       </div>
-      <button class="btn" id="btn-import-bank">${icons.importIcon} Importar .syx</button>
-      <button class="btn" id="btn-export-bank">${icons.exportIcon} Exportar .syx</button>
-      <button class="btn" id="btn-rename-bank">${icons.edit} Renombrar</button>
-      <button class="btn" id="btn-change-image" title="MF.5: Imagen personalizada">${icons.image} Imagen</button>
-      <button class="btn" id="btn-hw-specs" title="MF.6: Ficha técnica del hardware">${icons.specs} Specs</button>
+      <button class="btn" id="btn-import-bank">${icons.importIcon} Import .syx</button>
+      <button class="btn" id="btn-export-bank">${icons.exportIcon} Export .syx</button>
+      <button class="btn" id="btn-rename-bank">${icons.edit} Rename</button>
+      <button class="btn" id="btn-change-image" title="MF.5: Custom image">${icons.image} Image</button>
+      <button class="btn" id="btn-hw-specs" title="MF.6: Hardware spec sheet">${icons.specs} Specs</button>
       <button class="btn" id="btn-export-csv-bank">${icons.clipboard} CSV</button>
-      <button class="btn" id="btn-import-csv-bank">${icons.clipboard} Importar CSV</button>
-      ${!bank.isFactory ? `<button class="btn" style="color:var(--error);" id="btn-delete-bank">${icons.trash} Eliminar</button>` : ''}
+      <button class="btn" id="btn-import-csv-bank">${icons.clipboard} Import CSV</button>
+      ${!bank.isFactory ? `<button class="btn" style="color:var(--error);" id="btn-delete-bank">${icons.trash} Delete</button>` : ''}
     </div>
     <div class="patch-grid" id="patch-grid"></div>
     <div id="patch-detail-container"></div>`;
@@ -913,8 +920,8 @@ async function renderBankContent(el) {
     chip.className = 'patch-chip' + (patch.id === selectedPatchId ? ' active' : '');
     const isCompare = compareIds.has(patch.id);
     const fav = patch.isFavorite ? ` ${icons.star}` : '';
-    chip.innerHTML = `<input type="checkbox" class="patch-compare-check" data-patch-id="${patch.id}"${isCompare ? ' checked' : ''} title="Seleccionar para comparar">
-      <span>${escHtml(patch.name)}${fav}</span><span class="patch-cat">${patch.category}</span>`;
+    chip.innerHTML = `<input type="checkbox" class="patch-compare-check" data-patch-id="${patch.id}"${isCompare ? ' checked' : ''} title="Select to compare">
+      <span>${escHtml(patch.name)}${fav}</span>${renderCategoryBadge(patch.category, 'patch-cat')}`;
     chip.querySelector('.patch-compare-check').onclick = (e) => {
       e.stopPropagation();
       toggleCompare(patch.id, e.target.checked);
@@ -928,8 +935,8 @@ async function renderBankContent(el) {
     const compareBar = document.createElement('div');
     compareBar.className = 'action-bar';
     compareBar.innerHTML = `
-      <button class="btn btn-primary" id="btn-compare-now">${icons.compare} Comparar ${compareIds.size} patches</button>
-      <button class="btn" id="btn-compare-clear">Limpiar selección</button>`;
+      <button class="btn btn-primary" id="btn-compare-now">${icons.compare} Compare ${compareIds.size} patches</button>
+      <button class="btn" id="btn-compare-clear">Clear selection</button>`;
     el.querySelector('#patch-grid').after(compareBar);
     compareBar.querySelector('#btn-compare-now').onclick = () => showComparison(el.querySelector('#patch-detail-container'));
     compareBar.querySelector('#btn-compare-clear').onclick = () => { compareIds.clear(); renderContent(); };
@@ -944,7 +951,7 @@ async function renderBankContent(el) {
 async function recordPatchUpdate(patchId, field, oldValue, newValue) {
   await updatePatch(patchId, { [field]: newValue });
   undoHistory.record({
-    label: `Cambiar ${field} del patch`,
+    label: `Change patch ${field}`,
     undo: async () => { await updatePatch(patchId, { [field]: oldValue }); },
     redo: async () => { await updatePatch(patchId, { [field]: newValue }); }
   });
@@ -963,17 +970,18 @@ async function renderBankStats(el, patches, contract, bank) {
   const maxCat = catEntries.length > 0 ? catEntries[0][1] : 1;
   const catBars = catEntries.map(([cat, count]) => {
     const pct = Math.round((count / maxCat) * 100);
+    const style = getCategoryStyle(cat);
     return `<div class="stat-bar-row">
-      <span class="stat-bar-label">${escHtml(cat)}</span>
-      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+      <span class="stat-bar-label">${renderCategoryBadge(cat)}</span>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${pct}%;background:${style.color}"></div></div>
       <span class="stat-bar-value">${count}</span>
     </div>`;
   }).join('');
 
   // Name stats
   const nameIssues = [];
-  if (stats.noName > 0) nameIssues.push(`${stats.noName} sin nombre`);
-  if (stats.genericNames.length > 0) nameIssues.push(`${stats.genericNames.length} genéricos (${stats.genericNames.slice(0, 3).join(', ')}${stats.genericNames.length > 3 ? '…' : ''})`);
+  if (stats.noName > 0) nameIssues.push(`${stats.noName} unnamed`);
+  if (stats.genericNames.length > 0) nameIssues.push(`${stats.genericNames.length} generic (${stats.genericNames.slice(0, 3).join(', ')}${stats.genericNames.length > 3 ? '…' : ''})`);
 
   // Size
   const sizeKB = (stats.totalDataBytes / 1024).toFixed(1);
@@ -986,9 +994,9 @@ async function renderBankStats(el, patches, contract, bank) {
     ).join('');
     paramHtml = `
       <div class="stats-section">
-        <div class="stats-section-title">Parámetros más variables</div>
+        <div class="stats-section-title">Most variable parameters</div>
         <table class="stats-mini-table">
-          <thead><tr><th>Parámetro</th><th>Rango</th><th>Promedio</th><th>Valores únicos</th></tr></thead>
+          <thead><tr><th>Parameter</th><th>Range</th><th>Average</th><th>Unique values</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
@@ -997,7 +1005,7 @@ async function renderBankStats(el, patches, contract, bank) {
   const statsHtml = `
     <div class="bank-stats" id="bank-stats">
       <div class="stats-header" id="stats-toggle">
-        <span class="stats-title">📊 Estadísticas</span>
+        <span class="stats-title">${icons.specs} Statistics</span>
         <span class="stats-arrow">${icons.chevronDown}</span>
       </div>
       <div class="stats-body" id="stats-body">
@@ -1009,32 +1017,32 @@ async function renderBankStats(el, patches, contract, bank) {
           </div>
           <div class="stats-card">
             <div class="stats-card-value">${stats.favorites}<span class="stats-card-dim"> (${stats.favPct}%)</span></div>
-            <div class="stats-card-label">Favoritos</div>
+            <div class="stats-card-label">Favorites</div>
           </div>
           <div class="stats-card">
             <div class="stats-card-value">${sizeKB}<span class="stats-card-dim"> KB</span></div>
-            <div class="stats-card-label">Datos totales</div>
+            <div class="stats-card-label">Total data</div>
           </div>
           <div class="stats-card">
             <div class="stats-card-value">${stats.avgNameLen}<span class="stats-card-dim"> chars</span></div>
-            <div class="stats-card-label">Nombre medio</div>
+            <div class="stats-card-label">Avg. name length</div>
           </div>
         </div>
         <div class="stats-section">
-          <div class="stats-section-title">Categorías</div>
-          ${catBars || '<span class="stats-empty">Sin categorías definidas</span>'}
+          <div class="stats-section-title">Categories</div>
+          ${catBars || '<span class="stats-empty">No categories defined</span>'}
         </div>
         ${nameIssues.length > 0 ? `<div class="stats-section">
-          <div class="stats-section-title">Problemas de nombre</div>
+          <div class="stats-section-title">Name issues</div>
           <div class="stats-issues">${nameIssues.map(i => `<span class="stats-issue">${icons.warning} ${escHtml(i)}</span>`).join('')}</div>
         </div>` : ''}
         ${stats.noCategory > 0 ? `<div class="stats-section">
-          <div class="stats-section-title">Sin categoría</div>
-          <span class="stats-issue">${icons.warning} ${stats.noCategory} patch${stats.noCategory > 1 ? 'es' : ''} sin categoría</span>
+          <div class="stats-section-title">No category</div>
+          <span class="stats-issue">${icons.warning} ${stats.noCategory} patch${stats.noCategory > 1 ? 'es' : ''} without category</span>
         </div>` : ''}
         ${paramHtml}
         <div class="stats-section" style="text-align:right;">
-          <button class="btn btn-sm" id="btn-export-stats-json">${icons.download} Exportar JSON</button>
+          <button class="btn btn-sm" id="btn-export-stats-json">${icons.download} Export JSON</button>
         </div>
       </div>
     </div>`;
@@ -1064,7 +1072,7 @@ async function renderBankStats(el, patches, contract, bank) {
       a.href = URL.createObjectURL(blob);
       a.download = `${bank?.name || 'bank'}-stats.json`;
       a.click();
-      toast('Estadísticas exportadas', 'success');
+      toast('Statistics exported', 'success');
     };
   }
 }
@@ -1083,12 +1091,12 @@ async function renderPatchDetail(container) {
     paramsHtml = `
       <section class="interpreted-parameters">
         <div class="panel-header" style="padding-left:0;padding-right:0;">
-          <span class="panel-title">Parámetros interpretados</span>
+          <span class="panel-title">Interpreted parameters</span>
           <span class="item-badge">${schema.formatLabel(rawData)}</span>
         </div>
         <div class="parameter-table-wrap">
           <table class="parameter-table">
-            <thead><tr><th>Parámetro</th><th>Valor</th><th>Offset</th><th>Descripción</th></tr></thead>
+            <thead><tr><th>Parameter</th><th>Value</th><th>Offset</th><th>Description</th></tr></thead>
             <tbody>${rows.map(p => {
               let val = p.displayValue ?? p.value ?? p.rawByte ?? '—';
               if (p.options?.[p.value]) val = p.options[p.value];
@@ -1107,26 +1115,26 @@ async function renderPatchDetail(container) {
       <div class="patch-info">
         <div style="display:flex;gap:0.5rem;align-items:center;">
           <div class="patch-info-field" style="flex:1;">
-            <span class="patch-info-label">Nombre</span>
+            <span class="patch-info-label">Name</span>
             <input class="patch-info-input" id="patch-name" value="${escHtml(patch.name)}" maxlength="64">
           </div>
-          <button class="btn btn-sm" id="btn-fav">${patch.isFavorite ? icons.star : icons.starOutline} Favorito</button>
-          <button class="btn btn-sm" style="color:var(--error);" id="btn-delete-patch">Borrar</button>
+          <button class="btn btn-sm" id="btn-fav">${patch.isFavorite ? icons.star : icons.starOutline} Favorite</button>
+          <button class="btn btn-sm" style="color:var(--error);" id="btn-delete-patch">Delete</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;">
           <div class="patch-info-field">
-            <span class="patch-info-label">Categoría</span>
+            <span class="patch-info-label">Category</span>
             <select class="param-select" id="patch-category">
-              ${['Bass','Lead','Pad','Keys','FX','Perc','Synth','Other'].map(c => `<option${c === patch.category ? ' selected' : ''}>${c}</option>`).join('')}
+              ${['Bass','Lead','Pad','Keys','FX','Perc','Synth','UNK'].map(c => { const s = getCategoryStyle(c); return `<option value="${c}"${c === patch.category ? ' selected' : ''} style="color:${s.color}">${c}</option>`; }).join('')}
             </select>
           </div>
           <div class="patch-info-field">
-            <span class="patch-info-label">Autor</span>
+            <span class="patch-info-label">Author</span>
             <input class="patch-info-input" id="patch-author" value="${escHtml(patch.author || '')}" maxlength="64">
           </div>
         </div>
         <div class="patch-info-field">
-          <span class="patch-info-label">Notas</span>
+          <span class="patch-info-label">Notes</span>
           <input class="patch-info-input" id="patch-notes" value="${escHtml(patch.notes || '')}">
         </div>
       </div>
@@ -1134,7 +1142,7 @@ async function renderPatchDetail(container) {
       <div class="sysview-toggle" id="sysview-toggle">
         <button class="sysview-tab active" data-view="hex">Hex dump</button>
         <button class="sysview-tab" data-view="editor">Hex editor</button>
-        ${paramsHtml ? '<button class="sysview-tab" data-view="params">Parámetros</button>' : ''}
+        ${paramsHtml ? '<button class="sysview-tab" data-view="params">Parameters</button>' : ''}
         <span class="sysview-meta">${escHtml(sysexMeta)}</span>
       </div>
       <div class="sysview-content" id="sysview-content"></div>
@@ -1185,7 +1193,8 @@ async function renderPatchDetail(container) {
     await deletePatch(patch.id);
     selectedPatchId = null;
     renderNav(); renderContent();
-    toast('Patch eliminado', 'success');
+    toast('Patch deleted', 'success');
+    recordChange();
   };
 }
 
@@ -1207,9 +1216,9 @@ async function handleUndo() {
   const result = await undoHistory.undo();
   if (result.success) {
     await renderNav(); await renderContent();
-    toast(`Deshacer: ${result.label}`, 'info');
+    toast(`Undo: ${result.label}`, 'info');
   } else {
-    toast('Nada que deshacer', 'info');
+    toast('Nothing to undo', 'info');
   }
 }
 
@@ -1217,17 +1226,29 @@ async function handleRedo() {
   const result = await undoHistory.redo();
   if (result.success) {
     await renderNav(); await renderContent();
-    toast(`Rehacer: ${result.label}`, 'info');
+    toast(`Redo: ${result.label}`, 'info');
   } else {
-    toast('Nada que rehacer', 'info');
+    toast('Nothing to redo', 'info');
   }
 }
 
 async function handleMidiConnect() {
+  // Inside the JUCE plugin Web MIDI is unavailable: connect through the
+  // C++ hardware bridge using the same contract-driven transport.
+  if (isBridgeMidiAvailable()) {
+    try {
+      const { input, output } = createBridgeMidiPorts();
+      connectMidiDevice(output, input, null);
+      return;
+    } catch (error) {
+      toast(error.message, 'error');
+      return;
+    }
+  }
   try {
     midiAccess = await requestMidiAccess();
     const { inputs, outputs } = listMidiPorts(midiAccess);
-    if (outputs.length === 0) throw new Error('No se encontró una salida MIDI');
+    if (outputs.length === 0) throw new Error('No MIDI output found');
 
     const classified = outputs.map((port, idx) => ({ port, idx, model: detectModelFromName(port.name) }));
     const known = classified.filter(c => c.model);
@@ -1248,17 +1269,17 @@ function showKnownDevicePicker(known, inputs) {
   const rows = known.map((c, i) => {
     const inPort = findMatchingInput(c.port.name, inputs);
     return `<div style="padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--bg-tertiary);" class="midi-device-row" data-idx="${i}">
-      <div><strong>${escHtml(c.model.displayName)}</strong><br><small style="color:var(--text-secondary);">Out: ${escHtml(c.port.name || '?')} · In: ${escHtml(inPort?.name || 'Ninguna')}</small></div>
+      <div><strong>${escHtml(c.model.displayName)}</strong><br><small style="color:var(--text-secondary);">Out: ${escHtml(c.port.name || '?')} · In: ${escHtml(inPort?.name || 'None')}</small></div>
       <span style="color:var(--text-secondary);">${icons.chevronRight}</span>
     </div>`;
   }).join('');
 
   showModal(`<div style="padding:1rem;">
-    <h3 style="margin:0 0 0.6rem;">Varios dispositivos detectados</h3>
-    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">Selecciona cuál conectar:</p>
+    <h3 style="margin:0 0 0.6rem;">Multiple devices detected</h3>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">Select which one to connect:</p>
     ${rows}
     <div class="modal-actions" style="margin-top:0.8rem;">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
     </div>
   </div>`);
 
@@ -1272,29 +1293,29 @@ function showKnownDevicePicker(known, inputs) {
 }
 
 function showManualSelector(outputs, inputs) {
-  const outOpts = outputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Sin nombre')}</option>`).join('');
-  const inOpts = inputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Sin nombre')}</option>`).join('');
+  const outOpts = outputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Untitled')}</option>`).join('');
+  const inOpts = inputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Untitled')}</option>`).join('');
 
   showModal(`<div style="padding:1rem;">
-    <h3 style="margin:0 0 0.6rem;">Conexión MIDI</h3>
-    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">Selecciona los puertos:</p>
+    <h3 style="margin:0 0 0.6rem;">MIDI Connection</h3>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">Select the ports:</p>
     <div class="patch-info-field">
-      <span class="patch-info-label">Salida MIDI</span>
+      <span class="patch-info-label">MIDI Output</span>
       <select class="param-select" id="midi-out" style="width:100%">${outOpts}</select>
     </div>
     <div class="patch-info-field" style="margin-top:0.5rem;">
-      <span class="patch-info-label">Entrada MIDI</span>
-      <select class="param-select" id="midi-in" style="width:100%"><option value="-1">— No conectar entrada —</option>${inOpts}</select>
+      <span class="patch-info-label">MIDI Input</span>
+      <select class="param-select" id="midi-in" style="width:100%"><option value="-1">— No input connection —</option>${inOpts}</select>
     </div>
-    <button class="btn" id="midi-detect-btn" style="margin-top:0.6rem;width:100%;">${icons.search} Detectar modelo</button>
+    <button class="btn" id="midi-detect-btn" style="margin-top:0.6rem;width:100%;">${icons.search} Detect model</button>
     <div id="midi-detect-result"></div>
     <div id="midi-model-manual" style="display:none;margin-top:0.5rem;" class="patch-info-field">
-      <span class="patch-info-label">Modelo</span>
+      <span class="patch-info-label">Model</span>
       <select class="param-select" id="midi-port-model" style="width:100%">${ALL_MODELS.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name)}</option>`).join('')}</select>
     </div>
     <div class="modal-actions" style="margin-top:1rem;">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
-      <button class="btn btn-primary" id="midi-confirm" style="display:none;">Conectar</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn btn-primary" id="midi-confirm" style="display:none;">Connect</button>
     </div>
   </div>`);
 
@@ -1308,12 +1329,12 @@ function showManualSelector(outputs, inputs) {
     const confirmBtn = document.getElementById('midi-confirm');
     if (found) {
       detectedId = found.modelId;
-      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.3);color:var(--success);font-weight:600;">✔ Detectado: <strong>${escHtml(found.displayName)}</strong></div>`;
+      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.3);color:var(--success);font-weight:600;">Detected: <strong>${escHtml(found.displayName)}</strong></div>`;
       manualDiv.style.display = 'none';
       confirmBtn.style.display = '';
     } else {
       detectedId = null;
-      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(248,81,73,0.15);border:1px solid rgba(248,81,73,0.3);color:var(--error);">✘ No reconocido. Selecciona uno:</div>`;
+      result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(248,81,73,0.15);border:1px solid rgba(248,81,73,0.3);color:var(--error);">Not recognized. Select one:</div>`;
       manualDiv.style.display = '';
       confirmBtn.style.display = '';
     }
@@ -1328,20 +1349,25 @@ function showManualSelector(outputs, inputs) {
 }
 
 function connectMidiDevice(output, input, modelId) {
+  if (modelId == null) {
+    // Bridge MIDI (no port names to sniff): show the manual model picker.
+    showManualSelector([output], input ? [input] : []);
+    return;
+  }
   activeMidiTransport?.close();
   activeMidiTransport = createMidiTransport({ modelId, input, output, onActivity: flashMidiActivity });
   activeMidiModelId = modelId;
   const displayName = getModelDisplayName(modelId);
   const statusEl = document.getElementById('midi-status');
   statusEl.classList.add('connected');
-  document.getElementById('midi-label').textContent = `${displayName} ✓`;
-  toast(`${displayName} conectado${input ? '' : ' (solo envío)'}`, 'success');
+  document.getElementById('midi-label').textContent = displayName;
+  toast(`${displayName} connected${input ? '' : ' (output only)'}`, 'success');
 }
 
 async function handleMidiFetch() {
-  if (!activeMidiTransport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
+  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
   const contract = getModelContract(activeMidiModelId);
-  if (!contract) { toast('Contrato no encontrado', 'error'); return; }
+  if (!contract) { toast('Contract not found', 'error'); return; }
 
   let bank = selectedBankId ? await getBank(selectedBankId) : null;
   const isCompatible = id => id && (id === activeMidiModelId || contract.compatibleModels?.includes(id));
@@ -1369,6 +1395,7 @@ async function handleMidiFetch() {
     await renderNav();
     await renderContent();
     toast(`Fetch completado — ${patches.length} patches`, 'success');
+    recordChange();
   } catch (error) { toast(error.message, 'error'); }
 }
 
@@ -1382,7 +1409,7 @@ function renderSendDropdownMenu(bank) {
     if (!c) return '';
     const isPrimary = id === bank.modelId;
     const label = isPrimary ? `${c.displayName} (principal)` : c.displayName;
-    const icon = id === activeMidiModelId ? ' ●' : '';
+    const icon = id === activeMidiModelId ? '•' : '';
     return `<div class="send-dropdown-item" data-model-id="${id}">${escHtml(label)}${icon}</div>`;
   }).join('');
 
@@ -1416,15 +1443,15 @@ function toggleSendDropdown(bank) {
 }
 
 async function handleMidiSendBank(targetModelId = null) {
-  if (!activeMidiTransport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
-  if (!selectedBankId) { toast('Selecciona un banco', 'error'); return; }
+  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
+  if (!selectedBankId) { toast('Select a bank', 'error'); return; }
   const bank = await getBank(selectedBankId);
   // MF.18: Use target model's contract if specified (compatible hardware), otherwise bank's own
   const sendModelId = targetModelId || bank.modelId;
   const contract = getModelContract(sendModelId);
-  if (!contract) { toast(`Contrato no encontrado para ${sendModelId}`, 'error'); return; }
+  if (!contract) { toast(`Contract not found for ${sendModelId}`, 'error'); return; }
   const patches = await getPatchesForBank(selectedBankId);
-  if (patches.length === 0) { toast('Banco vacío', 'error'); return; }
+  if (patches.length === 0) { toast('Empty bank', 'error'); return; }
 
   const targetName = contract.displayName;
   try {
@@ -1441,22 +1468,22 @@ async function handleMidiSendBank(targetModelId = null) {
         if (i < patches.length - 1) await new Promise(r => setTimeout(r, delay));
       }
     }
-    toast(`Banco enviado a ${targetName} (${patches.length} patches)`, 'success');
+    toast(`Bank sent to ${targetName} (${patches.length} patches)`, 'success');
     // MF.7: Track send history
     await updateBank(selectedBankId, { lastSentDate: new Date().toISOString(), lastSentTarget: targetName });
   } catch (error) { toast(error.message, 'error'); }
 }
 
 window.handleMidiSendPatch = async function () {
-  if (!activeMidiTransport) { toast('Conecta primero un hardware MIDI', 'error'); return; }
-  if (!selectedPatchId) { toast('Selecciona un patch', 'error'); return; }
+  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
+  if (!selectedPatchId) { toast('Select a patch', 'error'); return; }
   const patch = await getPatch(selectedPatchId);
   const bank = await getBank(patch.bankId);
   const contract = getModelContract(bank.modelId);
   const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
   try {
     activeMidiTransport.sendPatch({ rawData }, patch.index, contract.midi?.defaultChannel ?? 1);
-    toast(`Patch "${patch.name}" enviado`, 'success');
+    toast(`Patch "${patch.name}" sent`, 'success');
   } catch (error) { toast(error.message, 'error'); }
 }
 
@@ -1465,15 +1492,15 @@ function promptNewBank(preSelectedModelId = null) {
   let selectedModelId = preSelectedModelId || selectedModelId;
 
   showModal(`
-    <h3>Nuevo Banco</h3>
+    <h3>New Bank</h3>
     <div id="model-selector-container" style="margin-bottom:1rem;"></div>
     <div class="patch-info-field">
-      <span class="patch-info-label">Nombre</span>
-      <input class="patch-info-input" id="modal-bank-name" placeholder="Mi Banco" autofocus>
+      <span class="patch-info-label">Name</span>
+      <input class="patch-info-input" id="modal-bank-name" placeholder="My Bank" autofocus>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
-      <button class="btn btn-primary" id="modal-confirm">Crear</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm">Create</button>
     </div>`);
 
   const container = document.getElementById('model-selector-container');
@@ -1490,14 +1517,14 @@ function promptNewBank(preSelectedModelId = null) {
   }
 
   document.getElementById('modal-confirm').onclick = async () => {
-    const name = document.getElementById('modal-bank-name').value.trim() || 'Nuevo Banco';
+    const name = document.getElementById('modal-bank-name').value.trim() || 'New Bank';
     const modelId = getSelectedModelId() || selectedModelId;
     const contract = getModelContract(modelId);
     // MF.18: Auto-populate hardwareIds from contract
     const hardwareIds = getHardwareIds(modelId);
     const bank = await createBank({ name, modelId, hardwareIds, manufacturer: contract?.manufacturer || '' });
     undoHistory.record({
-      label: `Crear banco "${name}"`,
+      label: `Create bank "${name}"`,
       undo: async () => { await deleteBank(bank.id); },
       redo: async () => { await createBank({ id: bank.id, name, modelId, hardwareIds, manufacturer: contract?.manufacturer || '' }); }
     });
@@ -1505,19 +1532,20 @@ function promptNewBank(preSelectedModelId = null) {
     navLevel = 'patches';
     await renderNav();
     await renderContent();
-    toast(`Banco "${name}" creado`, 'success');
+    toast(`Bank "${name}" created`, 'success');
+    recordChange();
     hideModal();
   };
 }
 
 function promptRenameBank(bank) {
-  if (bank.isFactory) { toast('Bancos de fábrica no se renombran', 'error'); return; }
+  if (bank.isFactory) { toast('Factory banks cannot be renamed', 'error'); return; }
   showModal(`
-    <h3>Renombrar Banco</h3>
+    <h3>Rename Bank</h3>
     <input class="patch-info-input" id="modal-input" value="${escHtml(bank.name)}" style="width:100%;" autofocus>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
-      <button class="btn btn-primary" id="modal-confirm">Aceptar</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm">OK</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
     const newName = document.getElementById('modal-input').value.trim();
@@ -1525,25 +1553,26 @@ function promptRenameBank(bank) {
       const oldName = bank.name;
       await updateBank(bank.id, { name: newName });
       undoHistory.record({
-        label: `Renombrar banco "${oldName}" → "${newName}"`,
+        label: `Rename bank "${oldName}" → "${newName}"`,
         undo: async () => { await updateBank(bank.id, { name: oldName }); },
         redo: async () => { await updateBank(bank.id, { name: newName }); }
       });
       await renderNav();
-      toast('Banco renombrado', 'success');
+      toast('Bank renamed', 'success');
+      recordChange();
     }
     hideModal();
   };
 }
 
 async function confirmDeleteBank(bank) {
-  if (bank.isFactory) { toast('No se pueden eliminar bancos de fábrica', 'error'); return; }
+  if (bank.isFactory) { toast('Factory banks cannot be deleted', 'error'); return; }
   showModal(`
-    <h3>Eliminar Banco</h3>
-    <p style="margin-bottom:1rem;color:var(--text-secondary);">Eliminar "${escHtml(bank.name)}" y todos sus patches?</p>
+    <h3>Delete Bank</h3>
+    <p style="margin-bottom:1rem;color:var(--text-secondary);">Delete "${escHtml(bank.name)}" and all its patches?</p>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
-      <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Eliminar</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Delete</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
     // Save bank data for undo
@@ -1552,7 +1581,7 @@ async function confirmDeleteBank(bank) {
     const patchesData = patches.map(p => ({ ...p }));
     await deleteBank(bank.id);
     undoHistory.record({
-      label: `Eliminar banco "${bank.name}"`,
+      label: `Delete bank "${bank.name}"`,
       undo: async () => {
         await createBank({ id: bankData.id, name: bankData.name, modelId: bankData.modelId, manufacturer: bankData.manufacturer, isFactory: bankData.isFactory });
         for (const p of patchesData) {
@@ -1563,10 +1592,11 @@ async function confirmDeleteBank(bank) {
     });
     selectedBankId = null; selectedPatchId = null;
     navLevel = 'banks';
-    await renderNav(); await renderContent();
-    toast('Banco eliminado', 'success');
+    await renderNav(); await renderContent();    toast('Bank deleted', 'success');
+    recordChange();
     hideModal();
   };
+
 }
 
 // ─── MF.5: Bank custom image ───
@@ -1575,7 +1605,8 @@ async function handleChangeBankImage(bank) {
   if (!result) return;
   if (result.error) { toast(result.error, 'error'); return; }
   await updateBank(bank.id, { imageUrl: result });
-  toast('Imagen del banco actualizada', 'success');
+  toast('Bank image updated', 'success');
+  recordChange();
   renderNav();
   renderContent();
 }
@@ -1585,7 +1616,8 @@ async function handleDropBankImage(bank, file) {
     const dataUrl = await processBankImage(file);
     if (!dataUrl) return;
     await updateBank(bank.id, { imageUrl: dataUrl });
-    toast('Imagen del banco actualizada', 'success');
+    toast('Bank image updated', 'success');
+    recordChange();
     renderNav();
     renderContent();
   } catch (err) {
@@ -1597,7 +1629,7 @@ async function handleDropBankImage(bank, file) {
 function showHardwareSpecs(modelId) {
   const spec = getHardwareSpec(modelId);
   const contract = getModelContract(modelId);
-  if (!spec && !contract) { toast('Sin especificaciones para este modelo', 'info'); return; }
+  if (!spec && !contract) { toast('No specs available for this model', 'info'); return; }
 
   const s = spec || {};
   const c = contract || {};
@@ -1607,38 +1639,38 @@ function showHardwareSpecs(modelId) {
   const field = (label, value) => value ? `<div class="spec-field"><span class="spec-label">${label}</span><span class="spec-value">${escHtml(String(value))}</span></div>` : '';
 
   const basicHtml = [
-    field('Fabricante', s.manufacturer),
-    field('Modelo', s.model),
-    field('Año', s.year),
-    field('Tipo', s.type),
-    field('Síntesis', s.synthesis),
-    field('Polifonía', s.polyphony ? `${s.polyphony} voces` : null),
-    field('Programas', s.voices ? `${s.voices} patches` : c.bankCapacity ? `${c.bankCapacity} patches` : null),
-    field('Osciladores', s.oscillators),
+    field('Manufacturer', s.manufacturer),
+    field('Model', s.model),
+    field('Year', s.year),
+    field('Type', s.type),
+    field('Synthesis', s.synthesis),
+    field('Polyphony', s.polyphony ? `${s.polyphony} voices` : null),
+    field('Programs', s.voices ? `${s.voices} patches` : c.bankCapacity ? `${c.bankCapacity} patches` : null),
+    field('Oscillators', s.oscillators),
   ].join('');
 
   const keyboardHtml = [
-    field('Teclado', s.keyboard),
+    field('Keyboard', s.keyboard),
     field('Display', s.display),
   ].join('');
 
   const connHtml = [
     field('MIDI', s.midi),
     field('Audio', s.audio),
-    s.connections ? `<div class="spec-field"><span class="spec-label">Conexiones</span><span class="spec-value">${s.connections.map(c => escHtml(c)).join(', ')}</span></div>` : '',
+    s.connections ? `<div class="spec-field"><span class="spec-label">Connections</span><span class="spec-value">${s.connections.map(c => escHtml(c)).join(', ')}</span></div>` : '',
   ].join('');
 
   const featuresHtml = [
-    field('Efectos', s.effects),
-    field('Arpegiador', s.arpeggiator),
-    field('Secuenciador', s.sequencer),
+    field('Effects', s.effects),
+    field('Arpeggiator', s.arpeggiator),
+    field('Sequencer', s.sequencer),
     field('Mod Matrix', s.modMatrix),
   ].join('');
 
   const physicalHtml = [
-    field('Dimensiones', s.dimensions),
-    field('Peso', s.weight),
-    field('Alimentación', s.power),
+    field('Dimensions', s.dimensions),
+    field('Weight', s.weight),
+    field('Power supply', s.power),
     field('Firmware', s.firmware),
   ].join('');
 
@@ -1648,26 +1680,26 @@ function showHardwareSpecs(modelId) {
 
   showModal(`
     <div class="spec-sheet">
-      <h3 style="margin:0 0 0.8rem;">${icons.specs} Ficha Técnica — ${escHtml(s.model || c.displayName || modelId)}</h3>
-      ${section('Información básica', basicHtml)}
-      ${section('Teclado y display', keyboardHtml)}
-      ${section('Conexiones', connHtml)}
-      ${section('Características', featuresHtml)}
-      ${section('Físico', physicalHtml)}
-      ${s.notes ? section('Notas', `<div class="spec-notes">${escHtml(s.notes)}</div>`) : ''}
-      ${linksHtml ? section('Enlaces', `<div class="spec-links">${linksHtml}</div>`) : ''}
+      <h3 style="margin:0 0 0.8rem;">${icons.specs} Spec Sheet — ${escHtml(s.model || c.displayName || modelId)}</h3>
+      ${section('Basic information', basicHtml)}
+      ${section('Keyboard and display', keyboardHtml)}
+      ${section('Connections', connHtml)}
+      ${section('Features', featuresHtml)}
+      ${section('Physical', physicalHtml)}
+      ${s.notes ? section('Notes', `<div class="spec-notes">${escHtml(s.notes)}</div>`) : ''}
+      ${linksHtml ? section('Links', `<div class="spec-links">${linksHtml}</div>`) : ''}
       <div class="modal-actions" style="margin-top:1rem;">
-        <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cerrar</button>
+        <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Close</button>
       </div>
     </div>`);
 }
 
 // ─── Import/Export ───
 async function handleExport() {
-  if (!selectedBankId) { toast('Selecciona un banco', 'error'); return; }
+  if (!selectedBankId) { toast('Select a bank', 'error'); return; }
   const { bank, patches } = await exportBank(selectedBankId);
   const result = await exportToFile(bank, patches, 'abdbank');
-  if (result.success) { toast(`Exportado: ${result.filename}`, 'success'); recordExport(); }
+  if (result.success) { toast(`Exported: ${result.filename}`, 'success'); recordExport(); }
   else toast(result.error, 'error');
 }
 
@@ -1687,15 +1719,15 @@ async function handleExportLibrary() {
       }));
       banksData.push({ bank, patches: exportPatches });
     }
-    if (banksData.length === 0) { toast('No hay bancos para exportar', 'error'); return; }
+    if (banksData.length === 0) { toast('No banks to export', 'error'); return; }
     const result = await exportLibraryToFile(banksData);
-    if (result.success) { toast(`Librería exportada: ${result.filename} (${result.bankCount} bancos)`, 'success'); recordExport(); }
+    if (result.success) { toast(`Library exported: ${result.filename} (${result.bankCount} banks)`, 'success'); recordExport(); }
     else toast(result.error, 'error');
   } catch (err) { toast(`Error: ${err.message}`, 'error'); }
 }
 
 async function handleExportCsv() {
-  if (!selectedBankId) { toast('Selecciona un banco', 'error'); return; }
+  if (!selectedBankId) { toast('Select a bank', 'error'); return; }
   const bank = await getBank(selectedBankId);
   const patches = await getPatchesForBank(selectedBankId);
   const contract = getModelContract(bank?.modelId);
@@ -1703,9 +1735,9 @@ async function handleExportCsv() {
   const blob = new Blob([patchesToCsv(rows)], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${bank.name}-nombres.csv`;
+  a.download = `${bank.name}-names.csv`;
   a.click();
-  toast(`Exportados ${rows.length} nombres`, 'success');
+  toast(`Exported ${rows.length} names`, 'success');
 }
 
 async function handleFileImport(e) {
@@ -1726,10 +1758,11 @@ async function handleFileImport(e) {
       total = r.importedCount;
       if (!selectedBankId && r.bankId) { selectedBankId = r.bankId; navLevel = 'patches'; }
     }
-    await renderNav(); await renderContent();
-    toast(`Importado: ${total} patches`, 'success');
+    await renderNav(); await renderContent();    toast(`Imported: ${total} patches`, 'success');
+    recordChange();
   } catch (err) { toast(`Error: ${err.message}`, 'error'); }
 }
+
 
 async function handleImportCsv(e) {
   const file = e.target.files[0];
@@ -1745,7 +1778,8 @@ async function handleImportCsv(e) {
     if (patch && row.name) { await updatePatch(patch.id, { name: row.name }); updated++; }
   }
   await renderNav(); await renderContent();
-  toast(`${updated} nombres actualizados`, 'success');
+  toast(`${updated} names updated`, 'success');
+  recordChange();
 }
 
 // ─── MF.12 Keyboard shortcuts ───
@@ -1774,7 +1808,7 @@ function handleKeyboard(e) {
     else if (e.key === 'v') { e.preventDefault(); handlePasteHex(); }
     else if (e.key === 'e' && !e.shiftKey) { e.preventDefault(); handleExport(); }
     else if (e.key === 'e' && e.shiftKey) { e.preventDefault(); handleExportLibrary(); }
-    else if (e.key === 's') { e.preventDefault(); toast('Guardado', 'success'); }
+    else if (e.key === 's') { e.preventDefault(); toast('Saved', 'success'); }
     else if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
     else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
     else if (e.key === 'm') { e.preventDefault(); handleMidiConnect(); }
@@ -1850,7 +1884,8 @@ async function handlePasteHex() {
       if (!selectedBankId && r.bankId) { selectedBankId = r.bankId; navLevel = 'patches'; }
     }
     await renderNav(); await renderContent();
-    toast(`Pegado: ${total} patches desde portapapeles`, 'success');
+    toast(`Pasted: ${total} patches from clipboard`, 'success');
+    recordChange();
   } catch {
     // Clipboard not available or empty
   }
@@ -1870,18 +1905,18 @@ async function navigatePatches(direction) {
 function confirmDeletePatch() {
   if (!selectedPatchId) return;
   showModal(`
-    <h3>Eliminar Patch</h3>
-    <p style="margin-bottom:1rem;color:var(--text-secondary);">¿Eliminar este patch?</p>
+    <h3>Delete Patch</h3>
+    <p style="margin-bottom:1rem;color:var(--text-secondary);">¿Delete this patch?</p>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancelar</button>
-      <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Eliminar</button>
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn" style="color:var(--error);border-color:var(--error);" id="modal-confirm">Delete</button>
     </div>`);
   document.getElementById('modal-confirm').onclick = async () => {
     const patch = await getPatch(selectedPatchId);
     const patchData = { ...patch };
     await deletePatch(selectedPatchId);
     undoHistory.record({
-      label: `Eliminar patch "${patchData.name}"`,
+      label: `Delete patch "${patchData.name}"`,
       undo: async () => {
         await createPatch(patchData.bankId, { index: patchData.index, rawData: patchData.rawData, name: patchData.name, category: patchData.category, author: patchData.author, notes: patchData.notes, isFavorite: patchData.isFavorite, id: patchData.id });
       },
@@ -1889,7 +1924,8 @@ function confirmDeletePatch() {
     });
     selectedPatchId = null;
     renderNav(); renderContent();
-    toast('Patch eliminado', 'success');
+    toast('Patch deleted', 'success');
+    recordChange();
     hideModal();
   };
 }
@@ -1898,25 +1934,25 @@ function showShortcutsHelp() {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const mod = isMac ? '⌘' : 'Ctrl';
   showModal(`
-    <h3>Atajos de teclado</h3>
+    <h3>Keyboard shortcuts</h3>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:0.4rem 1rem;font-size:0.85rem;">
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+I</kbd><span>Importar archivo</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+E</kbd><span>Exportar banco</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+⇧+E</kbd><span>Exportar librería</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+S</kbd><span>Guardar</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+M</kbd><span>Conectar MIDI</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+F</kbd><span>Buscar</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Z</kbd><span>Deshacer</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Y</kbd><span>Rehacer</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+I</kbd><span>Import file</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+E</kbd><span>Export bank</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Shift+E</kbd><span>Export Library</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+S</kbd><span>Save</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+M</kbd><span>Connect MIDI</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+F</kbd><span>Search</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Z</kbd><span>Undo</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Y</kbd><span>Redo</span>
       <hr style="grid-column:1/-1;border-color:var(--border);margin:0.3rem 0;">
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">↑ ↓</kbd><span>Navegar patches</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Enter</kbd><span>Seleccionar patch</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Supr</kbd><span>Eliminar patch</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Esc</kbd><span>Cerrar modal / Deseleccionar</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">?</kbd><span>Mostrar esta ayuda</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Up/Down</kbd><span>Navigate patches</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Enter</kbd><span>Select patch</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Supr</kbd><span>Delete patch</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">Esc</kbd><span>Close modal / Deselect</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">?</kbd><span>Show this help</span>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-primary" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cerrar</button>
+      <button class="btn btn-primary" onclick="document.getElementById('modal-overlay').classList.remove('active')">Close</button>
     </div>`);
 }
 
@@ -1981,7 +2017,7 @@ function setupDragDrop() {
   // Create drop overlay
   const overlay = document.createElement('div');
   overlay.id = 'drop-overlay';
-  overlay.innerHTML = `<div class="drop-overlay-content">${icons.folder} Soltar archivo aquí<br><small>.syx · .sysex · .abdlibrary</small></div>`;
+  overlay.innerHTML = `<div class="drop-overlay-content">${icons.folder} Drop file here<br><small>.syx · .sysex · .abdlibrary</small></div>`;
   overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,212,255,0.1);border:3px dashed var(--accent);z-index:999;justify-content:center;align-items:center;pointer-events:none;';
   document.body.appendChild(overlay);
 
@@ -2011,14 +2047,14 @@ function setupDragDrop() {
     const libFiles = files.filter(f => f.name.endsWith('.abdlibrary'));
 
     if (syxFiles.length === 0 && libFiles.length === 0) {
-      toast('Formato no soportado. Usa .syx, .sysex o .abdlibrary', 'error');
+      toast('Unsupported format. Use .syx, .sysex or .abdlibrary', 'error');
       return;
     }
 
     // Process library files
     for (const file of libFiles) {
       try {
-        setStatus('connecting', `Importando ${file.name}...`);
+        setStatus('connecting', `Importing ${file.name}...`);
         const result = await importFile(file);
         if (!result.success) { toast(result.error, 'error'); continue; }
         let total = 0;
@@ -2030,16 +2066,17 @@ function setupDragDrop() {
         } else {
           const r = await importBank(result.bank, result.patches, { deduplication: 'skip' });
           total = r.importedCount;
-        }
-        await renderNav(); await renderContent();
-        toast(`${file.name}: ${total} patches importados`, 'success');
+        }        await renderNav(); await renderContent();
+        toast(`${file.name}: ${total} patches imported`, 'success');
+        recordChange();
       } catch (err) { toast(`Error: ${err.message}`, 'error'); }
-    }
+
+      }
 
     // Process .syx files
     for (const file of syxFiles) {
       try {
-        setStatus('connecting', `Importando ${file.name}...`);
+        setStatus('connecting', `Importing ${file.name}...`);
         const result = await importFile(file);
         if (!result.success) { toast(result.error, 'error'); continue; }
         let total = 0;
@@ -2064,13 +2101,14 @@ function setupDragDrop() {
             selectedBankId = bank.id;
             navLevel = 'patches';
           }
-        }
-        await renderNav(); await renderContent();
-        toast(`${file.name}: ${total} patches importados`, 'success');
+        }        await renderNav(); await renderContent();
+        toast(`${file.name}: ${total} patches imported`, 'success');
+        recordChange();
       } catch (err) { toast(`Error: ${err.message}`, 'error'); }
-    }
 
-    setStatus('connected', 'Listo');
+      }
+
+    setStatus('connected', 'Ready');
   });
 }
 

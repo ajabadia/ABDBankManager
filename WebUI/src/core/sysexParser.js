@@ -5,7 +5,7 @@
  * instead of heuristic header offsets.
  */
 
-import { MODEL_CONTRACTS, getModelContract, getContractsForManufacturer } from '../contracts/modelContracts.js';
+import { MODEL_CONTRACTS } from '../contracts/modelContracts.js';
 
 // Manufacturer name lookup (for human-readable display only)
 const MANUFACTURERS = {

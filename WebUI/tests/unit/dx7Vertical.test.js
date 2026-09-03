@@ -8,14 +8,14 @@
  *   4. MIDI transport (mock ports)
  *   5. Parameter decoding from real fixture data
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getModelContract } from '../../src/contracts/modelContracts.js';
 import { importFile } from '../../src/core/importEngine.js';
 // Note: exportToFile is browser-only (uses saveAs). Roundtrip tested via contract.
-import { decodeDx7Parameters, getDx7TableParameters, extractDx7Name } from '../../src/core/dx7Parameters.js';
+import { decodeDx7Parameters, getDx7TableParameters } from '../../src/core/dx7Parameters.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(__dirname, '../../../fixtures/sysex/yamaha-dx7/fixtures');
@@ -255,10 +255,9 @@ describe('DX7 Parameter Decoding from Fixtures', () => {
 describe('DX7 MIDI Transport (mock)', () => {
   it('should create transport with mock ports', async () => {
     const { createDx7MidiTransport } = await import('../../src/core/pro800Midi.js');
-    let sentData = null;
     const mockOutput = {
       name: 'Mock DX7 Out',
-      send: (data) => { sentData = data; },
+      send: () => {},
     };
     const mockInput = {
       name: 'Mock DX7 In',
@@ -306,6 +305,6 @@ describe('DX7 MIDI Transport (mock)', () => {
 
   it('should throw if no output provided', async () => {
     const { createDx7MidiTransport } = await import('../../src/core/pro800Midi.js');
-    expect(() => createDx7MidiTransport({})).toThrow('Se requiere una salida MIDI');
+    expect(() => createDx7MidiTransport({})).toThrow('A MIDI output is required');
   });
 });

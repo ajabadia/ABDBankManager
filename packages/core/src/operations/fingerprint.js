@@ -15,3 +15,7 @@ export function checkDuplicate(fingerprint, existingPatches) {
   const match = existingPatches.find(p => p.fingerprint === fingerprint);
   return { isDuplicate: !!match, existingPatch: match || null };
 }
+
+// Version of the fingerprint recipe. Bump when the hashing input changes
+// (e.g. extractSoundBytes scoping) so older libraries can be re-hashed.
+export const FINGERPRINT_VERSION = 1;

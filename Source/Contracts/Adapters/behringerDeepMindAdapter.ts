@@ -1,5 +1,6 @@
 import { BaseHardwareLink, HardwareDevice, PatchData, ImportResult } from '../HardwareLinkContract';
-import { pack8to7, unpack7to8, splitSysexMessages } from './sysexUtils';
+import type { MidiOutputPortInfo } from '../Midi';
+import { pack8to7, unpack7to8, splitSysexMessages } from '../SysEx/codec';
 
 const MANUFACTURER = [0x00, 0x20, 0x32];
 const MODEL = 0x20;
@@ -23,7 +24,7 @@ export class BehringerDeepMind12HardwareLink extends BaseHardwareLink {
   protected getManufacturerId(): number[] { return MANUFACTURER; }
   protected getModelId(): number { return MODEL; }
 
-  detectHardware(midiOutputs: any[]): HardwareDevice | null {
+  detectHardware(midiOutputs: MidiOutputPortInfo[]): HardwareDevice | null {
     const output = midiOutputs.find(port => /deep.?mind|dm.?12/i.test(port.name || ''));
     return output ? { name: output.name || 'DeepMind 12', inputId: output.id || '', outputId: output.id || '', manufacturer: 'Behringer', modelId: this.modelId } : null;
   }

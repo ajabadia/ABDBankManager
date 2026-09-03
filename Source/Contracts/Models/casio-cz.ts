@@ -10,7 +10,12 @@
  * Checksum: sum of all nibble bytes & 0x7F.
  */
 
-import { ModelContract, validateModelContract } from '../ModelContract';
+import {
+  ModelContract, validateModelContract, type ContractFileParse
+} from '../ModelContract';
+import {
+  casioChecksum, encodeNibble, decodeNibble, splitSysexMessages
+} from '../SysEx/codec';
 
 const BANK_CAPACITY = 16;
 const BANKS_COUNT = 1;
@@ -33,40 +38,6 @@ const MODEL_IDS: Record<string, number> = {
   'casio-cz1':    0x15
 };
 
-function casioChecksum(bytes: Uint8Array): number {
-  let sum = 0;
-  for (const b of bytes) sum += b;
-  return sum & 0x7F;
-}
-
-function encodeNibble(data: Uint8Array): Uint8Array {
-  const nibbles: number[] = [];
-  for (const byte of data) {
-    nibbles.push((byte >> 4) & 0x0F);
-    nibbles.push(byte & 0x0F);
-  }
-  return new Uint8Array(nibbles);
-}
-
-function decodeNibble(nibbles: Uint8Array): Uint8Array {
-  const decoded: number[] = [];
-  for (let i = 0; i + 1 < nibbles.length; i += 2) {
-    decoded.push(((nibbles[i] & 0x0F) << 4) | (nibbles[i + 1] & 0x0F));
-  }
-  return new Uint8Array(decoded);
-}
-
-function splitSysex(raw: Uint8Array): Uint8Array[] {
-  const msgs: Uint8Array[] = [];
-  let inSysex = false;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === 0xF0 && !inSysex) { inSysex = true; start = i; }
-    else if (raw[i] === 0xF7 && inSysex) { msgs.push(raw.slice(start, i + 1)); inSysex = false; }
-  }
-  return msgs;
-}
-
 function isCasioSysEx(msg: Uint8Array, modelId: number): boolean {
   return msg.length >= 9
     && msg[0] === 0xF0 && msg[1] === 0x44
@@ -88,7 +59,7 @@ const casioCzContract: ModelContract = {
   displayName: 'Casio CZ-101',
   manufacturer: 'Casio',
   icon: 'casio-logo.svg',
-  thumbnail: 'casio-cz101.jpg',
+  thumbnail: 'casio-cz101.webp',
 
   bankCapacity: BANK_CAPACITY,
   banksCount: BANKS_COUNT,
@@ -178,7 +149,7 @@ const casioCzContract: ModelContract = {
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
     const modelId = MODEL_IDS[this.modelId] || 0x12;
-    const msgs = splitSysex(sysex);
+    const msgs = splitSysexMessages(sysex);
     const results: { rawData: Uint8Array; slot: number }[] = [];
     for (const msg of msgs) {
       if (isCasioSysEx(msg, modelId)) {
@@ -188,6 +159,49 @@ const casioCzContract: ModelContract = {
       }
     }
     return results;
+  },
+
+  parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
+    const modelId = MODEL_IDS[this.modelId] || 0x12;
+    const parsed = splitSysexMessages(data)
+      .filter(m => isCasioSysEx(m, modelId))
+      .map(m => this.parsePatchSysEx?.(m))
+      .filter((p): p is { rawData: Uint8Array; slot: number } => p !== null);
+    if (parsed.length === 0) return null;
+    const patches = parsed.map((p, i) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
+      category: this.defaultCategory,
+      author: 'Unknown',
+      tags: [] as string[],
+      notes: '',
+      originAddress: this.getProgramAddress(i),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: new Date().toISOString(),
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `Casio ${this.displayName}`,
+      patches,
+      warnings: [],
+    };
+  },
+
+  serializeFile(patches: { rawData: Uint8Array; slot: number; name?: string }[], options: { midiChannel: number; deviceId: number; format: 'single' | 'bank' }): Uint8Array {
+    const msgs = patches.map(p => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) { out.set(m, off); off += m.length; }
+    return out;
+  },
+
+  detectHardware(ports: Array<{ name?: string; id?: string }>): { name: string; inputId: string; outputId: string; manufacturer: string; modelId: string } | null {
+    const port = ports.find(p => /casio|cz/i.test(p.name || ''));
+    return port
+      ? { name: port.name || 'Casio CZ', inputId: port.id || '', outputId: port.id || '', manufacturer: 'Casio', modelId: this.modelId }
+      : null;
   },
 
   legacySysEx: {
@@ -201,7 +215,7 @@ export const casioCz1000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1000',
   displayName: 'Casio CZ-1000',
-  thumbnail: 'casio-cz101.jpg',
+  thumbnail: 'casio-cz1000.webp',
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x13 }
 };
 
@@ -209,7 +223,7 @@ export const casioCz5000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz5000',
   displayName: 'Casio CZ-5000',
-  thumbnail: 'casio-cz101.jpg',
+  thumbnail: 'casio-cz5000.webp',
   bankCapacity: 32,
   banksCount: 2,
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x14 }
@@ -219,7 +233,7 @@ export const casioCz1Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1',
   displayName: 'Casio CZ-1',
-  thumbnail: 'casio-cz101.jpg',
+  thumbnail: 'casio-cz1.webp',
   bankCapacity: 64,
   banksCount: 4,
   patchDataSize: 288,

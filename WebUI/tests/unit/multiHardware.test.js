@@ -8,22 +8,20 @@
  *  - Cross-model bank filtering logic (bank visible under all compatible models)
  *  - Move-patch hardware compatibility checks
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   getModelContract,
   getCompatibleModels,
   getHardwareIds,
-  MODEL_CONTRACTS,
-  modelContractMap
+  MODEL_CONTRACTS
 } from '../../src/contracts/modelContracts.js';
 
 // ─── Contract Data Validation ───
 
 describe('Contract: getHardwareIds', () => {
   it('returns [modelId] for models with no compatible models', () => {
-    const ids = getHardwareIds('behringer-deepmind12');
-    expect(ids).toContain('behringer-deepmind12');
-    // DeepMind has empty compatibleModels
+    const ids = getHardwareIds('behringer-pro800');
+    expect(ids).toContain('behringer-pro800');
     expect(ids).toHaveLength(1);
   });
 
@@ -66,8 +64,13 @@ describe('Contract: getHardwareIds', () => {
 });
 
 describe('Contract: getCompatibleModels', () => {
+  it('returns DM6 and DM12D as compatible with DM12', () => {
+    const compat = getCompatibleModels('behringer-deepmind12');
+    expect(compat).toContain('behringer-deepmind6');
+    expect(compat).toContain('behringer-deepmind12d');
+  });
+
   it('returns empty for models with no compatibles', () => {
-    expect(getCompatibleModels('behringer-deepmind12')).toEqual([]);
     expect(getCompatibleModels('behringer-pro800')).toEqual([]);
   });
 
@@ -166,10 +169,10 @@ describe('hardwareIds composition', () => {
     expect(ids).toHaveLength(4);
   });
 
-  it('hardwareIds for Korg MS2000 includes microKORG', () => {
+  it('hardwareIds for Korg MS2000 includes microKORG and the ABD softsynth', () => {
     const ids = getHardwareIds('korg-ms2000');
-    expect(ids).toEqual(expect.arrayContaining(['korg-ms2000', 'korg-microkorg']));
-    expect(ids).toHaveLength(2);
+    expect(ids).toEqual(expect.arrayContaining(['korg-ms2000', 'korg-microkorg', 'abd-sm002']));
+    expect(ids).toHaveLength(3);
   });
 
   it('hardwareIds for Pro-800 only includes itself', () => {
@@ -177,9 +180,11 @@ describe('hardwareIds composition', () => {
     expect(ids).toEqual(['behringer-pro800']);
   });
 
-  it('hardwareIds for DeepMind 12 only includes itself', () => {
+  it('hardwareIds for DeepMind 12 includes DM6 and DM12D', () => {
     const ids = getHardwareIds('behringer-deepmind12');
-    expect(ids).toEqual(['behringer-deepmind12']);
+    expect(ids).toContain('behringer-deepmind12');
+    expect(ids).toContain('behringer-deepmind6');
+    expect(ids).toContain('behringer-deepmind12d');
   });
 });
 
@@ -210,7 +215,7 @@ describe('Bank-Model compatibility filter logic', () => {
 
   it('bank is visible under a compatible model via reverse contract check', () => {
     // DX7's compatibleModels includes DX7II, so DX7II contract checks bank.modelId
-    const bank = { modelId: 'yamaha-dx7', hardwareIds: ['yamaha-dx7'] };
+
     // DX7II contract is NOT used — DX7's contract says it's compatible with DX7II
     // The filter checks: does DX7II's modelId appear in DX7 contract's compatibleModels? No.
     // Does DX7II's contract list yamaha-dx7 in compatibleModels? DX7II's compatibleModels
@@ -502,6 +507,9 @@ describe('Contract integrity for multi-hardware', () => {
         for (const compatId of contract.compatibleModels) {
           const compatContract = getModelContract(compatId);
           expect(compatContract, `Missing contract for ${compatId} (referenced by ${contract.modelId})`).toBeDefined();
+          // Same-manufacturer only required when neither side is a softsynth
+          // (abd-sm002 emulates Korg MS2000 hardware under the ABDSynths brand).
+          if (contract.isSoftsynth || compatContract.isSoftsynth) continue;
           expect(compatContract.manufacturer).toBe(contract.manufacturer);
         }
       }
@@ -533,6 +541,10 @@ describe('Contract integrity for multi-hardware', () => {
       if (contract.compatibleModels) {
         for (const compatId of contract.compatibleModels) {
           const compatContract = getModelContract(compatId);
+          // A softsynth may emulate hardware of another manufacturer (e.g. ABDSynths'
+          // abd-sm002 reuses Korg MS2000 banks), so the same-manufacturer invariant
+          // only applies when neither side is a software synth.
+          if (contract.isSoftsynth || compatContract?.isSoftsynth) continue;
           expect(
             compatContract?.manufacturer,
             `${compatId} should have same manufacturer as ${contract.modelId}`
