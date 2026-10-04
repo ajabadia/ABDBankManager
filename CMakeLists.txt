@@ -107,7 +107,31 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     add_custom_target(GenerateAll DEPENDS GenerateRegistry GenerateBuildVersion)
 
     # --- Concrete JUCE WebView host/plugin ---
-    add_subdirectory(apps/juce-plugin)
+    #
+    # ESTO ESTA DENTRO DE UN if(EXISTS) PORQUE ANTES NO ESTABA, Y PORQUE
+    # `apps/juce-plugin` NO ESTA EN EL ARBOL. Este `add_subdirectory` es
+    # incondicional, asi que un clon limpio se caia aqui antes incluso de
+    # llegar a compilar, y no con un error de JUCE sino con:
+    #
+    #   add_subdirectory given source "apps/juce-plugin" which is not an
+    #   existing directory
+    #
+    # que es el error mas confuso posible: habla de un directorio que el
+    # propio repo dice tener. El directorio es trabajo en curso que aun no
+    # se ha commiteado, y mientras no lo este, el build no puede depender
+    # de el.
+    #
+    # EL SALTO NO ES CALLADO, que es lo unico que haria mal. Si no esta, se
+    # dice en alto: un guard que se puede dejar en silencio es un guard que
+    # no guarda, y aqui lo que se calla es "no se ha compilado el plugin".
+    # Cuando el directorio se commitee, el `if` dejara de saltarse solo.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/juce-plugin/CMakeLists.txt")
+        add_subdirectory(apps/juce-plugin)
+    else()
+        message(STATUS
+            "apps/juce-plugin no esta en el arbol: se compila todo menos el plugin. "
+            "Es trabajo en curso sin commitear, y el build no puede depender de el.")
+    endif()
 
     # --- Installation ---
     install(FILES
