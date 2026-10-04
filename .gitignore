@@ -37,12 +37,23 @@ Desktop.ini
 # Windows junction for sirv dev server (mirrors vendor/images)
 WebUI/images
 
-# --- Fixtures SysEx de terceros (solo estudio local; NO se publican) ---
-# Bancos comerciales/factory de terceros (Behringer, Yamaha, Roland, etc.)
-# se usan para probar/estudiar en local. No versionar ni desplegar.
-fixtures/
-*.syx
-*.SYX
+# --- Fixtures SysEx ---
+#
+# ANTES aqui ponia `fixtures/`, `*.syx` y `*.SYX`, con un comentario que decia
+# que los bancos factory de terceros no se publican. Esa regla llevaba tiempo
+# sin efecto: un .gitignore no aplica a un fichero ya versionado, y aqui ya
+# estaban 96 .syx trackeados. O sea, la politica era decorativa y el
+# repositorio publicaba bancos factory de todos modos.
+#
+# Se quita porque ademas hacia fallar el CI: varios tests los leen (los de
+# checksum y los de adapters de Prophecy y Juno), asi que en un clon limpio
+# morian con ENOENT y el job de WebUI Tests salia en rojo. Un test que depende
+# de un fichero que no viaja con el test es un test que no se ejecuta.
+#
+# Si en algun momento hay que dejar de publicarlos, la salida no es volver a
+# ignorar el directorio: es que los tests generen sus propias fixtures, o que
+# se salten nombrando el motivo. Ignorar el fichero del test deja un verde que
+# no ha comprobado nada.
 
 # Build local de pruebas (presets de ABDMS2000 etc.)
 build-test/

@@ -13,12 +13,16 @@ korg-prophecy/
 
 ## Bancos de fábrica generados
 
-### MS2000 / microKORG (288 bytes raw / patch)
+### MS2000 / microKORG (254 bytes raw / patch)
 
 | Modelo | Bancos | Patches/banco | Tamaño raw | Tamaño wire (7→8) |
 |--------|--------|---------------|------------|-------------------|
-| MS2000 | 8 | 16 | 288 bytes | 336 bytes (336 = 288/7*8) |
-| microKORG | 8 | 16 | 288 bytes | 336 bytes |
+| MS2000 | 8 | 16 | 254 bytes | 291 bytes (36 grupos + 1 control + 2 datos) |
+| microKORG | 8 | 16 | 254 bytes | 291 bytes |
+
+> El programa real son **254 B** (nombre en `0x00`, Timbre 1 en `0x26`, Timbre 2 en `0x92`),
+> no 288 B con el nombre en `0x1C`. El último grupo parcial **no** se rellena: 254 → 291 B.
+> Ver `ABDMS2000/DOCS/MS2000_SysEx_Spec.md`.
 
 ### Prophecy (256 bytes raw / patch)
 
@@ -40,9 +44,9 @@ korg-prophecy/
 Generados con `ModelContract` canónico (`Source/Contracts/Models/korg-ms2000.ts`). Roundtrip verificado:
 
 ```typescript
-const packed = pack8to7(rawData);
+const packed = pack8to7NoPad(rawData);   // Korg, sin rellenar el grupo parcial
 const sysex = buildPatchSysEx(rawData);
-const unpacked = unpack7to8(sysex.slice(...));
+const unpacked = unpack7to8Tolerant(sysex.slice(...));
 unpacked.slice(0, rawData.length) === rawData
 ```
 
