@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import { CasioCzImportAdapter, CasioCzExportAdapter } from '@contracts/Adapters/casioCzAdapter';
-import { encodeNibble, decodeNibble } from '@contracts/Adapters/sysexUtils';
+import { encodeNibble, decodeNibble } from '@contracts/SysEx/codec';
 
 // ─── Helpers ───
 

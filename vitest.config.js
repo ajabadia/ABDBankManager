@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['**/*.test.{js,ts}'],
+    include: ['packages/**/*.test.{js,ts}', 'WebUI/tests/**/*.test.{js,ts}'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -22,7 +22,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'WebUI/src'),
       '@webui': path.resolve(__dirname, 'WebUI/src'),
       '@core': path.resolve(__dirname, 'packages/core/src'),
-      '@scripts': path.resolve(__dirname, 'Scripts'),
+      // En minuscula, y con mayusculas el rojo sale solo en Linux. El arbol tiene
+      // las dos carpetas --Scripts/ y scripts/-- porque Windows no distingue, asi
+      // que en local `Scripts` encuentra `scripts/registry_core.js` sin problema.
+      // En git solo esta la de minuscula, y en un runner Ubuntu un alias a
+      // `Scripts` no resuelve y el test muere con "Cannot find package
+      // '@scripts/registry_core'" antes de mirar una sola asercion.
+      '@scripts': path.resolve(__dirname, 'scripts'),
       '@contracts': path.resolve(__dirname, 'Source/Contracts'),
       '@adapters': path.resolve(__dirname, 'Source/Adapters'),
       '@store': path.resolve(__dirname, 'WebUI/src/store'),

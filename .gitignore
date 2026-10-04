@@ -51,5 +51,11 @@ build-test/
 build-plugin*/
 build-bridge/
 
+# JUCE, que baja el workflow a GITS/JUCE para que CMakeLists lo encuentre con
+# add_subdirectory. Es un clon completo de otro repo: si entra aqui, el diff lo
+# tapa y el peso se nota. `.gitmodules` lo declara como submodulo, pero el
+# indice no tiene el gitlink, asi que de aqui no sale.
+GITS/
+
 # Instalador descargado
 rustup-init.exe
