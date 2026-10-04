@@ -10,7 +10,7 @@ description: >
 # Porque aqui ese comando no hace NADA, y sale con 0, que es lo peor: un
 # paso que parece que ha instalado JUCE y no ha instalado nada.
 #
-# `.gitmodules` declara el submódulo:
+# `.gitmodules` declara el submodulo:
 #
 #   [submodule "GITS/JUCE"]
 #       path = GITS/JUCE
@@ -19,44 +19,66 @@ description: >
 # pero el indice no tiene el gitlink. Medido en un clon limpio de este repo:
 # `git submodule status` sale vacio, `git submodule update --init --recursive`
 # sale con 0 y despues GITS/JUCE sigue sin existir. Un .gitmodules sin gitlink
-# es una declaracion de intenciones, no un submódulo.
+# es una declaracion de intenciones, no un submodulo.
 #
 # Los tres jobs de windows que morian en Configure CMake ("C++ Unit Tests",
 # "Plugin Validation" y "Allocation Audit") tenian un paso "Install JUCE" que
 # era exactamente esa linea. Por eso el rojo decia `Could NOT find a package
 # configuration file provided by "JUCE"`: JUCE nunca estuvo.
 #
-# POR QUE UN TAG FIJADO Y NO `main`
-# =================================
+# POR QUE UN SHA Y NO UN TAG
+# =========================
 #
-# Porque `main` de JUCE se mueve solo, y un dia el mismo commit de aqui
-# compilaria con una JUCE distinta a la de ayer sin que nadie haya tocado
-# nada. Es el mismo motivo por el que ABDCZ101 y ABDSharedAssets fijan a SHA
-# sus hermanos, y el mismo por el que ABDSharedAssets fija pnpm y node.
+# Porque un tag se puede mover, y el paso no se entera. Un tag movido que
+# apunte a otra cosa pasaria en silencio, y lo que se acabaria compilando no
+# seria lo que este fichero dice. Con un SHA no hay nada que mover: el commit
+# es el commit, dentro de un ano y dentro de diez.
 #
-# 8.0.4 es la version que este repo declara en tres sitios distintos:
-# `find_package(JUCE 8 REQUIRED CONFIG)`, README y CHANGELOG. Y es la misma
-# que ya usan ABDAudioLab y ABDCZ101 en esta suite.
+# El commit va ademas con la VERSION por separado, y el paso comprueba las dos
+# cosas: que lo que hay en disco sea EXACTAMENTE ese commit, y que ese commit
+# declare la version que dice declarar. Son dos comprobaciones distintas y
+# ninguna de las dos sobra. Si el SHA se cambiara sin querer, la version no
+# habria cambiado y el proyecto searia otro; si las dos se cambiaran a mano sin
+# comprobar, el grep es el que avisa.
 #
-# Comprobado, no supuesto: con JUCE 8.0.4 este proyecto CONFIGURA (exit 0) y
-# COMPILA (`ABDBankManagerCore.lib`, exit 0) en local.
+# 9.0.1 es la version que se compila, y el commit e18f7f50 es el tag 9.0.1
+# upstream (un tag ligero: `git ls-remote` lo da directamente como commit).
+# Esta verificado, no supuesto, sobre un clon limpio de este repo en HEAD:
+#
+#   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   -> exit 0
+#   cmake --build build --config Release            -> exit 0
+#   build/cpp/Release/ABDBankManagerCore.lib          -> existe
+#   ABDBankManagerCoreTests.exe                       -> 4 de 4 tests, exit 0
+#
+# AVISO, Y NO SE HA TOCADO. El `CMakeLists.txt` sigue pidiendo
+# `find_package(JUCE 8 REQUIRED CONFIG)` en su rama de reserva, y el README y el
+# CHANGELOG siguen hablando de JUCE 8. Eso NO afecta a estos jobs: la rama de
+# reserva solo se alcanza si GITS/JUCE no existe, y este paso lo pone. Se deja
+# dicho aqui porque es la clase de cosa que vuelve a morder dentro de seis
+# meses, cuando alguien borre el paso y la reserva pida 8 mientras el arbol
+# tiene 9.
 
 inputs:
-  ref:
-    description: Tag de JUCE que se baja a GITS/JUCE
+  version:
+    description: Version de JUCE que se espera encontrar tras el checkout
     required: false
-    default: '8.0.4'
+    default: '9.0.1'
+  sha:
+    description: Commit exacto de JUCE que se baja a GITS/JUCE
+    required: false
+    default: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
 runs:
   using: composite
   steps:
-    - name: Bajar JUCE ${{ inputs.ref }} a GITS/JUCE
+    - name: Bajar JUCE ${{ inputs.version }} a GITS/JUCE
       shell: bash
       run: |
         set -euo pipefail
 
         destino="GITS/JUCE"
-        ref="${{ inputs.ref }}"
+        version="${{ inputs.version }}"
+        sha="${{ inputs.sha }}"
 
         # IDEMPOTENTE, Y POR QUE. Un runner es de un solo uso, asi que esto
         # casi nunca va a encontrar nada y parece una comprobacion de sobra.
@@ -68,21 +90,35 @@ runs:
           exit 0
         fi
 
-        mkdir -p GITS
         rm -rf "${destino}"
 
-        git clone --quiet --depth 1 --branch "${ref}" \
-          https://github.com/juce-framework/JUCE.git "${destino}"
+        # UN SHA NO ES UN `--branch`. Por eso no es un `git clone --branch`:
+        # `--branch` espera un nombre de rama o de tag, y un SHA no lo es, asi
+        # que el clon fallaria con un error que no nombra el pin. Lo que baja
+        # un commit concreto es `git fetch` por SHA, que GitHub permite porque
+        # el commit es alcanzable desde el tag. Se separa en init/fetch/checkout
+        # por eso, y no por gusto.
+        git init --quiet "${destino}"
+        git -C "${destino}" remote add origin https://github.com/juce-framework/JUCE.git
+        git -C "${destino}" fetch --quiet --depth 1 origin "${sha}"
+        git -C "${destino}" checkout --quiet --detach FETCH_HEAD
 
-        # SE COMPRUEBA LA VERSION, NO SE DA POR HECHA. Un tag mal escrito ya
-        # haria fallar el clone, pero un tag movido que apunte a otra cosa
-        # pasaria en silencio, y lo que se acabaria compilando no seria lo que
-        # el CMakeLists declara. Este grep falla el paso si no ve la linea.
-        if ! grep -q "project(JUCE VERSION ${ref} " "${destino}/CMakeLists.txt"; then
-          echo "::error::GITS/JUCE no dice ser JUCE ${ref}. Aborto: compilar con otra version es peor que no compilar."
+        # LA PRIMERA COMPROBACION: que lo que hay sea el commit pedido. El grep
+        # de la version, solo, no serviria: dos commits distintos pueden declarar
+        # la misma version, y entonces el paso estaria en verde sobre un arbol
+        # que no es el fijado.
+        actual="$(git -C "${destino}" rev-parse HEAD)"
+        if [ "${actual}" != "${sha}" ]; then
+          echo "::error::GITS/JUCE esta en ${actual} y el pin es ${sha}. Aborto: compilar con otro commit es peor que no compilar."
+          exit 1
+        fi
+
+        # LA SEGUNDA: que ese commit diga ser la version que pedimos.
+        if ! grep -q "project(JUCE VERSION ${version} " "${destino}/CMakeLists.txt"; then
+          echo "::error::GITS/JUCE esta en el commit ${actual}, que no dice ser JUCE ${version}. Aborto."
           grep -m1 'project(JUCE VERSION' "${destino}/CMakeLists.txt" || true
           exit 1
         fi
 
-        echo "JUCE ${ref} en ${destino}"
+        echo "JUCE ${version} en ${destino} (commit ${sha})"
         grep -m1 'project(JUCE VERSION' "${destino}/CMakeLists.txt"

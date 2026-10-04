@@ -173,7 +173,8 @@ jobs:
       - name: Install JUCE
         uses: ./.github/actions/juce
         with:
-          ref: '8.0.4'
+          version: '9.0.1'
+          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -218,7 +219,8 @@ jobs:
       - name: Install JUCE
         uses: ./.github/actions/juce
         with:
-          ref: '8.0.4'
+          version: '9.0.1'
+          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
       - name: Install X11 headers
         run: |
@@ -257,7 +259,8 @@ jobs:
       - name: Install JUCE
         uses: ./.github/actions/juce
         with:
-          ref: '8.0.4'
+          version: '9.0.1'
+          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -299,7 +302,8 @@ jobs:
       - name: Install JUCE
         uses: ./.github/actions/juce
         with:
-          ref: '8.0.4'
+          version: '9.0.1'
+          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
       - name: Configure CMake with sanitizers
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi /INCREMENTAL:NO"
@@ -413,7 +417,8 @@ jobs:
       - name: Install JUCE
         uses: ./.github/actions/juce
         with:
-          ref: '8.0.4'
+          version: '9.0.1'
+          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
       - name: Full Build
         run: |
