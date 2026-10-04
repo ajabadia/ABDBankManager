@@ -164,9 +164,16 @@ jobs:
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
-      - name: Install JUCE (via submodule)
-        run: |
-          git submodule update --init --recursive
+      # ANTES ERA `git submodule update --init --recursive`, y no hacia nada. Este
+      # repo declara el submodulo en .gitmodules pero el indice no tiene el
+      # gitlink, asi que ese comando sale con 0 y GITS/JUCE sigue sin existir:
+      # un paso que parece instalar JUCE y no lo instala es peor que no tenerlo.
+      # Medido en un clon limpio. El porque entero esta en
+      # .github/actions/juce/action.yml.
+      - name: Install JUCE
+        uses: ./.github/actions/juce
+        with:
+          ref: '8.0.4'
 
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -196,6 +203,15 @@ jobs:
           version: '3.1.50'
           actions-cache-folder: 'emsdk-cache'
 
+      # ESTE JOB NO TENIA NINGUN PASO DE JUCE, y por eso moria antes que los
+      # otros: los de Windows tenian un "Install JUCE" que no instalaba nada,
+      # y este no tenia ni el paso inútil. Los cuatro caian en el mismo sitio,
+      # por el mismo motivo, en `find_package(JUCE 8 REQUIRED CONFIG)`.
+      - name: Install JUCE
+        uses: ./.github/actions/juce
+        with:
+          ref: '8.0.4'
+
       - name: Configure WASM CMake
         run: |
           source $EMSDK/emsdk_env.sh
@@ -219,8 +235,13 @@ jobs:
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
+      # Este paso era `git submodule update --init --recursive`, un no-op: el
+      # .gitmodules declara el submodulo pero el indice no tiene el gitlink, asi
+      # que salia con 0 sin bajar nada. Ver .github/actions/juce/action.yml.
       - name: Install JUCE
-        run: git submodule update --init --recursive
+        uses: ./.github/actions/juce
+        with:
+          ref: '8.0.4'
 
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -253,8 +274,13 @@ jobs:
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
+      # Este paso era `git submodule update --init --recursive`, un no-op: el
+      # .gitmodules declara el submodulo pero el indice no tiene el gitlink, asi
+      # que salia con 0 sin bajar nada. Ver .github/actions/juce/action.yml.
       - name: Install JUCE
-        run: git submodule update --init --recursive
+        uses: ./.github/actions/juce
+        with:
+          ref: '8.0.4'
 
       - name: Configure CMake with sanitizers
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
@@ -297,8 +323,13 @@ jobs:
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
+      # Este paso era `git submodule update --init --recursive`, un no-op: el
+      # .gitmodules declara el submodulo pero el indice no tiene el gitlink, asi
+      # que salia con 0 sin bajar nada. Ver .github/actions/juce/action.yml.
       - name: Install JUCE
-        run: git submodule update --init --recursive
+        uses: ./.github/actions/juce
+        with:
+          ref: '8.0.4'
 
       - name: Full Build
         run: |

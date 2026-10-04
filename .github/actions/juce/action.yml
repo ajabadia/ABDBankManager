@@ -1,0 +1,88 @@
+name: Bajar JUCE a GITS/JUCE
+description: >
+  Baja JUCE al directorio GITS/JUCE del checkout para que el CMakeLists lo
+  encuentre con add_subdirectory, en vez de caer en
+  find_package(JUCE 8 REQUIRED CONFIG) y morir en Configure CMake.
+
+# POR QUE ESTO NO ES `git submodule update --init --recursive`
+# ===========================================================
+#
+# Porque aqui ese comando no hace NADA, y sale con 0, que es lo peor: un
+# paso que parece que ha instalado JUCE y no ha instalado nada.
+#
+# `.gitmodules` declara el submódulo:
+#
+#   [submodule "GITS/JUCE"]
+#       path = GITS/JUCE
+#       url = https://github.com/juce-framework/JUCE.git
+#
+# pero el indice no tiene el gitlink. Medido en un clon limpio de este repo:
+# `git submodule status` sale vacio, `git submodule update --init --recursive`
+# sale con 0 y despues GITS/JUCE sigue sin existir. Un .gitmodules sin gitlink
+# es una declaracion de intenciones, no un submódulo.
+#
+# Los tres jobs de windows que morian en Configure CMake ("C++ Unit Tests",
+# "Plugin Validation" y "Allocation Audit") tenian un paso "Install JUCE" que
+# era exactamente esa linea. Por eso el rojo decia `Could NOT find a package
+# configuration file provided by "JUCE"`: JUCE nunca estuvo.
+#
+# POR QUE UN TAG FIJADO Y NO `main`
+# =================================
+#
+# Porque `main` de JUCE se mueve solo, y un dia el mismo commit de aqui
+# compilaria con una JUCE distinta a la de ayer sin que nadie haya tocado
+# nada. Es el mismo motivo por el que ABDCZ101 y ABDSharedAssets fijan a SHA
+# sus hermanos, y el mismo por el que ABDSharedAssets fija pnpm y node.
+#
+# 8.0.4 es la version que este repo declara en tres sitios distintos:
+# `find_package(JUCE 8 REQUIRED CONFIG)`, README y CHANGELOG. Y es la misma
+# que ya usan ABDAudioLab y ABDCZ101 en esta suite.
+#
+# Comprobado, no supuesto: con JUCE 8.0.4 este proyecto CONFIGURA (exit 0) y
+# COMPILA (`ABDBankManagerCore.lib`, exit 0) en local.
+
+inputs:
+  ref:
+    description: Tag de JUCE que se baja a GITS/JUCE
+    required: false
+    default: '8.0.4'
+
+runs:
+  using: composite
+  steps:
+    - name: Bajar JUCE ${{ inputs.ref }} a GITS/JUCE
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        destino="GITS/JUCE"
+        ref="${{ inputs.ref }}"
+
+        # IDEMPOTENTE, Y POR QUE. Un runner es de un solo uso, asi que esto
+        # casi nunca va a encontrar nada y parece una comprobacion de sobra.
+        # Se deja porque el paso se puede reejecutar sobre el mismo checkout
+        # (un retry, un job reentrante) y un `rm -rf` a ciegas en ese caso
+        # borraria un arbol que ya estaba bien, que es un fallo que no avisa.
+        if [ -f "${destino}/CMakeLists.txt" ]; then
+          echo "JUCE ya esta en ${destino}: no se toca."
+          exit 0
+        fi
+
+        mkdir -p GITS
+        rm -rf "${destino}"
+
+        git clone --quiet --depth 1 --branch "${ref}" \
+          https://github.com/juce-framework/JUCE.git "${destino}"
+
+        # SE COMPRUEBA LA VERSION, NO SE DA POR HECHA. Un tag mal escrito ya
+        # haria fallar el clone, pero un tag movido que apunte a otra cosa
+        # pasaria en silencio, y lo que se acabaria compilando no seria lo que
+        # el CMakeLists declara. Este grep falla el paso si no ve la linea.
+        if ! grep -q "project(JUCE VERSION ${ref} " "${destino}/CMakeLists.txt"; then
+          echo "::error::GITS/JUCE no dice ser JUCE ${ref}. Aborto: compilar con otra version es peor que no compilar."
+          grep -m1 'project(JUCE VERSION' "${destino}/CMakeLists.txt" || true
+          exit 1
+        fi
+
+        echo "JUCE ${ref} en ${destino}"
+        grep -m1 'project(JUCE VERSION' "${destino}/CMakeLists.txt"
