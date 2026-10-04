@@ -212,6 +212,14 @@ jobs:
         with:
           ref: '8.0.4'
 
+      - name: Install X11 headers
+        run: |
+          # juceaide es una herramienta nativa que JUCE compila durante el
+          # configure, y en Linux linka contra X11. Sin esto el configure
+          # muere en "fatal error: X11/Xlib.h: No such file or directory".
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev
+
       - name: Configure WASM CMake
         run: |
           source $EMSDK/emsdk_env.sh
@@ -283,17 +291,29 @@ jobs:
           ref: '8.0.4'
 
       - name: Configure CMake with sanitizers
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi /INCREMENTAL:NO"
 
       - name: Build with ASan
         run: cmake --build build --config Debug --parallel
 
       - name: Run tests with ASan
         run: |
-          $testExe = Get-ChildItem -Path build -Filter "*Tests*" -Recurse | Where-Object { $_.Extension -eq '.exe' }
-          if ($testExe) {
-            $env:ASAN_OPTIONS = "detect_leaks=1:halt_on_error=1"
-            & $testExe.FullName
+          # El ASan de MSVC no implementa detect_leaks, solo en Linux.
+          $env:ASAN_OPTIONS = "halt_on_error=1"
+          $testExe = Get-ChildItem -Path build -Filter "*Tests*" -Recurse |
+            Where-Object { $_.Extension -eq '.exe' } |
+            Sort-Object FullName -Unique
+          if (-not $testExe) {
+            Write-Error "No se encontro ningun ejecutable de test en build/"
+            exit 1
+          }
+          foreach ($exe in $testExe) {
+            Write-Host "Ejecutando $($exe.FullName)"
+            & $exe.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "$($exe.Name) termino con codigo $LASTEXITCODE"
+              exit $LASTEXITCODE
+            }
           }
 
   # --- Security Scan ---
