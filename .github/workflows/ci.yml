@@ -274,6 +274,9 @@ jobs:
   allocation-audit:
     name: Allocation Audit
     runs-on: windows-latest
+    # Red de seguridad: un exe instrumentado que se cuelgue no debe quedarse
+    # ocupando un runner hasta agotar las 6 h.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -327,13 +330,20 @@ jobs:
             Copy-Item $asanDll[0].FullName -Destination $exe.DirectoryName -Force
           }
 
+          $timeoutSeconds = 300
           foreach ($exe in $testExe) {
             Write-Host "Ejecutando $($exe.FullName)"
-            & $exe.FullName
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "$($exe.Name) termino con codigo $LASTEXITCODE"
-              exit $LASTEXITCODE
+            $proc = Start-Process -FilePath $exe.FullName -PassThru -NoNewWindow
+            if (-not $proc.WaitForExit($timeoutSeconds * 1000)) {
+              try { $proc.Kill() } catch {}
+              Write-Error "$($exe.Name) sigue vivo tras $timeoutSeconds s con ASan; se ha parado el proceso"
+              exit 1
             }
+            if ($proc.ExitCode -ne 0) {
+              Write-Error "$($exe.Name) termino con codigo $($proc.ExitCode)"
+              exit $proc.ExitCode
+            }
+            Write-Host "$($exe.Name): correcto"
           }
 
   # --- Security Scan ---
