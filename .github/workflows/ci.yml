@@ -333,9 +333,22 @@ jobs:
           $timeoutSeconds = 300
           foreach ($exe in $testExe) {
             Write-Host "Ejecutando $($exe.FullName)"
-            $proc = Start-Process -FilePath $exe.FullName -PassThru -NoNewWindow
-            if (-not $proc.WaitForExit($timeoutSeconds * 1000)) {
+            $outLog = Join-Path $env:RUNNER_TEMP ("asan-" + $exe.BaseName + ".log")
+            $proc = Start-Process -FilePath $exe.FullName -PassThru -NoNewWindow `
+              -RedirectStandardOutput $outLog -RedirectStandardError "$outLog.err"
+            $finished = $proc.WaitForExit($timeoutSeconds * 1000)
+            if (-not $finished) {
               try { $proc.Kill() } catch {}
+            }
+            # Volcar siempre: si el proceso se queda colgado, esto dice hasta
+            # donde llego, y si falla, por que.
+            foreach ($log in @($outLog, "$outLog.err")) {
+              if (Test-Path $log) {
+                Write-Host "--- $([System.IO.Path]::GetFileName($log)) ---"
+                Get-Content $log | Write-Host
+              }
+            }
+            if (-not $finished) {
               Write-Error "$($exe.Name) sigue vivo tras $timeoutSeconds s con ASan; se ha parado el proceso"
               exit 1
             }
