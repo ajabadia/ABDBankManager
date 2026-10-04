@@ -109,7 +109,7 @@ void testValueTreeRoundtrip()
 juce::MemoryBlock makeFactoryBankZip()
 {
     juce::ZipFile::Builder builder;
-    const juce::MemoryBlock patchData { "\\x01\\x02\\x7f", 3 };
+    const juce::MemoryBlock patchData { "\x01\x02\x7f", 3 };
     const juce::MemoryBlock imageData { "PNG-test", 8 };
 
     const juce::String manifest = R"json({
