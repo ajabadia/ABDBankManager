@@ -56,6 +56,7 @@ struct Bank {
     juce::String knownIssues;
     juce::String creationDate;
     juce::String modifiedDate;
+    bool includeInBundle = false;
     juce::Array<Patch> patches;
 };
 

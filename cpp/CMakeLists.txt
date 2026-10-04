@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(ABDBankManagerCore STATIC
     ABDBankManagerCore.cpp
     BankManagerWebViewAdapter.cpp
+    FactoryContentLoader.cpp
     Pro800Midi.cpp
 )
 
