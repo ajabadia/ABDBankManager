@@ -218,7 +218,7 @@ jobs:
           # configure, y en Linux linka contra X11. Sin esto el configure
           # muere en "fatal error: X11/Xlib.h: No such file or directory".
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libasound2-dev libfreetype6-dev libcurl4-openssl-dev libglib2.0-dev
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libasound2-dev libfreetype6-dev libcurl4-openssl-dev libglib2.0-dev libfontconfig1-dev pkg-config
 
       - name: Configure WASM CMake
         run: |
@@ -291,7 +291,7 @@ jobs:
           ref: '8.0.4'
 
       - name: Configure CMake with sanitizers
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi /INCREMENTAL:NO" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi /INCREMENTAL:NO"
 
       - name: Build with ASan
         run: cmake --build build --config Debug --parallel
@@ -306,6 +306,25 @@ jobs:
           if (-not $testExe) {
             Write-Error "No se encontro ningun ejecutable de test en build/"
             exit 1
+          }
+
+          # Un exe instrumentado depende de clang_rt.asan_dynamic-x86_64.dll,
+          # que MSVC no copia al directorio de salida: sin ella el proceso
+          # muere con 0xC0000135. Solo sirve la de MSVC, la de LLVM no es
+          # intercambiable con el codigo que genera cl.exe.
+          $vsRoot = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio",
+                      "${env:ProgramFiles}\Microsoft Visual Studio")
+          $asanDll = Get-ChildItem -Path $vsRoot -Filter "clang_rt.asan_dynamic-x86_64.dll" `
+            -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\VC\\Tools\\MSVC\\' } |
+            Sort-Object FullName -Unique
+          if (-not $asanDll) {
+            Write-Error "No se encontro la runtime de ASan de MSVC en $vsRoot"
+            exit 1
+          }
+          Write-Host "Runtime de ASan: $($asanDll[0].FullName)"
+          foreach ($exe in $testExe) {
+            Copy-Item $asanDll[0].FullName -Destination $exe.DirectoryName -Force
           }
 
           foreach ($exe in $testExe) {
