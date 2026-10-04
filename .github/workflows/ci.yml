@@ -8,7 +8,23 @@ on:
 
 env:
   NODE_VERSION: '20.x'
-  CMAKE_VERSION: '3.22'
+  # 4.4.4 exacta, y exacta a proposito. Estaba en 3.22, y 3.22 no conoce el
+  # Visual Studio que trae `windows-latest`: el generador "Visual Studio 18 2026"
+  # se anadio en CMake 4.2. Sin el, CMake no encuentra ninguna VS que conocer,
+  # cae al primer generador que ve y elige NMake Makefiles, y como este job no
+  # carga el entorno de desarrollo (`nmake` no esta en el PATH) el configure
+  # moria en:
+  #
+  #   CMake Error at CMakeLists.txt:2 (project):
+  #     Running 'nmake' '-?' failed with: The system cannot find the file specified
+  #   CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
+  #
+  # que es un error de compilador que no existe: el problema era el generador.
+  # `ci-lib.yml` de este mismo repo ya pedia "Visual Studio 18 2026" decia atras.
+  # Un numero exacto y no un '4.4' flotante, por lo mismo que las versiones de
+  # pnpm y node de ABDSharedAssets: la minima para que esto hable, y la exacta,
+  # para que el job que hoy esta en verde siga siendo el mismo dentro de seis meses.
+  CMAKE_VERSION: '4.4.4'
 
 jobs:
   # --- Schema Validation ---
