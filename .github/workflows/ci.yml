@@ -194,6 +194,14 @@ jobs:
   wasm-build:
     name: WASM Build
     runs-on: ubuntu-latest
+    # Falla por un bug de JUCE 8.0.4, no por codigo del proyecto: en
+    # juce_PropertiesFile.cpp la variable dir se declara solo dentro de las
+    # ramas JUCE_LINUX, JUCE_WINDOWS y JUCE_APPLE, y emscripten no define
+    # ninguna, con lo que "dir" sale como undeclared identifier. El proyecto
+    # aun no define ningun target wasm (el README lo lista como Planned), asi
+    # que este job no puede pasar hasta que exista. continue-on-error deja el
+    # rojo a la vista sin bloquear la rama.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
