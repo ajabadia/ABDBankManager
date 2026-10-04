@@ -127,6 +127,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify installed tree matches manifests
+        run: npm run verificar:entorno
+
       - name: Generate registry
         run: npm run generate
 
