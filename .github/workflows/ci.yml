@@ -313,21 +313,34 @@ jobs:
 
           # Un exe instrumentado depende de clang_rt.asan_dynamic-x86_64.dll,
           # que MSVC no copia al directorio de salida: sin ella el proceso
-          # muere con 0xC0000135. Solo sirve la de MSVC, la de LLVM no es
-          # intercambiable con el codigo que genera cl.exe.
-          $vsRoot = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio",
-                      "${env:ProgramFiles}\Microsoft Visual Studio")
-          $asanDll = Get-ChildItem -Path $vsRoot -Filter "clang_rt.asan_dynamic-x86_64.dll" `
-            -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\VC\\Tools\\MSVC\\' } |
-            Sort-Object FullName -Unique
-          if (-not $asanDll) {
-            Write-Error "No se encontro la runtime de ASan de MSVC en $vsRoot"
+          # muere con 0xC0000135. Y tiene que ser la de la MISMA version que
+          # el cl.exe que compilo el build: el runner tiene varias versiones de
+          # las herramientas instaladas y con la que no toca el proceso se
+          # queda colgado en vez de reportar nada.
+          $compilerCache = Get-ChildItem -Path build -Filter "CMakeCXXCompiler.cmake" `
+            -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $compilerCache) {
+            Write-Error "No se encontro CMakeCXXCompiler.cmake en build/"
             exit 1
           }
-          Write-Host "Runtime de ASan: $($asanDll[0].FullName)"
+          $compilerLine = Select-String -Path $compilerCache.FullName `
+            -Pattern 'CMAKE_CXX_COMPILER\s+"([^"]+)"' | Select-Object -First 1
+          if (-not $compilerLine) {
+            Write-Error "No se pudo leer CMAKE_CXX_COMPILER de $($compilerCache.FullName)"
+            exit 1
+          }
+          $compilerPath = $compilerLine.Matches[0].Groups[1].Value -replace '/', '\'
+          # La DLL vive en la misma carpeta que cl.exe, no un nivel arriba.
+          $toolBin = Split-Path $compilerPath -Parent
+          $asanDll = Join-Path $toolBin "clang_rt.asan_dynamic-x86_64.dll"
+          if (-not (Test-Path $asanDll)) {
+            Write-Error "No existe $asanDll; el runtime de ASan debe ir junto al compilador"
+            exit 1
+          }
+          Write-Host "Compilador: $compilerPath"
+          Write-Host "Runtime de ASan: $asanDll"
           foreach ($exe in $testExe) {
-            Copy-Item $asanDll[0].FullName -Destination $exe.DirectoryName -Force
+            Copy-Item $asanDll -Destination $exe.DirectoryName -Force
           }
 
           $timeoutSeconds = 300
