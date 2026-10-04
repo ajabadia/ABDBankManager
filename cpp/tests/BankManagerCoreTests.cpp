@@ -258,12 +258,21 @@ void testWebUIIpc()
 
 } // namespace
 
+// Las marcas se vacian a proposito: con la salida redirigida a fichero,
+// std::cout va con buffer y sin esto no se ve en que test se para el proceso.
+#define ABD_TEST_CASE(name)                                  \
+    do {                                                    \
+        std::cout << "[ RUN      ] " #name "\n" << std::flush; \
+        name();                                             \
+        std::cout << "[     OK ] " #name "\n" << std::flush;    \
+    } while (false)
+
 int main()
 {
-    testValueTreeRoundtrip();
-    testFactoryContentLoader();
-    testWebUIIpc();
-    testWebViewAdapter();
-    std::cout << "ABDBankManagerCoreTests: all tests passed\n";
+    ABD_TEST_CASE(testValueTreeRoundtrip);
+    ABD_TEST_CASE(testFactoryContentLoader);
+    ABD_TEST_CASE(testWebUIIpc);
+    ABD_TEST_CASE(testWebViewAdapter);
+    std::cout << "ABDBankManagerCoreTests: all tests passed\n" << std::flush;
     return 0;
 }
