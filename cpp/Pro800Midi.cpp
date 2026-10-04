@@ -57,7 +57,7 @@ juce::MemoryBlock Pro800MidiTransport::buildPatchDump(const juce::MemoryBlock& r
     const uint8_t prefix[] { 0xf0, 0x00, 0x20, 0x32, 0x00, 0x01, 0x24, 0x00, 0x78,
         static_cast<uint8_t>(slot % 128), static_cast<uint8_t>(slot / 128) };
     message.append(prefix, sizeof(prefix));
-    message.append(packed);
+    message.append(packed.getData(), packed.getSize());
     const uint8_t end = 0xf7;
     message.append(&end, 1);
     return message;
