@@ -231,7 +231,7 @@ const casioCzContract: ModelContract = {
 export const casioCz1000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1000',
-  compatibleModels: ['casio-cz101', 'casio-cz5000', 'casio-cz1'],
+  compatibleModels: ['casio-cz5000', 'casio-cz1'],
   displayName: 'Casio CZ-1000',
   thumbnail: 'casio-cz1000.webp',
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x13 }
