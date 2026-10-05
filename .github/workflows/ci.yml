@@ -425,14 +425,20 @@ jobs:
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel
 
+      # El nucleo es STATIC (cpp/CMakeLists.txt) y el plugin se llama "ABD Bank
+      # Manager Plugin" con espacios: el build por defecto no produce NINGUN
+      # fichero *BankManager*.dll, asi que este check no podía pasar nunca. No
+      # habia saltado porque el job `needs` a vitest, que llevaba rojo. Se
+      # verifica lo que el build si debe producir: la libreria del core y el
+      # binario de tests (que ademas ejecuta el job cpp-unit-tests).
       - name: Verify outputs
         run: |
-          $lib = Get-ChildItem -Path build -Filter "*.lib" -Recurse | Where-Object { $_.Name -like "*BankManager*" }
-          $dll = Get-ChildItem -Path build -Filter "*.dll" -Recurse | Where-Object { $_.Name -like "*BankManager*" }
-          if ($lib -and $dll) {
-            Write-Host "✅ Library and DLL found"
+          $lib = Get-ChildItem -Path build -Filter "ABDBankManagerCore.lib" -Recurse
+          $tests = Get-ChildItem -Path build -Filter "ABDBankManagerCoreTests.exe" -Recurse
+          if ($lib -and $tests) {
+            Write-Host "✅ ABDBankManagerCore.lib and ABDBankManagerCoreTests.exe found"
           } else {
-            Write-Error "Missing build outputs"
+            Write-Error "Missing build outputs (ABDBankManagerCore.lib / ABDBankManagerCoreTests.exe)"
             exit 1
           }
 
