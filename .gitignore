@@ -37,6 +37,11 @@ Desktop.ini
 # Windows junction for sirv dev server (mirrors vendor/images)
 WebUI/images
 
+# Junctions zero-copy a ABDSharedAssets (los crea build.bat; subirlos clonaria
+# el contenido de otro repo aqui dentro, contra la politica de assets compartidos)
+WebUI/vendor/styles
+WebUI/vendor/icons
+
 # --- Fixtures SysEx ---
 #
 # ANTES aqui ponia `fixtures/`, `*.syx` y `*.SYX`, con un comentario que decia

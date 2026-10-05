@@ -21,7 +21,10 @@ const PatchMetadataSchema = z.object({
   hardwareIds: z.array(z.string()).min(1),
   isFavorite: z.boolean(),
   rating: z.number().int().min(0).max(5),
-  versionNumber: z.number().int().positive()
+  versionNumber: z.number().int().positive(),
+  // Los patches llevan posicion explicita en el banco (libraryAdapter la
+  // escribe y validateBankAgainstContract la lee con `patch.index ?? position`).
+  index: z.number().int().min(0).optional()
 });
 
 export function validatePatchAgainstContract(
