@@ -98,7 +98,7 @@ export function toCanonicalSize(raw: Uint8Array, size: number): Uint8Array {
  * outside printable range, trim.
  */
 export function decodeAsciiName(bytes: Uint8Array, maxLen: number): string {
-  let end = Math.min(bytes.length, maxLen);
+  const end = Math.min(bytes.length, maxLen);
   let name = '';
   for (let i = 0; i < end; i++) {
     const c = bytes[i];
