@@ -31,6 +31,30 @@ function getJunoContracts(): ModelContract[] {
     .filter((c): c is ModelContract => c != null);
 }
 
+// Los cuatro Juno comparten formato byte a byte: ni los singles (23B) ni el
+// bulk llevan byte de modelo (ver parseFile en roland-juno.ts), asi que por
+// bytes el primer contrato de la lista gana siempre. El unico discriminante
+// real es el nombre del fichero — asi los distinguen los fixtures factory
+// (Juno106_*, Juno60_*, Juno6_*, HS60_*). Sin pista de nombre se conserva el
+// orden por defecto (juno106 primero), que es el que venia hasta ahora.
+// El orden de los patrones importa: "Juno6" no debe capturar "Juno60".
+const FILENAME_MODEL_HINTS: Array<{ pattern: RegExp; modelId: string }> = [
+  { pattern: /hs[\s_-]*60/i, modelId: 'roland-hs60' },
+  { pattern: /juno[\s_-]*106/i, modelId: 'roland-juno106' },
+  { pattern: /juno[\s_-]*60/i, modelId: 'roland-juno60' },
+  { pattern: /juno[\s_-]*6(?![0-9])/i, modelId: 'roland-juno6' },
+];
+
+/** Ordena los contratos poniendo primero el que nombre el fichero, si lo nombra. */
+function orderContractsForFilename(contracts: ModelContract[], filename: string): ModelContract[] {
+  const hint = FILENAME_MODEL_HINTS.find(h => h.pattern.test(filename))?.modelId;
+  if (!hint) return contracts;
+  return [
+    ...contracts.filter(c => c.modelId === hint),
+    ...contracts.filter(c => c.modelId !== hint),
+  ];
+}
+
 // ─── Import Adapter ───
 
 export class RolandJunoImportAdapter extends BaseImportAdapter {
@@ -55,7 +79,7 @@ export class RolandJunoImportAdapter extends BaseImportAdapter {
   }
 
   parse(data: Uint8Array, filename: string): ImportResult {
-    for (const contract of getJunoContracts()) {
+    for (const contract of orderContractsForFilename(getJunoContracts(), filename)) {
       if (!contract.parseFile) continue;
       const result: ContractFileParse | null = contract.parseFile(data, filename);
       if (result == null) continue;
