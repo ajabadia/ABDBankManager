@@ -21,8 +21,9 @@
  * The first byte of each group is the control byte whose bits
  * indicate the MSB of each subsequent byte.
  * The last group is zero-padded to a full 7 bytes, so the output
- * length is always a multiple of 8 (required by unpack7to8 and
- * by devices, which always transmit complete groups).
+ * length is always a multiple of 8 (required by devices, which always
+ * transmit complete groups). `unpack7to8` decodes padded and non-padded
+ * payloads alike; for wire-exact frames without padding use `pack8to7NoPad`.
  */
 export function pack8to7(data: Uint8Array): Uint8Array {
   const packed: number[] = [];
@@ -81,20 +82,57 @@ export function unpack7to8Dm(packed: Uint8Array): Uint8Array {
  * Every 7 input bytes produce 8 output bytes.
  * Input bytes have 7 significant bits; the MSB of each input byte
  * carries 1 bit of each of the next 7 output bytes.
- * Partial trailing groups are dropped (input must be a multiple of 8).
+ *
+ * Partial trailing groups are **decoded, not dropped** (parity with the C++
+ * codec `ABDSharedCode/HardwareDrivers/SysExCodec.cpp`): real devices end the
+ * payload mid-group — the MS2000/microKORG transmit a 254-byte program as 291
+ * payload bytes (36 full groups + 1 control + 2 data). A decoder that required
+ * a multiple of 8 silently lost the last bytes of every program.
  */
 export function unpack7to8(packed: Uint8Array): Uint8Array {
   const unpacked: number[] = [];
-  for (let i = 0; i < packed.length; i += 8) {
-    if (i + 8 > packed.length) break;
-    const group = packed.slice(i, i + 8);
-    const control = group[0];
-    for (let j = 0; j < 7; j++) {
+  let i = 0;
+  while (i < packed.length) {
+    const control = packed[i++];
+    for (let j = 0; j < 7 && i < packed.length; j++) {
       const highBit = (control >> (6 - j)) & 1;
-      unpacked.push(((highBit << 7) | (group[j + 1] & 0x7F)) & 0xFF);
+      unpacked.push(((highBit << 7) | (packed[i++] & 0x7F)) & 0xFF);
     }
   }
   return new Uint8Array(unpacked);
+}
+
+/**
+ * Korg-order 7-to-8 packer **without padding the final partial group**.
+ *
+ * The MS2000/microKORG transmit a 254-byte program as 291 payload bytes
+ * (36 full groups + 1 control + 2 data), not as 296 padded bytes: the same
+ * 291-byte length the plugin's C++ packer produces (`SysExCodec::pack8to7`,
+ * `MS2000HardwareProgram::packedPayloadSize()`). `pack8to7` zero-pads, which
+ * would make the frame 5 bytes longer than a real device's.
+ */
+export function pack8to7NoPad(data: Uint8Array): Uint8Array {
+  const packed: number[] = [];
+  for (let i = 0; i < data.length; i += 7) {
+    const count = Math.min(7, data.length - i);
+    let control = 0;
+    for (let j = 0; j < count; j++) {
+      if ((data[i + j] & 0x80) !== 0) control |= 1 << (6 - j);
+    }
+    packed.push(control);
+    for (let j = 0; j < count; j++) packed.push(data[i + j] & 0x7F);
+  }
+  return new Uint8Array(packed);
+}
+
+/**
+ * Inverse of `pack8to7NoPad`: Korg control-bit order with the partial trailing
+ * group decoded. Now that `unpack7to8` itself is tolerant of partial groups
+ * (parity with the C++ codec), this is an alias kept for its semantic name —
+ * Korg model contracts read real device payloads through it.
+ */
+export function unpack7to8Tolerant(packed: Uint8Array): Uint8Array {
+  return unpack7to8(packed);
 }
 
 // ─── Pro-800 7-to-8 Packing (no trailing-group padding) ───

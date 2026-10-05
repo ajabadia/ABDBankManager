@@ -106,12 +106,24 @@ const rolandJuno106Contract: ModelContract = {
     if (sysex.length < 6) return false;
     if (sysex[0] !== 0xF0 || sysex[1] !== 0x41) return false;
     if (sysex[sysex.length - 1] !== 0xF7) return false;
-    // Single patch: F0 41 30 ch [18B] F7 — no checksum, just validate format
-    if (sysex.length === 23 && sysex[2] === CMD_PATCH_DUMP) return true;
-    // Bulk dump: has checksum at second-to-last byte
-    if (sysex.length < 24) return false;
-    const payload = sysex.slice(5, sysex.length - 2);
-    return sysex[sysex.length - 2] === bulkChecksum(payload);
+    // Bulk dump: checksum at second-to-last byte
+    if (isJunoBulkDump(sysex)) return true;
+    // Single-patch frames have fixed length (23B) and NO checksum byte:
+    // F0 41 30 ch [18B] F7. Los ficheros de banco son N frames concatenados y
+    // los datos (rango completo 00-FF en fixtures sintéticos) pueden romper el
+    // split naive F0/F7 → recuperación por stride fijo con anclas validadas.
+    const FRAME_LEN = 4 + PATCH_DATA_SIZE + 1;
+    if (sysex.length >= FRAME_LEN && sysex.length % FRAME_LEN === 0) {
+      let ok = true;
+      for (let off = 0; off + FRAME_LEN <= sysex.length; off += FRAME_LEN) {
+        if (!isJunoSinglePatch(sysex.slice(off, off + FRAME_LEN))) { ok = false; break; }
+      }
+      if (ok) return true;
+    }
+    // Fallback: mensajes bien formados vía split estándar
+    const msgs = splitSysexMessages(sysex);
+    if (msgs.length === 0) return false;
+    return msgs.every(m => isJunoSinglePatch(m) || isJunoBulkDump(m));
   },
 
   buildPatchSysEx(rawData: Uint8Array, _slot: number, channel: number): Uint8Array {
@@ -149,7 +161,8 @@ const rolandJuno106Contract: ModelContract = {
   },
 
   parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
-    const parsed = splitSysexMessages(data).flatMap(msg => {
+    // Path A: split estándar (bulk dumps y ficheros bien formados)
+    let parsed = splitSysexMessages(data).flatMap(msg => {
       if (isJunoSinglePatch(msg)) {
         return [{ rawData: msg.slice(4, 4 + PATCH_DATA_SIZE), slot: 0 }];
       }
@@ -165,6 +178,21 @@ const rolandJuno106Contract: ModelContract = {
       }
       return [];
     });
+    // Path B: los single-patch frames son de longitud fija (F0 41 30 ch + 18B +
+    // F7 = 23B) y no llevan modelId; los datos pueden contener bytes F0/F7 y
+    // romper el split naive. Recuperación por stride fijo con validación de
+    // anclas (F0/41/30.../F7) en cada frame.
+    const FRAME_LEN = 4 + PATCH_DATA_SIZE + 1;
+    if (data.length >= FRAME_LEN && data.length % FRAME_LEN === 0) {
+      const frames: { rawData: Uint8Array; slot: number }[] = [];
+      let ok = true;
+      for (let off = 0; off + FRAME_LEN <= data.length; off += FRAME_LEN) {
+        const frame = data.slice(off, off + FRAME_LEN);
+        if (!isJunoSinglePatch(frame)) { ok = false; break; }
+        frames.push({ rawData: frame.slice(4, 4 + PATCH_DATA_SIZE), slot: frames.length });
+      }
+      if (ok && frames.length > parsed.length) parsed = frames;
+    }
     if (parsed.length === 0) return null;
     const patches = parsed.map((p, i) => ({
       name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
@@ -221,6 +249,7 @@ export const rolandJuno60Contract: ModelContract = {
   modelId: 'roland-juno60',
   displayName: 'Roland Juno-60',
   thumbnail: 'roland-juno-60.webp',
+  compatibleModels: ['roland-juno106', 'roland-juno6', 'roland-hs60'],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3D
@@ -233,6 +262,7 @@ export const rolandJuno6Contract: ModelContract = {
   modelId: 'roland-juno6',
   displayName: 'Roland Juno-6',
   thumbnail: 'roland-juno-6.webp',
+  compatibleModels: ['roland-juno106', 'roland-juno60', 'roland-hs60'],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3C
@@ -245,6 +275,7 @@ export const rolandHs60Contract: ModelContract = {
   modelId: 'roland-hs60',
   displayName: 'Roland HS-60',
   thumbnail: 'roland-hs60.webp',
+  compatibleModels: ['roland-juno106', 'roland-juno60', 'roland-juno6'],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx!,
     modelIdByte: 0x3E

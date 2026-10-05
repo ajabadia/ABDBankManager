@@ -38,12 +38,30 @@ const MODEL_IDS: Record<string, number> = {
   'casio-cz1':    0x15
 };
 
-function isCasioSysEx(msg: Uint8Array, modelId: number): boolean {
+// Model byte -> modelId / patch size (evidencia: fixtures factory reales).
+const MODEL_BY_BYTE: Record<number, { modelId: string; dataSize: number }> = {
+  0x12: { modelId: 'casio-cz101',  dataSize: 128 },
+  0x13: { modelId: 'casio-cz1000', dataSize: 128 },
+  0x14: { modelId: 'casio-cz5000', dataSize: 128 },
+  0x15: { modelId: 'casio-cz1',    dataSize: 288 }
+};
+
+function isCasioSysEx(msg: Uint8Array, modelId?: number): boolean {
   return msg.length >= 9
     && msg[0] === 0xF0 && msg[1] === 0x44
     && msg[2] === 0x00 && msg[3] === 0x00
-    && msg[4] === modelId && msg[5] === CMD_DUMP
+    && (modelId === undefined || (msg[4] === modelId && MODEL_BY_BYTE[msg[4]] !== undefined))
+    && (modelId !== undefined || MODEL_BY_BYTE[msg[4]] !== undefined)
+    && msg[5] === CMD_DUMP
     && msg[msg.length - 1] === 0xF7;
+}
+
+/**
+ * Checksum CZ (verificado contra los 128 mensajes de los fixtures factory):
+ * suma & 0x7F desde el byte 6 (canal) hasta el ultimo nibble, excluyendo ck y F7.
+ */
+function czChecksumRegion(msg: Uint8Array): number {
+  return casioChecksum(msg.slice(6, msg.length - 2));
 }
 
 function getBankLetter(index: number): string {
@@ -104,11 +122,9 @@ const casioCzContract: ModelContract = {
   },
 
   verifyChecksum(sysex: Uint8Array): boolean {
-    if (sysex.length < 9) return false;
-    if (sysex[0] !== 0xF0 || sysex[1] !== 0x44) return false;
-    if (sysex[sysex.length - 1] !== 0xF7) return false;
-    const nibbles = sysex.slice(7, sysex.length - 2);
-    return sysex[sysex.length - 2] === casioChecksum(nibbles);
+    const msgs = splitSysexMessages(sysex).filter(m => isCasioSysEx(m));
+    if (msgs.length === 0) return false;
+    return msgs.every(m => m[m.length - 2] === czChecksumRegion(m));
   },
 
   buildPatchSysEx(rawData: Uint8Array, _slot: number, channel: number): Uint8Array {
@@ -118,7 +134,6 @@ const casioCzContract: ModelContract = {
     const padded = new Uint8Array(dataSize);
     padded.set(data);
     const nibbles = encodeNibble(padded);
-    const checksum = casioChecksum(nibbles);
     const result = new Uint8Array(7 + nibbles.length + 2);
     result[0] = 0xF0;
     result[1] = 0x44;
@@ -128,17 +143,18 @@ const casioCzContract: ModelContract = {
     result[5] = CMD_DUMP;
     result[6] = channel & 0x0F;
     result.set(nibbles, 7);
-    result[7 + nibbles.length] = checksum;
+    // El checksum cubre desde el byte de canal (6) hasta el último nibble.
+    result[7 + nibbles.length] = casioChecksum(result.slice(6, 7 + nibbles.length));
     result[7 + nibbles.length + 1] = 0xF7;
     return result;
   },
 
   parsePatchSysEx(sysex: Uint8Array): { rawData: Uint8Array; slot: number } | null {
-    const modelId = MODEL_IDS[this.modelId] || 0x12;
-    if (!isCasioSysEx(sysex, modelId)) return null;
+    if (!isCasioSysEx(sysex)) return null;
+    const info = MODEL_BY_BYTE[sysex[4]];
+    const dataSize = info?.dataSize ?? PATCH_DATA_SIZE;
     const nibbles = sysex.slice(7, sysex.length - 2);
     const decoded = decodeNibble(nibbles);
-    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
     return { rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: 0 };
   },
 
@@ -148,26 +164,27 @@ const casioCzContract: ModelContract = {
   },
 
   parseDumpResponse(sysex: Uint8Array): { rawData: Uint8Array; slot: number }[] {
-    const modelId = MODEL_IDS[this.modelId] || 0x12;
     const msgs = splitSysexMessages(sysex);
     const results: { rawData: Uint8Array; slot: number }[] = [];
     for (const msg of msgs) {
-      if (isCasioSysEx(msg, modelId)) {
+      if (isCasioSysEx(msg)) {
+        const info = MODEL_BY_BYTE[msg[4]];
+        const dataSize = info?.dataSize ?? PATCH_DATA_SIZE;
         const nibbles = msg.slice(7, msg.length - 2);
         const decoded = decodeNibble(nibbles);
-        results.push({ rawData: new Uint8Array(decoded.slice(0, PATCH_DATA_SIZE)), slot: results.length });
+        results.push({ rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: results.length });
       }
     }
     return results;
   },
 
   parseFile(data: Uint8Array, _filename: string): ContractFileParse | null {
-    const modelId = MODEL_IDS[this.modelId] || 0x12;
-    const parsed = splitSysexMessages(data)
-      .filter(m => isCasioSysEx(m, modelId))
+    const msgs = splitSysexMessages(data).filter(m => isCasioSysEx(m));
+    if (msgs.length === 0) return null;
+    const firstModel = MODEL_BY_BYTE[msgs[0][4]]?.modelId;
+    const parsed = msgs
       .map(m => this.parsePatchSysEx?.(m))
       .filter((p): p is { rawData: Uint8Array; slot: number } => p !== null);
-    if (parsed.length === 0) return null;
     const patches = parsed.map((p, i) => ({
       name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
       category: this.defaultCategory,
@@ -180,7 +197,7 @@ const casioCzContract: ModelContract = {
       creationDate: new Date().toISOString(),
     }));
     return {
-      modelId: this.modelId,
+      modelId: firstModel || this.modelId,
       bankName: `Casio ${this.displayName}`,
       patches,
       warnings: [],
@@ -214,6 +231,7 @@ const casioCzContract: ModelContract = {
 export const casioCz1000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1000',
+  compatibleModels: ['casio-cz101', 'casio-cz5000', 'casio-cz1'],
   displayName: 'Casio CZ-1000',
   thumbnail: 'casio-cz1000.webp',
   legacySysEx: { ...casioCzContract.legacySysEx!, modelIdByte: 0x13 }
@@ -222,6 +240,7 @@ export const casioCz1000Contract: ModelContract = {
 export const casioCz5000Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz5000',
+  compatibleModels: ['casio-cz101', 'casio-cz1000', 'casio-cz1'],
   displayName: 'Casio CZ-5000',
   thumbnail: 'casio-cz5000.webp',
   bankCapacity: 32,
@@ -232,6 +251,7 @@ export const casioCz5000Contract: ModelContract = {
 export const casioCz1Contract: ModelContract = {
   ...casioCzContract,
   modelId: 'casio-cz1',
+  compatibleModels: ['casio-cz101', 'casio-cz1000', 'casio-cz5000'],
   displayName: 'Casio CZ-1',
   thumbnail: 'casio-cz1.webp',
   bankCapacity: 64,
