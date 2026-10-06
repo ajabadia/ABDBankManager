@@ -1156,6 +1156,53 @@ Cada proyecto solo necesita definir sus variables CSS de tema. El Bank Manager h
 | 5 | **¿Audición de patches?** | **No** | Solo presentación, organización y almacenaje. Sin motor de audio. |
 | 6 | **¿Permisos de usuario?** | **No de momento, pero preparar la arquitectura** | La librería incluirá un campo `userId` opcional en el schema. No se implementan roles ni login en esta versión, pero el modelo no debe impedir añadirlos en el futuro. |
 | 7 | **¿Versión web vs standalone?** | **Ambas** | Standalone (Tauri) para gestión offline con acceso total a filesystem. Web (SPA) para acceso ligero desde cualquier navegador. La librería se persiste en IndexedDB (web) o SQLite/JSON local (Tauri). |
+| 8 | **¿Job WASM de CI?** | **Retirado el 2026-10-06, con decisión documentada** | No existe target wasm y JUCE (pin 9.0.1 → 9.0.3) no compila bajo emscripten. Reentrada sujeta a los criterios de §14.1; el bloque maestro vive en `.github/workflows/ci.yml`. |
+
+### 14.1 Retiro del job WASM y criterios de reentrada (2026-10-06)
+
+**La decisión.** El job `wasm-build` de la CI estuvo rojo semanas con `continue-on-error` — la peor
+combinación posible: un rojo que nadie mira. Antes de retirarlo se intentó arreglar de verdad y se 
+midió (2026-10-06, contra el pin 9.0.1 = `e18f7f5` y el último release, 9.0.3):
+
+1. **No hay ningún target wasm en el proyecto** (README: "WASM AudioWorklet — Planned"; decisión 5 de
+   esta tabla: "Sin motor de audio"). El job compilaba el árbol entero bajo emscripten sin producir
+   ningún artefacto que consuma nadie: un verde ahí no verificaría nada.
+2. **Este árbol no puede compilar bajo emscripten con JUCE, ni en 9.0.1 ni en 9.0.3** — cero commits
+   wasm/emscripten entre ambos tags, y los dos ficheros que fallan sin ningún cambio:
+   `juce_ThreadPriorities_native.h` no tiene rama `JUCE_WASM` (la tabla sale vacía y el compilador
+   revienta en `std::size`/`std::begin`) y `juce_SystemStats_wasm.cpp` llama a `emscripten_get_now` sin
+   incluir `<emscripten.h>`. Además `juce_audio_devices` y `juce_events` no tienen ninguna ruta wasm —
+   y el core del proyecto los enlaza.
+3. **Arreglar eso exigiría parchear JUCE aquí (o mantener un fork) para un target que no existe.** Eso
+   no es arreglar un job: es empezar un puerto de plataforma sin consumidor.
+
+**Los dos arreglos reales que salieron del intento y se quedaron:**
+
+- El root `CMakeLists.txt` invocaba `Scripts/...` con mayúsculas; en un FS case-sensitive (Linux) node
+  no encontraba `build_webui.js` ni `registry_generator.js`. Eso rompía **cualquier build en Linux**.
+  Hoy está custodiado por el job `linux-cmake-core` (§ de CI), que ejecuta `GenerateAll` en ubuntu.
+- `add_subdirectory(apps/juce-plugin)` quedó bajo `if(NOT EMSCRIPTEN)`: el plugin es nativo
+  (VST3/WebView2) y bajo emscripten moriría en el SDK VST3 de Steinberg (medido: `funknown.h` revienta
+  en `PLUGIN_API`).
+
+**Criterios de reentrada** (registrados también en `.github/workflows/ci.yml`):
+
+- **(a)** exista un target wasm real que produzca un artefacto verificable.
+- **(b)** el JUCE fijado compile ese árbol bajo emscripten sin parches nuestros. Se comprueba en un
+  minuto: `git log -i --grep=wasm <pin>..<tag>` en el repo oficial de JUCE y un
+  `emcmake cmake && cmake --build` de prueba.
+
+El README no cambia hasta que (a) sea real: WASM AudioWorklet sigue siendo Planned.
+
+**Actualización posterior (mismo día, investigación de viabilidad).** (b), tal como está escrito, hoy no
+se puede satisfacer sin enmendarlo: la suite ya tiene precedente de camino abierto — ABDNeural compila
+JUCE bajo em++ con **dos workarounds locales sin fork** en su `wasm/CMakeLists.txt` (parche en el propio
+configure sobre `juce_ThreadPriorities_native.h`, cuya ancla existe idéntica en 9.0.1, y un
+`-includeemscripten.h` global), y no linkea `juce_audio_devices` porque **el AudioWorklet es la E/S de
+audio**. Reentrar por ese camino exige decidir explícitamente si (b) acepta esos workarounds de la suite
+o sigue exigiendo el fix de upstream; y definir primero el alcance del target en este repo (la fila 5 de
+esta tabla dice que aquí no hay motor de audio). Mientras ambas cosas no se decidan, el criterio tal
+como está escrito se mantiene y el job sigue retirado.
 
 ---
 
