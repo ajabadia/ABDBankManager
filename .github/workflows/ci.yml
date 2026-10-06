@@ -276,6 +276,15 @@ jobs:
           cmake --build build --parallel --target GenerateAll
           cmake --build build --parallel --target ABDBankManagerCoreTests
 
+      # Compilar no basta: el binario tiene que CORRER en Linux. ctest recoge
+      # ABDBankManagerCoreTests (el unico add_test del grafo: los tests de
+      # ABDSharedCode estan apagados con ABDSHAREDCODE_BUILD_*_TESTS=OFF en el
+      # root) y su exit code es el del paso. --output-on-failure: callado en
+      # verde, con el volcado completo en rojo. Los windows ya los corría el
+      # job C++ Unit Tests; esto mide el mismo binario en el otro sistema.
+      - name: Run C++ Tests
+        run: ctest --test-dir build --output-on-failure
+
   # --- WASM Build: RETIRADO el 2026-10-06 (decision documentada) ---
   #
   # El job existio y estuvo rojo semanas con continue-on-error — la peor
