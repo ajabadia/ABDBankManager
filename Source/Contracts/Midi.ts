@@ -1,12 +1,4 @@
-/**
- * Platform-neutral MIDI port shapes used by hardware discovery.
- * Browser Web MIDI, Tauri and JUCE adapters can all provide these fields.
- */
-export interface MidiPortInfo {
-  id?: string;
-  name?: string;
-  manufacturer?: string;
-  type?: 'input' | 'output' | string;
-}
-
-export type MidiOutputPortInfo = MidiPortInfo;
+// Shim del corte F4 de BankManager (DOCS/bank-manager-module-cut.md):
+// el canonico vive en ABDSharedCode/BankManager/Contracts/Midi.ts.
+// Este shim mantiene el path de importacion de los consumidores.
+export * from '../../../ABDSharedCode/BankManager/Contracts/Midi.ts';
