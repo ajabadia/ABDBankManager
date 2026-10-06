@@ -154,7 +154,15 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     # El job WASM de CI se retiro con decision documentada — ver el bloque en
     # .github/workflows/ci.yml; esta compuerta se queda para que un
     # `emcmake cmake` futuro configure el arbol sin arrastrar el plugin.
-    if(NOT EMSCRIPTEN)
+    # El plugin es opcional. `-DABDBANKMANAGER_BUILD_PLUGIN=OFF` configura el
+    # arbol SIN apps/juce-plugin: lo usa el job de CI "Linux CMake Core" para
+    # compilar nucleo + GenerateAll en un FS case-sensitive (el guard del bug
+    # de mayusculas de `scripts/`) sin arrastrar el SDK VST3 de Steinberg ni
+    # la superficie de JUCE plugin. Por defecto ON: nada cambia en los builds
+    # Windows ni en build.bat.
+    option(ABDBANKMANAGER_BUILD_PLUGIN
+        "Build the native plugin (VST3/Standalone WebView host)" ON)
+    if(NOT EMSCRIPTEN AND ABDBANKMANAGER_BUILD_PLUGIN)
         add_subdirectory(apps/juce-plugin)
     endif()
 

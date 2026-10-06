@@ -124,4 +124,22 @@ if(BUILD_TESTING)
         target_link_libraries(ABDBankManagerCoreTests PRIVATE ABDShared::WebView2Bridge)
     endif()
     add_test(NAME ABDBankManagerCoreTests COMMAND ABDBankManagerCoreTests)
+
+    # LINUX/BSD: los pkg de JUCE que solo llegan a los targets `juce_add_*`.
+    # `_juce_link_optional_libraries` (JUCEUtils.cmake) linkea
+    # `juce::pkgconfig_JUCE_BROWSER_LINUX_DEPS` y `_CURL_` PRIVATE en los
+    # targets que piden NEEDS_WEB_BROWSER / NEEDS_CURL; este test es un
+    # `add_executable` plano, asi que sin estos -I juce_gui_extra.cpp, que
+    # llega aqui via WebView2Bridge, se compila con JUCE_WEB_BROWSER=1 (el
+    # default de cabecera) y sin los flags de gtk/webkit: `fatal error:
+    # gtk/gtk.h: No such file or directory`, medido en CI. Apagar el
+    # navegador (JUCE_WEB_BROWSER=0) NO vale: JUCE esconde la clase
+    # WebBrowserComponent y WebView2ResourceProvider.h la usa en su API
+    # (tambien medido). El plugin sigue como siempre: juce_add_plugin pide
+    # sus deps solo.
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(ABDBankManagerCoreTests PRIVATE
+            juce::pkgconfig_JUCE_BROWSER_LINUX_DEPS
+            juce::pkgconfig_JUCE_CURL_LINUX_DEPS)
+    endif()
 endif()
