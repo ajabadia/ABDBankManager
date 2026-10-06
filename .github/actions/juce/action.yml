@@ -122,3 +122,62 @@ runs:
 
         echo "JUCE ${version} en ${destino} (commit ${sha})"
         grep -m1 'project(JUCE VERSION' "${destino}/CMakeLists.txt"
+
+    # --- WebView2 ---
+    #
+    # POR QUE, Y POR QUE AHORA. Desde que apps/juce-plugin esta en el arbol
+    # (corte del modulo bancario), Configure CMake muere con
+    # `Could NOT find WebView2 (missing: WebView2_include_dir WebView2_library)`:
+    # juce_add_plugin del plugin lo pide obligatorio en JUCEUtils.cmake:306, y
+    # los runners de GitHub no traen el paquete NuGet en la carpeta que
+    # FindWebView2.cmake mira. Antes el directorio no estaba en el arbol, el
+    # if(EXISTS) del root saltaba el plugin, y este problema no existia.
+    #
+    # DONDE MIRA EL FINDER, Y POR QUE ESTE PASO LO SATISFACE. Sin
+    # JUCE_WEBVIEW2_PACKAGE_LOCATION busca en
+    # %USERPROFILE%/AppData/Local/PackageManagement/NuGet/Packages, se queda
+    # con el primer directorio que case con *Microsoft.Web.WebView2* y contenga
+    # build/native/include/WebView2.h, y de ahi lee el include y
+    # build/native/x64/WebView2LoaderStatic.lib. Es exactamente el layout que
+    # produce `Install-Package -Scope CurrentUser` del propio aviso de JUCE,
+    # pero bajando el .nupkg directo (un zip) con Invoke-WebRequest: una
+    # descarga menos (el proveedor NuGet de PackageManagement) y una
+    # comprobacion explicita del header, que es lo que el finder exige.
+    #
+    # VERSION FIJA. 1.0.3485.44 es la que JUCE nombra en su propio aviso.
+    # Cualquier otra serviria (el glob solo casea el nombre del directorio),
+    # pero fijarla hace que dos runs distintos midan lo mismo.
+    #
+    # SOLO WINDOWS, Y POR QUE SE TOCA ESTA ACCION. Los cinco jobs que la
+    # usan compilan el plugin en windows; el WASM (ubuntu/emscripten) tambien
+    # la usa y ahi FindWebView2 ni se invoca (rama WIN32), asi que el `if`
+    # del paso es lo que deja el paso donde hace falta y fuera donde sobra.
+    #
+    # IDEMPOTENTE, como el paso de JUCE de arriba: si el header ya esta, no se
+    # descarga nada (un retry no vuelve a bajar el paquete).
+    - name: Bajar WebView2 a la carpeta NuGet del usuario
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $version = '1.0.3485.44'
+        $dest = Join-Path $env:USERPROFILE 'AppData\Local\PackageManagement\NuGet\Packages'
+        $pkg = Join-Path $dest "Microsoft.Web.WebView2.$version"
+        $header = Join-Path $pkg 'build\native\include\WebView2.h'
+
+        if (Test-Path $header) {
+          Write-Host "WebView2 $version ya esta en $pkg"
+          exit 0
+        }
+
+        New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+        $zip = Join-Path $env:RUNNER_TEMP "Microsoft.Web.WebView2.$version.zip"
+        # El endpoint v2 de nuget.org redirige al tarball; Invoke-WebRequest
+        # sigue la redireccion solo.
+        Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$version" -OutFile $zip
+        Expand-Archive -Path $zip -DestinationPath $pkg -Force
+
+        if (-not (Test-Path $header)) {
+          Write-Error "El .nupkg de WebView2 $version no contiene $header: FindWebView2 seguira fallando."
+          exit 1
+        }
+        Write-Host "WebView2 $version en $pkg"
