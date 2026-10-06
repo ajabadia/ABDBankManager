@@ -1039,7 +1039,7 @@ D:\desarrollos\ABDSynths\ABDBankManager\
 | `contracts/cz5000Banks.js` | Adapter Casio CZ con modo CZ-5000 | `detectBankModel()` → ModelContract |
 | `ui/bankManager.js` | `@abdsynths/bank-manager-ui` + contrato `casio-cz` | El componente UI se vuelve genérico |
 | `styles/bankManager.css` | `@abdsynths/bank-manager-ui/styles` | CSS genérico con variables de tema |
-| `Source/State/BankManager.cpp` | `cpp/ABDBankManagerCore.cpp` | C++ genérico |
+| `Source/State/BankManager.cpp` | `ABDSharedCode/BankManager/ABDBankManagerCore.cpp` | C++ genérico |
 
 ### 10.2 ABDEep
 
@@ -1047,13 +1047,13 @@ D:\desarrollos\ABDSynths\ABDBankManager\
 |---|---|---|
 | `components/bank-manager.js` (HTML inline) | `@abdsynths/bank-manager-ui` | El dual-panel hardware/local se convierte en el diseño estándar |
 | `Source/Core/BankFileReader.h/cpp` | `@abdsynths/bank-manager-adapters/importers/sysex-behringer-dm12.js` | Parseo SysEx DeepMind |
-| `Source/Core/PresetManager.h` | `cpp/ABDBankManagerCore.h` + ModelContract | La persistencia en Documents/ABDEep/Presets migra |
+| `Source/Core/PresetManager.h` | `ABDSharedCode/BankManager/ABDBankManagerCore.h` + ModelContract | La persistencia en Documents/ABDEep/Presets migra |
 
 ### 10.3 ABDJUNiO601
 
 | Componente actual | Se reemplaza por | Notas |
 |---|---|---|
-| `Source/Core/BaseClass/PresetManagerBase.h` | `cpp/ABDBankManagerCore.h` | La base class `ABD::PresetManagerBase` se generaliza |
+| `Source/Core/BaseClass/PresetManagerBase.h` | `ABDSharedCode/BankManager/ABDBankManagerCore.h` | La base class `ABD::PresetManagerBase` se generaliza |
 | `Source/Core/PresetManager.h/cpp` | ModelContract `roland-juno106` + Core | `loadTape`, `importPresetsFromFile` → adapters |
 | `Source/Core/Importers/JunoSysexImporter.h/cpp` | `adapters/importers/sysex-roland-juno.js` | |
 | `Source/Core/JunoSysExEngine.h/cpp` | `adapters/hardware/hw-roland-juno.js` | Dump/fetch bidireccional |
