@@ -1199,13 +1199,20 @@ async function renderPatchDetail(container) {
 }
 
 // ─── MIDI ───
+/**
+ * Empareja la entrada con la salida indicada.
+ *
+ * Solo nombre exacto (con la normalizacion a minusculas de siempre): es el
+ * mismo criterio fail-closed del `findMatchingInput` de ABDSharedCode
+ * (JuceMidiHardwareBackend). La version anterior aceptaba
+ * `incluye/está incluida`, que podia emparejar el puerto equivocado (un
+ * nombre corto contenia a otro); null = sin entrada y el transporte sigue
+ * en modo solo-salida, que ya estaba contemplado.
+ */
 function findMatchingInput(outputName, inputs) {
   if (!outputName || inputs.length === 0) return null;
   const n = outputName.toLowerCase();
-  return inputs.find(p => {
-    const inp = (p.name || '').toLowerCase();
-    return inp === n || inp.includes(n) || n.includes(inp);
-  }) || null;
+  return inputs.find(p => (p.name || '').toLowerCase() === n) || null;
 }
 
 const ALL_MODELS = getAllModels().map(m => ({ id: m.id, name: m.name }));
