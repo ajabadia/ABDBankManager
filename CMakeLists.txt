@@ -126,8 +126,11 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     endif()
 
     # --- Build Version Generation ---
+    # minusculas, como el directorio real (`scripts/`): en Windows da igual, pero
+    # en un FS case-sensitive (Linux, el job WASM de CI) node acaba con
+    # "Cannot find module .../Scripts/build_webui.js" y el target revienta.
     add_custom_target(GenerateBuildVersion
-        COMMAND node ${CMAKE_SOURCE_DIR}/Scripts/build_webui.js
+        COMMAND node ${CMAKE_SOURCE_DIR}/scripts/build_webui.js
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Generating BuildVersion.h and buildVersion.js"
         VERBATIM
@@ -135,7 +138,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
 
     # --- Registry Generation ---
     add_custom_target(GenerateRegistry
-        COMMAND node ${CMAKE_SOURCE_DIR}/Scripts/registry_generator.js
+        COMMAND node ${CMAKE_SOURCE_DIR}/scripts/registry_generator.js
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Generating ParameterRegistry.gen.h/.cpp and registry.gen.js"
         VERBATIM
@@ -144,7 +147,16 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     add_custom_target(GenerateAll DEPENDS GenerateRegistry GenerateBuildVersion)
 
     # --- Concrete JUCE WebView host/plugin ---
-    add_subdirectory(apps/juce-plugin)
+    # El plugin es un artefacto NATIVO (VST3/Standalone con WebView2) y no existe
+    # historia que construir de el bajo emscripten: JUCE no soporta emscripten
+    # (medido: 9.0.1 -> 9.0.3 sin un solo commit wasm) y el SDK VST3 de
+    # Steinberg no compila con su clang (funknown.h revienta en PLUGIN_API).
+    # El job WASM de CI se retiro con decision documentada — ver el bloque en
+    # .github/workflows/ci.yml; esta compuerta se queda para que un
+    # `emcmake cmake` futuro configure el arbol sin arrastrar el plugin.
+    if(NOT EMSCRIPTEN)
+        add_subdirectory(apps/juce-plugin)
+    endif()
 
     # --- Installation ---
     install(FILES

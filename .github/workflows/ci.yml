@@ -212,54 +212,46 @@ jobs:
             Write-Warning "No test executable found"
           }
 
-  # --- WASM Build ---
-  wasm-build:
-    name: WASM Build
-    runs-on: ubuntu-latest
-    # Falla por un bug de JUCE 8.0.4, no por codigo del proyecto: en
-    # juce_PropertiesFile.cpp la variable dir se declara solo dentro de las
-    # ramas JUCE_LINUX, JUCE_WINDOWS y JUCE_APPLE, y emscripten no define
-    # ninguna, con lo que "dir" sale como undeclared identifier. El proyecto
-    # aun no define ningun target wasm (el README lo lista como Planned), asi
-    # que este job no puede pasar hasta que exista. continue-on-error deja el
-    # rojo a la vista sin bloquear la rama.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v16
-        with:
-          version: '3.1.50'
-          actions-cache-folder: 'emsdk-cache'
-
-      # ESTE JOB NO TENIA NINGUN PASO DE JUCE, y por eso moria antes que los
-      # otros: los de Windows tenian un "Install JUCE" que no instalaba nada,
-      # y este no tenia ni el paso inútil. Los cuatro caian en el mismo sitio,
-      # por el mismo motivo, en `find_package(JUCE 8 REQUIRED CONFIG)`.
-      - name: Install JUCE
-        uses: ./.github/actions/juce
-        with:
-          version: '9.0.1'
-          sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
-
-      - name: Install X11 headers
-        run: |
-          # juceaide es una herramienta nativa que JUCE compila durante el
-          # configure, y en Linux linka contra X11. Sin esto el configure
-          # muere en "fatal error: X11/Xlib.h: No such file or directory".
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libasound2-dev libfreetype6-dev libcurl4-openssl-dev libglib2.0-dev libfontconfig1-dev pkg-config
-
-      - name: Configure WASM CMake
-        run: |
-          source $EMSDK/emsdk_env.sh
-          emcmake cmake -B build-wasm -S . -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build WASM
-        run: |
-          source $EMSDK/emsdk_env.sh
-          cmake --build build-wasm --config Release --parallel
+  # --- WASM Build: RETIRADO el 2026-10-06 (decision documentada) ---
+  #
+  # El job existio y estuvo rojo semanas con continue-on-error — la peor
+  # combinacion posible: un rojo que nadie mira. Antes de retirarlo se
+  # intento arreglarlo de verdad, y esto es lo que se midio (2026-10-06,
+  # contra el pin 9.0.1 = e18f7f5 y el ultimo release, 9.0.3):
+  #
+  #   1. No hay NINGUN target wasm en el proyecto (README: WASM AudioWorklet
+  #      — Planned), asi que el job compilaba el arbol entero bajo emscripten
+  #      sin producir ningun artefacto que consuma nadie. Un verde ahi no
+  #      verificaria nada, y sin target tampoco hay nada que arreglar.
+  #   2. Este arbol no puede compilar bajo emscripten con JUCE, ni en 9.0.1
+  #      ni en 9.0.3 (medido sobre el repo oficial: CERO commits
+  #      wasm/emscripten entre ambos tags, y los dos ficheros que fallan sin
+  #      ningun cambio): juce_ThreadPriorities_native.h no tiene rama
+  #      JUCE_WASM (la tabla sale vacia y el compilador revienta en
+  #      std::size), juce_SystemStats_wasm.cpp llama a emscripten_get_now sin
+  #      incluir emscripten.h, y juce_audio_devices / juce_events no tienen
+  #      NINGUNA ruta wasm — y el core del proyecto los enlaza.
+  #   3. Arreglar eso exigiria parchear modulos de JUCE aqui (o mantener un
+  #      fork) para un target que no existe. Eso no es arreglar un job: es
+  #      empezar un puerto de plataforma con un consumidor imaginario.
+  #
+  # DOS ARREGLOS REALES SALIERON DEL INTENTO y se quedan:
+  #   - El root CMakeLists invocaba `Scripts/...` con mayusculas; en un FS
+  #     case-sensitive (Linux) node no encontraba build_webui.js ni
+  #     registry_generator.js. Eso rompia CUALQUIER build en Linux, no solo
+  #     este job.
+  #   - add_subdirectory(apps/juce-plugin) quedo bajo `if(NOT EMSCRIPTEN)` en
+  #     el root CMakeLists: el plugin es nativo (VST3/WebView2) y bajo
+  #     emscripten moriria en el SDK VST3 de Steinberg (medido: fununknown.h
+  #     revienta en PLUGIN_API).
+  #
+  # CRITERIO DE RE-ENTRADA: anadir el job de nuevo el dia que (a) exista un
+  # target wasm real que produzca un artefacto verificable, y (b) el JUCE
+  # fijado compile ese arbol bajo emscripten sin parches nuestros. (b) se
+  # comprueba en un minuto: `git log -i --grep=wasm <pin>..<tag>` en el repo
+  # de JUCE oficial y un `emcmake cmake && cmake --build` de prueba. El README
+  # no cambia: WASM AudioWorklet sigue siendo Planned.
+  #
 
   # --- Plugin Validation ---
   pluginval:
