@@ -343,6 +343,22 @@ function main() {
     process.exitCode = 1;
     return;
   }
+
+  // El corte F4 (DOCS/bank-manager-module-cut.md) dejo Source/Contracts como
+  // shim hacia ../ABDSharedCode/BankManager/Contracts: sin el hermano clonado
+  // al lado, `npm run generate` y la suite mueren en "Could not resolve" de
+  // esbuild. Aqui el aviso llega antes y con la accion escrita. Va en main()
+  // y no en verificar(): verificar() es una funcion pura sobre un arbol
+  // fixture y sus tests exigen que no conoce nada fuera de ese arbol.
+  const canonico = path.resolve(raizPorDefecto, '..', 'ABDSharedCode', 'BankManager', 'Contracts', 'index.ts');
+  if (!fs.existsSync(canonico)) {
+    console.log(`ERROR  falta ${canonico}`);
+    console.log('');
+    console.log('ENTORNO INCOMPLETO: Source/Contracts es un shim hacia ../ABDSharedCode (corte F4).');
+    console.log('Clona ABDSharedCode al lado (ci.yml lo hace en los jobs npm) y vuelve a lanzar.');
+    process.exitCode = 1;
+    return;
+  }
   console.log('OK: el arbol instalado corresponde a los manifiestos.');
 }
 

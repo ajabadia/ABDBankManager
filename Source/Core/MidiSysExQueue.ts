@@ -3,6 +3,8 @@
  * Rate-limited queue for bidirectional SysEx communication per hardware
  */
 
+import { HARDWARE_QUEUE_CONFIGS } from '../Contracts/HardwareQueueConfigs.ts';
+
 export interface SysExMessage {
   data: Uint8Array;
   delay: number;
@@ -146,15 +148,6 @@ export function createHardwareQueue(
   });
 }
 
-/**
- * Hardware-specific queue configurations
- */
-export const HARDWARE_QUEUE_CONFIGS = {
-  'casio-cz': { interMessageDelayMs: 100, dumpTimeoutMs: 5000 },
-  'roland-juno': { interMessageDelayMs: 50, dumpTimeoutMs: 3000 },
-  'korg-ms2000': { interMessageDelayMs: 20, dumpTimeoutMs: 2000 },
-  'behringer-dm12': { interMessageDelayMs: 10, dumpTimeoutMs: 1000 },
-  'yamaha-dx7': { interMessageDelayMs: 20, dumpTimeoutMs: 2000 }
-} as const;
-
 export type HardwareModelId = keyof typeof HARDWARE_QUEUE_CONFIGS;
+
+export { HARDWARE_QUEUE_CONFIGS };
