@@ -177,7 +177,7 @@ runs:
         Expand-Archive -Path $zip -DestinationPath $pkg -Force
 
         if (-not (Test-Path $header)) {
-          Write-Error "El .nupkg de WebView2 $version no contiene $header: FindWebView2 seguira fallando."
+          Write-Error "El .nupkg de WebView2 $version no contiene ${header}: FindWebView2 seguira fallando."
           exit 1
         }
         Write-Host "WebView2 $version en $pkg"
