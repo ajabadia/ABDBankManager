@@ -278,7 +278,7 @@
   - [x] vitest job
   - [x] cpp-unit-tests job (Windows)
   - [x] build-verification job
-  - [ ] wasm-build job (stub â€” configures but no output verification)
+  - [x] wasm-build job (retirado 2026-10-06 con decision documentada: sin target wasm y JUCE 9.0.1->9.0.3 no compila bajo emscripten; ver el bloque en .github/workflows/ci.yml)
   - [ ] pluginval job (stub â€” install + validation commented out)
   - [ ] allocation-audit job (partial â€” runs ASan but no exit code check)
   - [ ] security-scan job (partial â€” `audit-ci` swallows failures with `|| true`)
