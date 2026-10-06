@@ -1,10 +1,31 @@
-#include "../ABDBankManagerCore.h"
-#include "../BankManagerWebViewAdapter.h"
-#include "../FactoryContentLoader.h"
+#include <BankManager/ABDBankManagerCore.h>
+#include <BankManager/BankManagerWebViewAdapter.h>
+#include <BankManager/FactoryContentLoader.h>
+#include <BankManager/Pro800Midi.h>
+
+#include <HardwareDrivers/CasioNibbleCodec.h>
+#include <HardwareDrivers/SysExCodec.h>
+#include <WebView2Bridge/WebView2ResourceProvider.h>
 
 #include <cassert>
+#include <cstring>
 #include <memory>
 #include <iostream>
+#include <string>
+#include <vector>
+
+// CHECK propio en vez de assert: este binario se compila en Release, donde
+// NDEBUG vacia los assert — un test que no comprueba nada no es un test.
+#define CHECK(cond)                                                                \
+    do                                                                             \
+    {                                                                              \
+        if (! (cond))                                                              \
+        {                                                                          \
+            std::cerr << "FAILED: " #cond " (" << __FILE__ << ':' << __LINE__     \
+                      << ")\n";                                                    \
+            std::abort();                                                          \
+        }                                                                          \
+    } while (false)
 
 using namespace ABD::BankManager;
 
@@ -109,7 +130,7 @@ void testValueTreeRoundtrip()
 juce::MemoryBlock makeFactoryBankZip()
 {
     juce::ZipFile::Builder builder;
-    const juce::MemoryBlock patchData { "\x01\x02\x7f", 3 };
+    const juce::MemoryBlock patchData { "\\x01\\x02\\x7f", 3 };
     const juce::MemoryBlock imageData { "PNG-test", 8 };
 
     const juce::String manifest = R"json({
@@ -256,23 +277,206 @@ void testWebUIIpc()
     assert(lastEvent == "error");
 }
 
-} // namespace
+// ─── Codecs compartidos (ABDSharedCode/HardwareDrivers) ───
+// Los vectores de abajo son los mismos que fija el lado TS
+// (Source/Contracts/SysEx/codec.ts y sus tests de vitest): si los dos lados
+// dejan de decodificar los mismos bytes, uno de los dos miente.
 
-// Las marcas se vacian a proposito: con la salida redirigida a fichero,
-// std::cout va con buffer y sin esto no se ve en que test se para el proceso.
-#define ABD_TEST_CASE(name)                                  \
-    do {                                                    \
-        std::cout << "[ RUN      ] " #name "\n" << std::flush; \
-        name();                                             \
-        std::cout << "[     OK ] " #name "\n" << std::flush;    \
-    } while (false)
+void testSharedSysExCodecOrders()
+{
+    using abd::hw::SysExCodec;
+
+    // Orden canonico (bit i = MSB del byte i — Pro-800) vs orden Korg
+    // (bit 6-j — dumps reales MS2000/microKORG). Los dos vectores salen de
+    // la misma entrada: si alguien "unifica" los ordenes, aqui revienta.
+    const uint8_t raw[] = { 0x81, 0x82, 0x03, 0x04, 0x05, 0x06, 0x07, 0x88 };
+    const std::vector<uint8_t> canonicalExpected {
+        0x03, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x01, 0x08 };
+    const std::vector<uint8_t> korgExpected {
+        0x60, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x40, 0x08 };
+    const std::vector<uint8_t> rawVec (std::begin(raw), std::end(raw));
+
+    std::vector<uint8_t> packed;
+    CHECK(SysExCodec::pack8to7(raw, sizeof(raw), packed));
+    CHECK(packed == canonicalExpected);
+
+    std::vector<uint8_t> korgPacked;
+    CHECK(SysExCodec::pack8to7Korg(raw, sizeof(raw), korgPacked));
+    CHECK(korgPacked == korgExpected);
+
+    // Roundtrips de los dos ordenes, sin relleno.
+    std::vector<uint8_t> decoded;
+    CHECK(SysExCodec::unpack7to8(packed.data(), packed.size(), decoded));
+    CHECK(decoded == rawVec);
+    decoded.clear();
+    CHECK(SysExCodec::unpack7to8Korg(korgPacked.data(), korgPacked.size(), decoded));
+    CHECK(decoded == rawVec);
+
+    // Decodificar un payload Korg con el orden canonico NO devuelve lo
+    // mismo: es la prueba de que los dos ordenes no son intercambiables.
+    decoded.clear();
+    CHECK(SysExCodec::unpack7to8(korgPacked.data(), korgPacked.size(), decoded));
+    CHECK(decoded != rawVec);
+
+    // Politica de relleno: el grupo parcial se completa a 7 y la longitud
+    // de salida siempre es multiplo de 8.
+    std::vector<uint8_t> padded;
+    CHECK(SysExCodec::pack8to7Padded(raw, sizeof(raw), padded));
+    CHECK(padded.size() == 16 && padded.size() % 8 == 0);
+    std::vector<uint8_t> korgPadded;
+    CHECK(SysExCodec::pack8to7KorgPadded(raw, sizeof(raw), korgPadded));
+    CHECK(korgPadded.size() == 16 && korgPadded.size() % 8 == 0);
+
+    // El unpack tolerante descodifica el frame rellenado: salen los 8 bytes
+    // originales mas la cola de ceros del relleno.
+    decoded.clear();
+    CHECK(SysExCodec::unpack7to8Korg(korgPadded.data(), korgPadded.size(), decoded));
+    CHECK(decoded.size() == 14);
+    CHECK(std::equal(decoded.begin(), decoded.begin() + 8, rawVec.begin()));
+
+    // Cable real MS2000: 254 bytes de programa -> 291 payload sin relleno
+    // (36 grupos completos + 1 collector + 2 datos), 296 rellenos. Es la
+    // longitud que documenta DOCS/ABDSYNTHS_SYSEX_GUIDE.md.
+    std::vector<uint8_t> program (254);
+    for (size_t i = 0; i < program.size(); ++i)
+        program[i] = static_cast<uint8_t>(i & 0x7F);
+
+    std::vector<uint8_t> wire;
+    CHECK(SysExCodec::pack8to7Korg(program.data(), program.size(), wire));
+    CHECK(wire.size() == 291);
+    std::vector<uint8_t> wirePadded;
+    CHECK(SysExCodec::pack8to7KorgPadded(program.data(), program.size(), wirePadded));
+    CHECK(wirePadded.size() == 296);
+
+    decoded.clear();
+    CHECK(SysExCodec::unpack7to8Korg(wire.data(), wire.size(), decoded));
+    CHECK(decoded == program);
+}
+
+void testSharedCasioNibbleParity()
+{
+    using abd::hw::CasioNibbleCodec;
+    using abd::hw::NibbleOrder;
+
+    // encodeNibble de codec.ts: high-first, un nibble por byte.
+    const uint8_t raw[] = { 0x00, 0x12, 0xAB, 0xFF, 0x7F };
+    const std::vector<uint8_t> expected {
+        0x00, 0x00, 0x01, 0x02, 0x0A, 0x0B, 0x0F, 0x0F, 0x07, 0x0F };
+
+    std::vector<uint8_t> nibbles;
+    CHECK(CasioNibbleCodec::encode(raw, sizeof(raw), nibbles, NibbleOrder::HighFirst));
+    CHECK(nibbles == expected);
+
+    std::vector<uint8_t> back;
+    CHECK(CasioNibbleCodec::decode(nibbles.data(), nibbles.size(), back, NibbleOrder::HighFirst));
+    CHECK(back == std::vector<uint8_t> (std::begin(raw), std::end(raw)));
+
+    // casioChecksum() de codec.ts: suma & 0x7F. 0x81+0x7E+0x02 = 257 -> 1.
+    const uint8_t sumBytes[] = { 0x81, 0x7E, 0x02 };
+    CHECK(CasioNibbleCodec::calculateChecksum(sumBytes, sizeof(sumBytes)) == 0x01);
+    CHECK(CasioNibbleCodec::verifyChecksum(sumBytes, sizeof(sumBytes), 0x01));
+    CHECK(! CasioNibbleCodec::verifyChecksum(sumBytes, sizeof(sumBytes), 0x02));
+}
+
+void testPro800MidiUsesSharedCodec()
+{
+    // El frame que construye el transporte tiene que ser byte a byte el que
+    // producia el pack local antes de la migracion (orden canonico, sin
+    // relleno): cadena esperada escrita a mano, no regenerada por el codec.
+    juce::MemoryBlock raw;
+    const uint8_t rawBytes[] = { 0x81, 0x82, 0x03, 0x04, 0x05, 0x06, 0x07, 0x88 };
+    raw.append(rawBytes, sizeof(rawBytes));
+
+    const auto frame = Pro800MidiTransport::buildPatchDump(raw, 130);
+    const uint8_t expected[] = {
+        0xf0, 0x00, 0x20, 0x32, 0x00, 0x01, 0x24, 0x00, 0x78,
+        0x02, 0x01,                          // slot 130 = 2 + (1 << 7)
+        0x03, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x01, 0x08,
+        0xf7 };
+    CHECK(frame.getSize() == sizeof(expected));
+    CHECK(std::memcmp(frame.getData(), expected, sizeof(expected)) == 0);
+
+    // Y el parseo devuelve el slot y los bytes originales.
+    juce::MemoryBlock parsed;
+    CHECK(Pro800MidiTransport::parseResponse(frame, parsed) == 130);
+    CHECK(parsed == raw);
+}
+
+// ─── Proveedor de recursos WebView compartido ───
+
+void testSharedWebViewResourceProvider()
+{
+    namespace wv = abd::webview2;
+
+    // Normalizacion: raiz, query/fragmento, esquema+host y URL-encoding.
+    CHECK(wv::normalizeResourcePath("/") == "index.html");
+    CHECK(wv::normalizeResourcePath("") == "index.html");
+    CHECK(wv::normalizeResourcePath("/app.js?v=2#frag") == "app.js");
+    CHECK(wv::normalizeResourcePath("juce://backend/dir/page.html") == "dir/page.html");
+    CHECK(wv::normalizeResourcePath("/my%20file.html") == "my file.html");
+
+    // MIME compartido: .js pasa a application/javascript (el estandar).
+    CHECK(wv::getMimeTypeForFilename("a.html") == "text/html");
+    CHECK(wv::getMimeTypeForFilename("a.js") == "application/javascript");
+    CHECK(wv::getMimeTypeForFilename("a.webp") == "image/webp");
+
+    // Catalogo falso con la forma del WebUIAssets que genera JUCE: el
+    // identificador aplana sin guiones (behringer-deepmind12.webp ->
+    // behringerdeepmind12_webp), por eso el paso 1 (originalFilenames) es el
+    // que salva a los ficheros con guion.
+    const char* names[] = { "index_html", "behringerdeepmind12_webp", "style_css" };
+    const char* files[] = { "index.html", "behringer-deepmind12.webp", "main.css" };
+    auto lookup = [](const char* key, int& size) -> const char*
+    {
+        if (std::strcmp(key, "index_html") == 0)              { size = 5;  return "INDEX"; }
+        if (std::strcmp(key, "behringerdeepmind12_webp") == 0) { size = 4;  return "IMG!"; }
+        if (std::strcmp(key, "style_css") == 0)                { size = 3;  return "CSS"; }
+        size = 0;
+        return nullptr;
+    };
+    const wv::BinaryAssetsCatalog catalog { 3, names, files, lookup };
+
+    // Paso 1: fichero con guion via originalFilenames (ignore case).
+    auto img = wv::resolveEmbeddedAsset("img/behringer-deepmind12.webp", catalog);
+    CHECK(img.has_value());
+    CHECK(img->mimeType == "image/webp");
+    CHECK(img->data.size() == 4);
+
+    // Paso 2: aplanado estilo JUCE cuando el nombre original no coincide.
+    auto css = wv::resolveEmbeddedAsset("style.css", catalog);
+    CHECK(css.has_value());
+    CHECK(css->mimeType == "text/css");
+    CHECK(css->data.size() == 3);
+
+    // juce.js lo sirve el propio JUCE; lo desconocido, nadie.
+    CHECK(! wv::resolveEmbeddedAsset("juce.js", catalog).has_value());
+    CHECK(! wv::resolveEmbeddedAsset("nope.png", catalog).has_value());
+
+    // Provider completo: la raiz cae en index.html embebido; un prefijo
+    // fuera de la allowlist no tiene fallback al filesystem.
+    auto root = wv::webView2ResourceProvider("/?v=1", catalog, {});
+    CHECK(root.has_value());
+    CHECK(root->mimeType == "text/html");
+    CHECK(! wv::webView2ResourceProvider("/styles/tokens.css", catalog, {}).has_value());
+    // Prefijo permitido pero fichero inexistente: tambien nullopt (no
+    // depende de si ABDSharedAssets esta clonado al lado).
+    CHECK(! wv::webView2ResourceProvider(
+        "/styles/zz-missing-9f3a-not-a-real-file.css", catalog,
+        { "styles/" }).has_value());
+}
+
+} // namespace
 
 int main()
 {
-    ABD_TEST_CASE(testValueTreeRoundtrip);
-    ABD_TEST_CASE(testFactoryContentLoader);
-    ABD_TEST_CASE(testWebUIIpc);
-    ABD_TEST_CASE(testWebViewAdapter);
-    std::cout << "ABDBankManagerCoreTests: all tests passed\n" << std::flush;
+    testValueTreeRoundtrip();
+    testFactoryContentLoader();
+    testWebUIIpc();
+    testWebViewAdapter();
+    testSharedSysExCodecOrders();
+    testSharedCasioNibbleParity();
+    testPro800MidiUsesSharedCodec();
+    testSharedWebViewResourceProvider();
+    std::cout << "ABDBankManagerCoreTests: all tests passed\n";
     return 0;
 }

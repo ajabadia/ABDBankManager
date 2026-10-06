@@ -11,6 +11,11 @@
  *   - Casio CZ nibble encoding
  *   - Roland / Yamaha / Casio checksums
  *   - F0...F7 message splitting
+ *
+ * SSOT del lado C++: `ABDSharedCode/HardwareDrivers/` (`abd::hw::SysExCodec`
+ * y `abd::hw::CasioNibbleCodec`). Este fichero es el port para la WebUI; los
+ * vectores de paridad viven en `cpp/tests/BankManagerCoreTests.cpp`, que
+ * fija los mismos bytes en los dos lados del puente.
  */
 
 // ─── 7-to-8 Bit Packing (Korg, Behringer) ───
@@ -110,6 +115,11 @@ export function unpack7to8(packed: Uint8Array): Uint8Array {
  * 291-byte length the plugin's C++ packer produces (`SysExCodec::pack8to7`,
  * `MS2000HardwareProgram::packedPayloadSize()`). `pack8to7` zero-pads, which
  * would make the frame 5 bytes longer than a real device's.
+ *
+ * El orden Korg (bit 6-j) ya existe tambien en C++ como
+ * `abd::hw::SysExCodec::pack8to7Korg` — subido a ABDSharedCode junto con las
+ * dos politicas de relleno; el nombre "Korg" del header compartido, que antes
+ * describia el orden canonico bit i, esta corregido alla.
  */
 export function pack8to7NoPad(data: Uint8Array): Uint8Array {
   const packed: number[] = [];
@@ -221,6 +231,8 @@ export function unpackProphecy8to7(packed: Uint8Array): Uint8Array {
  * Each pair of input bytes encodes one output byte:
  *   high nibble = (byte0 & 0x0F) << 4
  *   low nibble  = byte1 & 0x0F
+ *
+ * Parity con `abd::hw::CasioNibbleCodec::decode` (ABDSharedCode), HighFirst.
  */
 export function decodeNibble(nibbles: Uint8Array): Uint8Array {
   const decoded: number[] = [];

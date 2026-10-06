@@ -20,6 +20,36 @@ if(NOT TARGET juce::juce_core)
     endif()
 endif()
 
+# --- ABDSharedCode (modulos compartidos de la suite ABDSynths) ---
+# Integracion segun ABDSharedCode/INTEGRATION_GUIDE.md: monorepo local si
+# existe al lado, si no FetchContent desde GitHub (CI y clones limpios).
+# Los tests standalone y los modulos que no consumimos se apagan para que el
+# configure de este proyecto no arrastre superficie ajena.
+set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ABDSharedCode")
+set(ABDSHAREDCODE_BUILD_DSPCORE_TESTS OFF)
+set(ABDSHAREDCODE_BUILD_DSPEFFECTS_TESTS OFF)
+set(ABDSHAREDCODE_BUILD_SYNTHCORE_TESTS OFF)
+set(ABDSHAREDCODE_BUILD_AUTOUPDATER OFF)
+set(ABDSHAREDCODE_BUILD_AUDIOCOMPARATOR OFF)
+# El modulo BankManager (corte del modulo bancario, DOCS/bank-manager-module-cut.md)
+# vive en ABDSharedCode/BankManager y hace falta AQUI: cpp/ lo enlaza para
+# compilar sus fuentes dentro de ABDBankManagerCore.lib.
+set(ABDSHAREDCODE_BUILD_BANKMANAGER ON)
+if(EXISTS "${ABDSHARED_CODE_DIR}/CMakeLists.txt")
+    message(STATUS "ABDSharedCode: using local at ${ABDSHARED_CODE_DIR}")
+    add_subdirectory("${ABDSHARED_CODE_DIR}" "${CMAKE_BINARY_DIR}/ABDSharedCode")
+else()
+    message(STATUS "ABDSharedCode: no local copy, fetching from GitHub")
+    include(FetchContent)
+    FetchContent_Declare(
+        ABDSharedCode
+        GIT_REPOSITORY https://github.com/ajabadia/ABDSharedCode.git
+        GIT_TAG        master
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(ABDSharedCode)
+endif()
+
 # --- Bank Manager Core (C++ module for JUCE plugins) ---
 add_subdirectory(cpp)
 
@@ -44,7 +74,14 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     endif()
 
     # --- WebUI Binary Data (for standalone app) ---
-    file(GLOB_RECURSE BANK_MANAGER_WEBUI_ASSETS CONFIGURE_DEPENDS
+    # FOLLOW_SYMLINKS es obligatorio: los assets compartidos de la suite llegan como
+    # junctions (WebUI/vendor/images/models/logos -> ABDSharedAssets/brands, etc.).
+    # Sin esta opcion CMake lista los propios junctions como si fueran FICHEROS
+    # (LIST_DIRECTORIES false no los filtra: son symlinks a directorios) y
+    # juce_add_binary_data los pasa a juce_binarydata, que revienta con
+    # "Unhandled exception" -> MSB8066. Ademas, al no recursar dentro, los logos y
+    # miniaturas desaparecian del bundle embebido.
+    file(GLOB_RECURSE BANK_MANAGER_WEBUI_ASSETS CONFIGURE_DEPENDS FOLLOW_SYMLINKS
         "WebUI/src/*"
         "WebUI/*.html"
         "WebUI/*.js"
@@ -107,31 +144,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     add_custom_target(GenerateAll DEPENDS GenerateRegistry GenerateBuildVersion)
 
     # --- Concrete JUCE WebView host/plugin ---
-    #
-    # ESTO ESTA DENTRO DE UN if(EXISTS) PORQUE ANTES NO ESTABA, Y PORQUE
-    # `apps/juce-plugin` NO ESTA EN EL ARBOL. Este `add_subdirectory` es
-    # incondicional, asi que un clon limpio se caia aqui antes incluso de
-    # llegar a compilar, y no con un error de JUCE sino con:
-    #
-    #   add_subdirectory given source "apps/juce-plugin" which is not an
-    #   existing directory
-    #
-    # que es el error mas confuso posible: habla de un directorio que el
-    # propio repo dice tener. El directorio es trabajo en curso que aun no
-    # se ha commiteado, y mientras no lo este, el build no puede depender
-    # de el.
-    #
-    # EL SALTO NO ES CALLADO, que es lo unico que haria mal. Si no esta, se
-    # dice en alto: un guard que se puede dejar en silencio es un guard que
-    # no guarda, y aqui lo que se calla es "no se ha compilado el plugin".
-    # Cuando el directorio se commitee, el `if` dejara de saltarse solo.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/juce-plugin/CMakeLists.txt")
-        add_subdirectory(apps/juce-plugin)
-    else()
-        message(STATUS
-            "apps/juce-plugin no esta en el arbol: se compila todo menos el plugin. "
-            "Es trabajo en curso sin commitear, y el build no puede depender de el.")
-    endif()
+    add_subdirectory(apps/juce-plugin)
 
     # --- Installation ---
     install(FILES
