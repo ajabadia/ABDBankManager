@@ -197,11 +197,41 @@ jobs:
           version: '9.0.1'
           sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
+      # @abdsynths/shared (ABDSharedAssets, SSOT de styles e icons) ANTES del
+      # configure: CMake globba WebUI/vendor/* con FOLLOW_SYMLINKS para
+      # embeberlo en WebUIAssets. Sin esto un checkout limpio embebe el plugin
+      # SIN CSS — medido 2026-10-07 en un clone limpio: 128 entradas vs 153, y
+      # el resource provider devuelve nulo a /styles/tokens.css (el navegador
+      # ve 404) con el job en verde. Mismo mapa que las junctions de build.bat;
+      # aqui copia, que en el runner no hay mklink.
+      - name: Checkout ABDSharedAssets (sibling)
+        run: git clone --depth 1 https://github.com/ajabadia/ABDSharedAssets.git ../ABDSharedAssets
+
+      - name: Consume @abdsynths/shared (styles + icons)
+        shell: bash
+        run: |
+          cp -R ../ABDSharedAssets/styles WebUI/vendor/styles
+          cp -R ../ABDSharedAssets/icons WebUI/vendor/icons
+
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      # Guardia anti-falso-verde: comprueba el RESULTADO del glob de CMake,
+      # no la intencion del paso anterior. Si styles no llego a WebUI/vendor
+      # (o llego tarde), el catalogo embebido no lleva el CSS y esto roja en
+      # vez de dejar pasar un plugin sin estilos. "tokens.css" solo puede
+      # aparecer en BinaryData como nombre de fichero: los contenidos van a
+      # arrays numericos y no hay ningun tokens.css trackeado en este repo.
+      - name: "Guard: el catalogo embebido contiene el CSS"
+        shell: bash
+        run: |
+          if ! grep -rq "tokens.css" build/juce_binarydata_WebUIAssets/; then
+            echo "::error::WebUIAssets embebido sin styles/tokens.css: @abdsynths/shared no llego al glob de CMake"
+            exit 1
+          fi
 
       - name: Run C++ Tests
         run: |
@@ -273,6 +303,17 @@ jobs:
       # Con el plugin (default ON): hace falta para compilar el VST3 mas
       # abajo. El guard de mayusculas no cambia: GenerateAll se declara en el
       # root y se ejecuta en el primer paso de build sea cual sea el valor.
+      # Consume @abdsynths/shared antes del configure (bloque completo en
+      # cpp-unit-tests): sin esto el embed sale sin CSS y el job, verde.
+      - name: Checkout ABDSharedAssets (sibling)
+        run: git clone --depth 1 https://github.com/ajabadia/ABDSharedAssets.git ../ABDSharedAssets
+
+      - name: Consume @abdsynths/shared (styles + icons)
+        shell: bash
+        run: |
+          cp -R ../ABDSharedAssets/styles WebUI/vendor/styles
+          cp -R ../ABDSharedAssets/icons WebUI/vendor/icons
+
       - name: Configure CMake (root, con plugin)
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
@@ -302,6 +343,15 @@ jobs:
       # en modules/juce_audio_processors/format_types/VST3_SDK, no hay red.
       - name: Build VST3 plugin
         run: cmake --build build --parallel --target ABDBankManagerPlugin_VST3
+
+      # Guardia anti-falso-verde (detalle en cpp-unit-tests).
+      - name: "Guard: el catalogo embebido contiene el CSS"
+        shell: bash
+        run: |
+          if ! grep -rq "tokens.css" build/juce_binarydata_WebUIAssets/; then
+            echo "::error::WebUIAssets embebido sin styles/tokens.css: @abdsynths/shared no llego al glob de CMake"
+            exit 1
+          fi
 
       # pluginval IGUAL que en Windows: misma version (v1.0.4, fijada) y mismo
       # strictness 10, asi el par de jobs es una comparacion de verdad y no dos
@@ -407,11 +457,31 @@ jobs:
           version: '9.0.1'
           sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
+      # Consume @abdsynths/shared antes del configure (bloque completo en
+      # cpp-unit-tests): sin esto el embed sale sin CSS y el job, verde.
+      - name: Checkout ABDSharedAssets (sibling)
+        run: git clone --depth 1 https://github.com/ajabadia/ABDSharedAssets.git ../ABDSharedAssets
+
+      - name: Consume @abdsynths/shared (styles + icons)
+        shell: bash
+        run: |
+          cp -R ../ABDSharedAssets/styles WebUI/vendor/styles
+          cp -R ../ABDSharedAssets/icons WebUI/vendor/icons
+
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
       - name: Build Plugin
         run: cmake --build build --config Release --parallel
+
+      # Guardia anti-falso-verde (detalle en cpp-unit-tests).
+      - name: "Guard: el catalogo embebido contiene el CSS"
+        shell: bash
+        run: |
+          if ! grep -rq "tokens.css" build/juce_binarydata_WebUIAssets/; then
+            echo "::error::WebUIAssets embebido sin styles/tokens.css: @abdsynths/shared no llego al glob de CMake"
+            exit 1
+          fi
 
       # pluginval DE VERDAD — este job era un echo (el ROADMAP lo listaba
       # como stub). Version y strictness fijados identicos al job de Linux
@@ -475,11 +545,31 @@ jobs:
           version: '9.0.1'
           sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
+      # Consume @abdsynths/shared antes del configure (bloque completo en
+      # cpp-unit-tests): sin esto el embed sale sin CSS y el job, verde.
+      - name: Checkout ABDSharedAssets (sibling)
+        run: git clone --depth 1 https://github.com/ajabadia/ABDSharedAssets.git ../ABDSharedAssets
+
+      - name: Consume @abdsynths/shared (styles + icons)
+        shell: bash
+        run: |
+          cp -R ../ABDSharedAssets/styles WebUI/vendor/styles
+          cp -R ../ABDSharedAssets/icons WebUI/vendor/icons
+
       - name: Configure CMake with sanitizers
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi /INCREMENTAL:NO"
 
       - name: Build with ASan
         run: cmake --build build --config Debug --parallel
+
+      # Guardia anti-falso-verde (detalle en cpp-unit-tests).
+      - name: "Guard: el catalogo embebido contiene el CSS"
+        shell: bash
+        run: |
+          if ! grep -rq "tokens.css" build/juce_binarydata_WebUIAssets/; then
+            echo "::error::WebUIAssets embebido sin styles/tokens.css: @abdsynths/shared no llego al glob de CMake"
+            exit 1
+          fi
 
       - name: Run tests with ASan
         run: |
@@ -590,10 +680,30 @@ jobs:
           version: '9.0.1'
           sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
+      # Consume @abdsynths/shared antes del configure (bloque completo en
+      # cpp-unit-tests): sin esto el embed sale sin CSS y el job, verde.
+      - name: Checkout ABDSharedAssets (sibling)
+        run: git clone --depth 1 https://github.com/ajabadia/ABDSharedAssets.git ../ABDSharedAssets
+
+      - name: Consume @abdsynths/shared (styles + icons)
+        shell: bash
+        run: |
+          cp -R ../ABDSharedAssets/styles WebUI/vendor/styles
+          cp -R ../ABDSharedAssets/icons WebUI/vendor/icons
+
       - name: Full Build
         run: |
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release --parallel
+
+      # Guardia anti-falso-verde (detalle en cpp-unit-tests).
+      - name: "Guard: el catalogo embebido contiene el CSS"
+        shell: bash
+        run: |
+          if ! grep -rq "tokens.css" build/juce_binarydata_WebUIAssets/; then
+            echo "::error::WebUIAssets embebido sin styles/tokens.css: @abdsynths/shared no llego al glob de CMake"
+            exit 1
+          fi
 
       # El nucleo es STATIC (cpp/CMakeLists.txt) y el plugin se llama "ABD Bank
       # Manager Plugin" con espacios: el build por defecto no produce NINGUN
