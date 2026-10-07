@@ -229,7 +229,7 @@ jobs:
   # -DABDBANKMANAGER_BUILD_PLUGIN=OFF para no arrastrar el SDK VST3 a un guard
   # barato. Hoy el job hace mas: ademas de GenerateAll y los tests C++ compila
   # el VST3 en Ubuntu (JUCE trae el SDK VST3 vendorizado, no hay descarga) y
-  # lo pasa por pluginval — v1.0.4, strictness 5, la MISMA bateria que el job
+  # lo pasa por pluginval — v1.0.4, strictness 10, la MISMA bateria que el job
   # pluginval de Windows— para que los dos sistemas sean comparables. La
   # opcion OFF se queda como escape hatch documentado en CMakeLists.txt; este
   # job ya no la usa.
@@ -304,7 +304,7 @@ jobs:
         run: cmake --build build --parallel --target ABDBankManagerPlugin_VST3
 
       # pluginval IGUAL que en Windows: misma version (v1.0.4, fijada) y mismo
-      # strictness 5, asi el par de jobs es una comparacion de verdad y no dos
+      # strictness 10, asi el par de jobs es una comparacion de verdad y no dos
       # cosas distintas con el mismo nombre. El find evita el nombre con
       # espacios del artefacto ("ABD Bank Manager Plugin.vst3"); test -n
       # falla el paso si el .vst3 no existe en vez de validar un vacio.
@@ -314,11 +314,11 @@ jobs:
           unzip -q "$RUNNER_TEMP/pluginval.zip" -d "$RUNNER_TEMP/pluginval"
           chmod +x "$RUNNER_TEMP"/pluginval/pluginval
 
-      - name: Run pluginval (strictness 5)
+      - name: Run pluginval (strictness 10)
         run: |
           vst3=$(find build -name '*.vst3' -type d | head -1)
           test -n "$vst3"
-          xvfb-run -a "$RUNNER_TEMP/pluginval/pluginval" --strictness-level 5 --validate "$vst3"
+          xvfb-run -a "$RUNNER_TEMP/pluginval/pluginval" --strictness-level 10 --validate "$vst3"
 
   # --- WASM Build: RETIRADO el 2026-10-06 (decision documentada) ---
   #
@@ -391,7 +391,7 @@ jobs:
 
       # pluginval DE VERDAD — este job era un echo (el ROADMAP lo listaba
       # como stub). Version y strictness fijados identicos al job de Linux
-      # (v1.0.4 / 5) para que los dos jobs sean comparables: mismo validator,
+      # (v1.0.4 / 10) para que los dos jobs sean comparables: mismo validator,
       # misma bateria, distinta plataforma. shell: bash en los dos pasos
       # porque find/unzip no son comandos de PowerShell.
       - name: Install pluginval
@@ -405,7 +405,7 @@ jobs:
         run: |
           vst3=$(find build -name '*.vst3' -type d | head -1)
           test -n "$vst3"
-          "$RUNNER_TEMP/pluginval/pluginval.exe" --strictness-level 5 --validate "$vst3"
+          "$RUNNER_TEMP/pluginval/pluginval.exe" --strictness-level 10 --validate "$vst3"
 
   # --- Allocation Audit ---
   allocation-audit:
