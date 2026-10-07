@@ -7,12 +7,17 @@
     <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ws: wss:;">
+    <!-- Estas cinco rutas van SIN prefijo vendor/ a proposito: es la unica
+         forma que sirve en los tres mundos con el mismo index.html —
+         embebido (el resource provider resuelve por basename), vite dev y
+         dist (publicDir=vendor copia vendor/* en la raiz). Con vendor/ el
+         embebido y dev funcionan, pero dist 404. -->
     <script type="importmap">
     {
       "imports": {
-        "dexie": "./vendor/dexie/dexie.mjs",
-        "jszip": "./vendor/jszip.mjs",
-        "file-saver": "./vendor/FileSaver.mjs"
+        "dexie": "./dexie/dexie.mjs",
+        "jszip": "./jszip.mjs",
+        "file-saver": "./FileSaver.mjs"
       }
     }
     </script>
@@ -1362,8 +1367,8 @@
     </div>
 
     <!-- UMD bundles (loaded before modules so import map wrappers can reference globals) -->
-    <script src="./vendor/jszip/jszip.min.js"></script>
-    <script src="./vendor/file-saver/FileSaver.min.js"></script>
+    <script src="./jszip/jszip.min.js"></script>
+    <script src="./file-saver/FileSaver.min.js"></script>
 
     <script type="module" src="./src/app.js"></script>
     <!-- Cache-busting: change version to force browser reload -->
