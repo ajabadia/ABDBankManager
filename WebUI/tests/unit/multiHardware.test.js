@@ -233,16 +233,20 @@ describe('Bank-Model compatibility filter logic', () => {
     expect(isBankCompatibleWithModel(bank, 'korg-ms2000')).toBe(false);
   });
 
-  it('bank with no hardwareIds uses modelId-only matching', () => {
+  it('bank with no hardwareIds uses modelId + reverse contract matching', () => {
     const bank = { modelId: 'casio-cz101' };
-    // Without hardwareIds, compatibility is checked via modelId only
+    // Without hardwareIds, compatibility is checked via modelId and contract lookup
     // CZ-101 matches CZ-101 directly
     expect(isBankCompatibleWithModel(bank, 'casio-cz101')).toBe(true);
-    // CZ-1000: does CZ-1000's contract list 'casio-cz101'? No (inherited compatibleModels
-    // is ['casio-cz1000', 'casio-cz5000', 'casio-cz1']). So without hardwareIds,
-    // the bank is NOT visible under CZ-1000. hardwareIds is required for cross-model.
-    expect(isBankCompatibleWithModel(bank, 'casio-cz1000')).toBe(false);
-    // With proper hardwareIds it works:
+    // CZ-1000: since the contract-family symmetry fix (each CZ variant lists the
+    // whole CZ family in compatibleModels, mirrored in ABDSharedAssets JSONs), the
+    // reverse contract check makes a CZ-101 bank visible under CZ-1000 even
+    // without hardwareIds. A CZ blob is valid on any CZ.
+    expect(isBankCompatibleWithModel(bank, 'casio-cz1000')).toBe(true);
+    expect(isBankCompatibleWithModel(bank, 'casio-cz1')).toBe(true);
+    // Non-family models still don't match without hardwareIds:
+    expect(isBankCompatibleWithModel(bank, 'korg-ms2000')).toBe(false);
+    // With explicit hardwareIds it also works:
     const bankWithIds = { modelId: 'casio-cz101', hardwareIds: ['casio-cz101', 'casio-cz1000', 'casio-cz5000', 'casio-cz1'] };
     expect(isBankCompatibleWithModel(bankWithIds, 'casio-cz1000')).toBe(true);
   });
