@@ -212,7 +212,7 @@ jobs:
             Write-Warning "No test executable found"
           }
 
-  # --- Linux CMake Core (sin plugin VST3) ---
+  # --- Linux CMake + VST3 + pluginval (guard del bug de mayusculas) ---
   # El guard contra el bug de mayusculas: el root CMakeLists invocaba
   # `Scripts/build_webui.js` con S mayuscula y el directorio real es
   # `scripts/`. En Windows (todos los demas jobs que compilan) da igual; en un
@@ -223,12 +223,18 @@ jobs:
   # POR QUE CONFIGURA EL ROOT Y NO `cpp/`: solo el root declara los custom
   # targets GenerateBuildVersion/GenerateRegistry con la ruta de los scripts
   # — que es exactamente donde vivia el bug. `cmake -S cpp` (lo que hace
-  # ci-lib.yml) no los ejecuta y no lo pillaria nunca. Y POR QUE SIN EL
-  # PLUGIN: el proposito es compilar el nucleo barato en Linux, no arrastrar
-  # el SDK VST3 de Steinberg ni la superficie JUCE de plugin — eso ya lo
-  # cubren pluginval y Build Verification en Windows.
+  # ci-lib.yml) no los ejecuta y no lo pillaria nunca.
+  #
+  # EVOLUCION (2026-10-06): la version inicial configuraba con
+  # -DABDBANKMANAGER_BUILD_PLUGIN=OFF para no arrastrar el SDK VST3 a un guard
+  # barato. Hoy el job hace mas: ademas de GenerateAll y los tests C++ compila
+  # el VST3 en Ubuntu (JUCE trae el SDK VST3 vendorizado, no hay descarga) y
+  # lo pasa por pluginval — v1.0.4, strictness 5, la MISMA bateria que el job
+  # pluginval de Windows— para que los dos sistemas sean comparables. La
+  # opcion OFF se queda como escape hatch documentado en CMakeLists.txt; este
+  # job ya no la usa.
   linux-cmake-core:
-    name: Linux CMake Core (sin plugin VST3)
+    name: Linux CMake + VST3 + pluginval (guard de mayusculas)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -250,10 +256,13 @@ jobs:
       #     con los flags del pkg que JUCE sondea (webkit2gtk-4.1 primero,
       #     4.0 despues — en noble solo existe 4.1).
       # ALSA y las libs X11 van por juce_audio_devices y juce_gui_extra.
+      # xvfb va en la lista: pluginval en Linux abre el editor del plugin y
+      # en el runner no hay display — xvfb-run lo corge bajo un framebuffer
+      # virtual, que es como corren los validations de pluginval en CI.
       - name: Install system dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfreetype6-dev libfontconfig1-dev libcurl4-openssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxi-dev libxrandr-dev libasound2-dev
+          sudo apt-get install -y libfreetype6-dev libfontconfig1-dev libcurl4-openssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxi-dev libxrandr-dev libasound2-dev xvfb
 
       - name: Install JUCE
         uses: ./.github/actions/juce
@@ -261,8 +270,11 @@ jobs:
           version: '9.0.1'
           sha: 'e18f7f506c0b96f2c738a0bcd7fe6467a5005ad8'
 
-      - name: Configure CMake (root, sin el plugin VST3)
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DABDBANKMANAGER_BUILD_PLUGIN=OFF
+      # Con el plugin (default ON): hace falta para compilar el VST3 mas
+      # abajo. El guard de mayusculas no cambia: GenerateAll se declara en el
+      # root y se ejecuta en el primer paso de build sea cual sea el valor.
+      - name: Configure CMake (root, con plugin)
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
       # Dos pasos a proposito. El primero ES el guard: GenerateAll corre
       # node sobre scripts/build_webui.js y scripts/registry_generator.js
@@ -284,6 +296,29 @@ jobs:
       # job C++ Unit Tests; esto mide el mismo binario en el otro sistema.
       - name: Run C++ Tests
         run: ctest --test-dir build --output-on-failure
+
+      # El VST3 en Ubuntu. El target es el que JUCE crea por formato
+      # (<Plugin>_VST3); el SDK de Steinberg lo trae el propio JUCE vendorizado
+      # en modules/juce_audio_processors/format_types/VST3_SDK, no hay red.
+      - name: Build VST3 plugin
+        run: cmake --build build --parallel --target ABDBankManagerPlugin_VST3
+
+      # pluginval IGUAL que en Windows: misma version (v1.0.4, fijada) y mismo
+      # strictness 5, asi el par de jobs es una comparacion de verdad y no dos
+      # cosas distintas con el mismo nombre. El find evita el nombre con
+      # espacios del artefacto ("ABD Bank Manager Plugin.vst3"); test -n
+      # falla el paso si el .vst3 no existe en vez de validar un vacio.
+      - name: Install pluginval
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pluginval.zip" https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Linux.zip
+          unzip -q "$RUNNER_TEMP/pluginval.zip" -d "$RUNNER_TEMP/pluginval"
+          chmod +x "$RUNNER_TEMP"/pluginval/pluginval
+
+      - name: Run pluginval (strictness 5)
+        run: |
+          vst3=$(find build -name '*.vst3' -type d | head -1)
+          test -n "$vst3"
+          xvfb-run -a "$RUNNER_TEMP/pluginval/pluginval" --strictness-level 5 --validate "$vst3"
 
   # --- WASM Build: RETIRADO el 2026-10-06 (decision documentada) ---
   #
@@ -354,18 +389,23 @@ jobs:
       - name: Build Plugin
         run: cmake --build build --config Release --parallel
 
+      # pluginval DE VERDAD — este job era un echo (el ROADMAP lo listaba
+      # como stub). Version y strictness fijados identicos al job de Linux
+      # (v1.0.4 / 5) para que los dos jobs sean comparables: mismo validator,
+      # misma bateria, distinta plataforma. shell: bash en los dos pasos
+      # porque find/unzip no son comandos de PowerShell.
       - name: Install pluginval
+        shell: bash
         run: |
-          # pluginval installation would go here
-          # For now, skip if not available
-          echo "pluginval step - would run pluginval --strictness-level 5"
+          curl -fsSL -o "$RUNNER_TEMP/pluginval.zip" https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
+          unzip -q "$RUNNER_TEMP/pluginval.zip" -d "$RUNNER_TEMP/pluginval"
 
-      # - name: Run pluginval
-      #   run: |
-      #     $pluginPath = Get-ChildItem -Path build -Filter "*.vst3" -Recurse | Select-Object -First 1
-      #     if ($pluginPath) {
-      #       pluginval --strictness-level 5 --validate $pluginPath.FullName
-      #     }
+      - name: Run pluginval
+        shell: bash
+        run: |
+          vst3=$(find build -name '*.vst3' -type d | head -1)
+          test -n "$vst3"
+          "$RUNNER_TEMP/pluginval/pluginval.exe" --strictness-level 5 --validate "$vst3"
 
   # --- Allocation Audit ---
   allocation-audit:
