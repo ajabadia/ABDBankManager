@@ -320,6 +320,30 @@ jobs:
           test -n "$vst3"
           xvfb-run -a "$RUNNER_TEMP/pluginval/pluginval" --strictness-level 10 --validate "$vst3"
 
+      # El .vst3 que pluginval acabo de aprobar, subido como artifact para
+      # poder bajarlo y probarlo en local. El bundle se COPIA a un dir aparte
+      # antes de subirlo: upload-artifact usa como raiz el ancestro comun de
+      # lo que sube, y si se subiera el bundle directamente el artifact
+      # saldria Contents/ suelto — sin la carpeta "ABD Bank Manager Plugin.vst3"
+      # que hace falta para instalarlo. Encadenado detras de pluginval: si la
+      # validacion falla, el paso no corre y no se sube un binario no validado.
+      - name: Stage validated VST3
+        run: |
+          vst3=$(find build -name '*.vst3' -type d | head -1)
+          test -n "$vst3"
+          mkdir -p "$RUNNER_TEMP/vst3-upload"
+          cp -R "$vst3" "$RUNNER_TEMP/vst3-upload/"
+
+      # if-no-files-found: error: un build que no produce el bundle falla aqui
+      # en vez de subir un artifact vacio en silencio. 30 dias, como en ci-lib.
+      - name: Upload validated VST3 (Linux)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ABDMS2000-vst3-linux
+          path: ${{ runner.temp }}/vst3-upload
+          if-no-files-found: error
+          retention-days: 30
+
   # --- WASM Build: RETIRADO el 2026-10-06 (decision documentada) ---
   #
   # El job existio y estuvo rojo semanas con continue-on-error — la peor
@@ -406,6 +430,26 @@ jobs:
           vst3=$(find build -name '*.vst3' -type d | head -1)
           test -n "$vst3"
           "$RUNNER_TEMP/pluginval/pluginval.exe" --strictness-level 10 --validate "$vst3"
+
+      # Mismo rationale que en Linux: copiar el bundle antes de subirlo para
+      # que el artifact traiga la carpeta "*.vst3" completa instalable, y solo
+      # si pluginval (arriba) salio verde. shell: bash: find/cp no son
+      # comandos de PowerShell.
+      - name: Stage validated VST3
+        shell: bash
+        run: |
+          vst3=$(find build -name '*.vst3' -type d | head -1)
+          test -n "$vst3"
+          mkdir -p "$RUNNER_TEMP/vst3-upload"
+          cp -R "$vst3" "$RUNNER_TEMP/vst3-upload/"
+
+      - name: Upload validated VST3 (Windows)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ABDMS2000-vst3-windows
+          path: ${{ runner.temp }}/vst3-upload
+          if-no-files-found: error
+          retention-days: 30
 
   # --- Allocation Audit ---
   allocation-audit:
