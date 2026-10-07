@@ -1157,6 +1157,7 @@ Cada proyecto solo necesita definir sus variables CSS de tema. El Bank Manager h
 | 6 | **¿Permisos de usuario?** | **No de momento, pero preparar la arquitectura** | La librería incluirá un campo `userId` opcional en el schema. No se implementan roles ni login en esta versión, pero el modelo no debe impedir añadirlos en el futuro. |
 | 7 | **¿Versión web vs standalone?** | **Ambas** | Standalone (Tauri) para gestión offline con acceso total a filesystem. Web (SPA) para acceso ligero desde cualquier navegador. La librería se persiste en IndexedDB (web) o SQLite/JSON local (Tauri). |
 | 8 | **¿Job WASM de CI?** | **Retirado el 2026-10-06, con decisión documentada** | No existe target wasm y JUCE (pin 9.0.1 → 9.0.3) no compila bajo emscripten. Reentrada sujeta a los criterios de §14.1; el bloque maestro vive en `.github/workflows/ci.yml`. |
+| 9 | **¿Validación del plugin VST3 en CI?** | **pluginval en Linux y Windows, strictness 10 (máximo), misma versión** | v1.0.4 fijada en ambos jobs para que la comparación entre OS sea real. El job de Windows era un stub hasta 2026-10-07. Artefactos validados subidos como artifact. Detalle en §14.2. |
 
 ### 14.1 Retiro del job WASM y criterios de reentrada (2026-10-06)
 
@@ -1203,6 +1204,53 @@ audio**. Reentrar por ese camino exige decidir explícitamente si (b) acepta eso
 o sigue exigiendo el fix de upstream; y definir primero el alcance del target en este repo (la fila 5 de
 esta tabla dice que aquí no hay motor de audio). Mientras ambas cosas no se decidan, el criterio tal
 como está escrito se mantiene y el job sigue retirado.
+
+### 14.2 Validación pluginval del VST3 en Linux y Windows (2026-10-07)
+
+**La decisión.** El plugin VST3 se valida con [pluginval](https://github.com/Tracktion/pluginval)
+(Tracktion) en **ambos** sistemas operativos de la CI, con versión y nivel idénticos, para que
+"pasa en CI" signifique lo mismo en cada plataforma:
+
+| | Linux (job `linux-cmake-core`) | Windows (job `pluginval`) |
+|---|---|---|
+| Versión | v1.0.4 fijada (`pluginval_Linux.zip`) | v1.0.4 fijada (`pluginval_Windows.zip`) |
+| Strictness | 10 (máximo de pluginval) | 10 (máximo de pluginval) |
+| Display | `xvfb-run -a` (framebuffer virtual) | nativo del runner |
+| Artefacto | `ABDMS2000-vst3-linux` | `ABDMS2000-vst3-windows` |
+
+**Historia.** El job `pluginval` de Windows nació como stub: un `echo` que salía en verde sin validar
+nada (así lo listaba el ROADMAP). Se hizo real en el PR #9 (2026-10-07), junto con extender el job de
+Linux para que compilara el VST3 en Ubuntu y lo pasara por la misma batería. Ese PR introdujo la regla
+que aún rige: **misma versión y mismo strictness en los dos jobs** — sin eso, "los dos jobs de
+pluginval" serían dos cosas distintas con el mismo nombre.
+
+**Niveles medidos.** La subida de nivel se hizo en dos pasos, midiendo los dos OS a la vez:
+
+- **Strictness 5** (PR #9, 2026-10-07): 19 grupos "Completed tests" en cada plataforma, a la primera.
+- **Strictness 10 — el máximo** (PR #10, 2026-10-07): 25 grupos en cada plataforma, también a la
+  primera. Los logs de ambos jobs confirman `Strictness level: 10` y `Num plugins found: 1`.
+
+Criterio mantenido desde el PR #9: **no se baja el strictness para forzar el verde**. Si un nivel nuevo
+falla, el PR no se mergea hasta decidir si es un bug real del plugin o una limitación de pluginval en
+CI.
+
+**Artefactos** (PR #11, 2026-10-07). Tras validar, cada job sube el bundle como artifact de GitHub
+Actions con `actions/upload-artifact@v7` y 30 días de retención (convención de `ci-lib.yml`). Dos
+detalles que no son cosméticos:
+
+- Los pasos van **detrás** de pluginval: si la validación falla, no se sube un binario no validado.
+- El bundle se **copia a un directorio aparte** antes de subirlo. `upload-artifact` usa como raíz el
+  ancestro común de lo que sube; subir el bundle directamente dejaría un `Contents/` suelto, sin la
+  carpeta `ABD Bank Manager Plugin.vst3` que hace falta para instalarlo.
+
+Con `if-no-files-found: error`, un build que no produce el bundle falla el paso en vez de subir un
+artifact vacío en silencio.
+
+**Warnings de Linux.** Bajo xvfb aparecen avisos de AT-SPI, libEGL y ALSA (`/dev/snd/seq failed`) —
+no fatales: el runner no tiene display ni tarjeta de sonido, y pluginval aprueba la batería completa
+igual.
+
+El bloque maestro (parámetros, pasos y nombres de artifact) vive en `.github/workflows/ci.yml`.
 
 ---
 
