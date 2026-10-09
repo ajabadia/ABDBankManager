@@ -1,0 +1,6 @@
+/* ==========================================================================
+   bank-manager.css (WebUI components mirror)
+   Importa los estilos canónicos unificados desde @abdsynths/shared
+   ========================================================================== */
+
+@import '@abdsynths/shared/styles/components/bank-manager.css';

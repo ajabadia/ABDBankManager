@@ -11,6 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@abdsynths/bank-manager-contracts": "*"
+    "@abdsynths/bank-manager-contracts": "workspace:*"
   }
 }

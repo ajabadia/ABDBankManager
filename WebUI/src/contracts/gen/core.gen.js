@@ -1,6 +1,75 @@
 // GENERATED FILE — DO NOT EDIT
 // Generator: Scripts/build_core_web.js
-// Fuente canónica: packages/core/src/operations/library.js
+// Fuente canónica: packages/core/src/index.js
+// packages/core/src/models/Patch.js
+function createPatch(overrides = {}) {
+  return {
+    id: overrides.id || crypto.randomUUID(),
+    name: overrides.name || "Init",
+    category: overrides.category || "UNK",
+    author: overrides.author || "",
+    tags: overrides.tags || [],
+    notes: overrides.notes || "",
+    isFavorite: overrides.isFavorite || false,
+    rating: overrides.rating || 0,
+    creationDate: overrides.creationDate || (/* @__PURE__ */ new Date()).toISOString(),
+    modifiedDate: overrides.modifiedDate || (/* @__PURE__ */ new Date()).toISOString(),
+    originModel: overrides.originModel || "",
+    // Asociación multi-hardware: canónico + compatibles (derivada en import);
+    // default neutro: solo el modelo de origen si se conoce.
+    hardwareIds: overrides.hardwareIds || (overrides.originModel ? [overrides.originModel] : []),
+    originAddress: overrides.originAddress || "",
+    originBank: overrides.originBank || "",
+    rawData: overrides.rawData || null,
+    // RESERVADO para plugins/editores — el gestor no lo usa ni lo muestra
+    parameters: overrides.parameters || null,
+    fingerprint: overrides.fingerprint || "",
+    previousVersionId: overrides.previousVersionId || void 0,
+    versionNumber: overrides.versionNumber || 1,
+    importSource: overrides.importSource || "",
+    importDate: overrides.importDate || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
+// packages/core/src/models/Bank.js
+function createBank(overrides = {}) {
+  return {
+    id: overrides.id || crypto.randomUUID(),
+    name: overrides.name || "New Bank",
+    modelId: overrides.modelId || "",
+    // Asociación multi-hardware: canónico + compatibles (derivada en import);
+    // default neutro: solo el modelo canónico.
+    hardwareIds: overrides.hardwareIds || (overrides.modelId ? [overrides.modelId] : []),
+    isFactory: overrides.isFactory || false,
+    isLocked: overrides.isLocked || false,
+    patches: overrides.patches || [],
+    source: overrides.source || null,
+    // Sistema de presets del banco: 'sysex' | 'native' | null (sin declarar).
+    // Un synth de software puede exponer los dos a la vez (el SysEx de la familia
+    // que emula y su sistema propio), y un preset de uno no es un preset del otro,
+    // así que el banco dice de dónde salió. `null` = bancos anteriores a este campo
+    // (siempre SysEx). Ver DOCS/BANK_MANAGER_TRANSPORT_MODEL.md §7.3.
+    presetFormat: overrides.presetFormat || null,
+    creationDate: overrides.creationDate || (/* @__PURE__ */ new Date()).toISOString(),
+    modifiedDate: overrides.modifiedDate || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
+// packages/core/src/operations/fingerprint.js
+async function calculateFingerprint(rawData, contract) {
+  if (!rawData || rawData.length === 0) return "";
+  const soundBytes = contract?.extractSoundBytes ? contract.extractSoundBytes(rawData) : rawData;
+  const hashBuffer = await crypto.subtle.digest("SHA-256", soundBytes);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function checkDuplicate(fingerprint, existingPatches) {
+  if (!fingerprint) return { isDuplicate: false, existingPatch: null };
+  const match = existingPatches.find((p) => p.fingerprint === fingerprint);
+  return { isDuplicate: !!match, existingPatch: match || null };
+}
+var FINGERPRINT_VERSION = 1;
+
 // packages/core/src/operations/library.js
 var ERR_BANK_NOT_FOUND = "ERR_BANK_NOT_FOUND";
 var ERR_DUPLICATE_BANK_ID = "ERR_DUPLICATE_BANK_ID";
@@ -367,6 +436,95 @@ function movePatchBetweenBanks(library, sourceBankId, sourceIndex, targetBankId,
   );
   return next;
 }
+
+// packages/core/src/search/searchPatches.js
+function searchPatches(library, query) {
+  if (!library || !Array.isArray(library.banks)) return [];
+  const q = (query?.text || "").toLowerCase().trim();
+  const modelId = query?.modelId;
+  const category = query?.category;
+  const favoritesOnly = query?.favoritesOnly === true;
+  const minRating = typeof query?.minRating === "number" ? query.minRating : 0;
+  const results = [];
+  for (const bank of library.banks) {
+    if (!bank.patches || !Array.isArray(bank.patches)) continue;
+    if (modelId && bank.modelId !== modelId) continue;
+    for (const patch of bank.patches) {
+      if (category && patch.category !== category) continue;
+      if (favoritesOnly && !patch.isFavorite) continue;
+      if (patch.rating < minRating) continue;
+      let matches = q === "";
+      if (!matches) {
+        const searchable = [
+          patch.name,
+          patch.author,
+          patch.notes,
+          ...patch.tags || []
+        ].join(" ").toLowerCase();
+        matches = searchable.includes(q);
+      }
+      if (matches) {
+        results.push({
+          patch,
+          bankId: bank.id,
+          bankName: bank.name
+        });
+      }
+    }
+  }
+  return results;
+}
+function getFilteredPatches(library, filters) {
+  if (!library || !Array.isArray(library.banks)) return [];
+  const {
+    modelId,
+    category,
+    author,
+    tags,
+    favoritesOnly,
+    sortBy = "name",
+    sortOrder = "asc"
+  } = filters || {};
+  const results = [];
+  for (const bank of library.banks) {
+    if (!bank.patches || !Array.isArray(bank.patches)) continue;
+    if (modelId && bank.modelId !== modelId) continue;
+    for (const patch of bank.patches) {
+      if (category && patch.category !== category) continue;
+      if (author && patch.author !== author) continue;
+      if (tags && tags.length && !tags.some((t) => (patch.tags || []).includes(t))) continue;
+      if (favoritesOnly && !patch.isFavorite) continue;
+      results.push(patch);
+    }
+  }
+  results.sort((a, b) => {
+    let cmp = 0;
+    switch (sortBy) {
+      case "name":
+        cmp = a.name.localeCompare(b.name);
+        break;
+      case "date":
+        cmp = new Date(a.modifiedDate) - new Date(b.modifiedDate);
+        break;
+      case "category":
+        cmp = a.category.localeCompare(b.category);
+        break;
+      case "rating":
+        cmp = a.rating - b.rating;
+        break;
+      default:
+        cmp = a.name.localeCompare(b.name);
+    }
+    return sortOrder === "desc" ? -cmp : cmp;
+  });
+  return results;
+}
+function createSearcher() {
+  return {
+    searchPatches: (library, query) => searchPatches(library, query),
+    getFilteredPatches: (library, filters) => getFilteredPatches(library, filters)
+  };
+}
 export {
   ERR_BANK_FULL,
   ERR_BANK_NOT_FOUND,
@@ -380,13 +538,20 @@ export {
   ERR_NO_SPACE,
   ERR_PATCH_NOT_FOUND,
   ERR_SOURCE_EQUALS_TARGET,
+  FINGERPRINT_VERSION,
   addBank,
   addPatch,
   assertBankEditable,
   assertBankHasCapacity,
+  calculateFingerprint,
+  checkDuplicate,
   copyPatchBetweenBanks,
+  createBank,
+  createPatch,
+  createSearcher,
   duplicateBank,
   freshPatchId,
+  getFilteredPatches,
   isLibrary,
   isUserPreferenceOnly,
   mergeBank,
@@ -396,5 +561,6 @@ export {
   removePatch,
   renameBank,
   renamePatch,
+  searchPatches,
   updatePatchMetadata
 };

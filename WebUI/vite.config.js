@@ -2,13 +2,21 @@ import { defineConfig } from 'vite';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// El mundo embebido tiene DOS directorios estaticos: CMake globs "WebUI/vendor/*"
-// y "WebUI/public/*" y el provider los resuelve aplanados por basename. vite solo
-// admite UN publicDir, asi que aqui publicDir queda desactivado y un plugin proprio
-// los sirve (dev) y los copia (build) en la raiz con la misma semantica en ambos
-// casos: public/ pisa a vendor/ si alguna ruta choca. Asi embebido, vite dev y dist
-// ven exactamente las mismas rutas en la raiz.
+// Este repo sirve DOS WebUI distintas desde el mismo Vite dev/build:
+//   1) WebUI principal (WebUI/) -- sandbox / standalone / host propio.
+//   2) WebUI embebida del Bank Manager (WebUI/abdbank/) -- la pagina HTML que
+//      aloja el iframe del BankManagerModal cuando el synth la sirve como
+//      recurso propio.
+// El mundo embebido tiene DOS directorios staticos: CMake globs "WebUI/vendor/*"
+// y "WebUI/public/*" y el provider embebido los resuelve aplanados por basename.
+// Vite solo admite UN publicDir, asi que aqui publicDir queda desactivado y un
+// plugin propio los sirve (dev) y los copia (build) en la raiz con la misma
+// semantica en ambos casos: public/ pisa a vendor/ si alguna ruta choca. Asi
+// embebido, vite dev y dist ven exactamente las mismas rutas en la raiz.
 const WEBUI_ROOT = __dirname;
+const PROJECT_ROOT = path.resolve(WEBUI_ROOT, '..');
+const EMBEDDED_WEBUI_DIR = path.resolve(WEBUI_ROOT, 'abdbank');
+
 const DEV_SERVE_ORDER = ['public', 'vendor']; // precedencia en dev: public gana
 const BUILD_COPY_ORDER = ['vendor', 'public']; // copia en build: public se copia al final
 
@@ -34,7 +42,7 @@ const MIME = {
   '.wasm': 'application/wasm'
 };
 
-// Resuelve una URL contra los dos directorios publicos, en orden de precedencia.
+// Resuelve una URL contra los dos directorios estaticos, en orden de precedencia.
 // Devuelve la ruta absoluta o null. No escapa de WEBUI_ROOT ni indexa directorios.
 function resolveStaticFile(urlPath) {
   let rel = urlPath.split('?')[0].split('#')[0];
@@ -105,8 +113,45 @@ function dualPublicDirs() {
           fs.cpSync(path.join(src, entry.name), path.join(outDir, entry.name), { recursive: true, dereference: true });
         }
       }
+
+      // Segunda pagina estatica del repo: WebUI embebida del Bank Manager.
+      // Esta se sirve desde el host o desde vite, pero Vite no la bundlea ni la
+      // transforma: solo debe llegar copiada a dist/webui/abdbank/.
+      if (fs.existsSync(EMBEDDED_WEBUI_DIR)) {
+        const embeddedOut = path.resolve(outDir, 'abdbank');
+        fs.rmSync(embeddedOut, { recursive: true, force: true });
+        fs.mkdirSync(embeddedOut, { recursive: true });
+        for (const entry of fs.readdirSync(EMBEDDED_WEBUI_DIR, { withFileTypes: true })) {
+          const src = path.resolve(EMBEDDED_WEBUI_DIR, entry.name);
+          const dest = path.join(embeddedOut, entry.name);
+          if (entry.isDirectory()) {
+            fs.cpSync(src, dest, { recursive: true, dereference: true });
+          } else {
+            fs.cpSync(src, dest, { dereference: true });
+          }
+        }
+      }
     }
   };
+}
+
+// Entradas estaticas adicionales: todo lo que no sea el index.html principal.
+// En este repo, la unica pagina estatica adicional esperada es la del bank manager
+// embebido, pero lo calculamos dinamicamente para no tener que mantener un listado
+// manual si en el futuro hay mas paginas staticas en WebUI/.
+function extraHtmlEntries() {
+  const entries = {};
+  if (fs.existsSync(EMBEDDED_WEBUI_DIR)) {
+    for (const entry of fs.readdirSync(EMBEDDED_WEBUI_DIR, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ext === '.html' || ext === '.htm') {
+        const name = path.basename(entry.name, ext);
+        entries[name] = path.resolve(EMBEDDED_WEBUI_DIR, entry.name);
+      }
+    }
+  }
+  return entries;
 }
 
 export default defineConfig({
@@ -116,7 +161,14 @@ export default defineConfig({
   plugins: [dualPublicDirs()],
   server: {
     port: 1420,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      allow: ['..', path.resolve(__dirname, '../../ABDSharedAssets')]
+    },
+    middlewareMode: false,
+    watch: {
+      ignored: ['**/dist/**', '**/node_modules/**']
+    }
   },
   build: {
     outDir: path.resolve(__dirname, '../dist/webui'),
@@ -124,13 +176,15 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html')
+        main: path.resolve(__dirname, 'index.html'),
+        ...extraHtmlEntries()
       }
     }
   },
   resolve: {
     alias: {
-      '@webui': path.resolve(__dirname, 'src')
+      '@webui': path.resolve(__dirname, 'src'),
+      '@abdsynths/shared': path.resolve(__dirname, '../../ABDSharedAssets')
     }
   }
 });

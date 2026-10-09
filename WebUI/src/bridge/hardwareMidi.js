@@ -46,9 +46,23 @@ let activeSession = null;
  * Returns { input, output } compatible with createMidiTransport().
  * A previous session (if any) is closed automatically.
  */
-export function createBridgeMidiPorts() {
+/**
+ * Crea el par de puertos respaldado por el bridge del anfitrión.
+ *
+ * `onStatus` recibe el estado del otro extremo para que la UI pueda explicarse:
+ *  - `{ type: 'ack', listening, device }` — el anfitrión abrió (o no) su entrada;
+ *  - `{ type: 'error', message }`        — no hay dispositivo, o falló el envío;
+ *  - `{ type: 'sent', bytes }`           — cuántos bytes han salido de verdad.
+ * Sin esto, dentro del plugin un fetch sin hardware disponible solo podía acabar
+ * en timeout, sin decir por qué.
+ */
+export function createBridgeMidiPorts({ onStatus } = {}) {
   if (activeSession) activeSession.close();
   const listeners = new Set();
+
+  const notify = (status) => {
+    try { onStatus?.(status); } catch (e) { console.error('[BridgeMIDI] onStatus failed:', e); }
+  };
 
   const input = {
     id: 'bridge-midi-in',
@@ -78,7 +92,23 @@ export function createBridgeMidiPorts() {
     }
   });
 
-  // Ask the C++ core to forward hardware bytes to the WebUI.
+  const unsubscribeAck = bridge.on('hardware.listen.ack', (data) => {
+    notify({
+      type: 'ack',
+      listening: !!(data && data.listening),
+      device: (data && data.device) || null
+    });
+  });
+
+  const unsubscribeErrors = bridge.on('hardware.error', (message) => {
+    notify({ type: 'error', message: typeof message === 'string' ? message : String(message ?? '') });
+  });
+
+  const unsubscribeSent = bridge.on('hardware.sent', (bytes) => {
+    notify({ type: 'sent', bytes: Number(bytes) || 0 });
+  });
+
+  // Ask the host to open its hardware MIDI transport and forward bytes to the WebUI.
   bridge.send('hardware.listen', {});
 
   const session = {
@@ -86,6 +116,9 @@ export function createBridgeMidiPorts() {
     output,
     close() {
       unsubscribeReceive();
+      unsubscribeAck();
+      unsubscribeErrors();
+      unsubscribeSent();
       listeners.clear();
       if (activeSession === session) activeSession = null;
     },

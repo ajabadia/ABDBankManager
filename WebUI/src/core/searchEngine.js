@@ -58,16 +58,22 @@ function escHtml(s) {
 /**
  * Search across all data
  * @param {string} query - search string
+ * @param {{allowedModelIds?: Iterable<string>}} [options] - When given, model
+ *   hits are limited to these ids (host-context filtering: the Bank Manager
+ *   must not offer a synth the host cannot drive). Banks and patches always
+ *   search the whole library, since they are the user's own data.
  * @returns {Promise<SearchResult[]>}
  */
-export async function globalSearch(query) {
+export async function globalSearch(query, options = {}) {
   if (!query || query.length < 1) return [];
 
   const q = query.toLowerCase().trim();
   const results = [];
+  const allowedModelIds = options.allowedModelIds ? new Set(options.allowedModelIds) : null;
 
-  // 1. Search models
+  // 1. Search models (restricted to the host-compatible hardware when set)
   for (const contract of MODEL_CONTRACTS) {
+    if (allowedModelIds && !allowedModelIds.has(contract.modelId)) continue;
     const name = (contract.displayName || '').toLowerCase();
     if (name.includes(q)) {
       const score = name === q ? SCORE_EXACT_NAME

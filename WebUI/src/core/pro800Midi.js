@@ -67,6 +67,9 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
   if (!contract) throw new Error(`Contract not found: ${modelId}`);
   const effectiveTimeout = timeoutMs || contract.dumpTimeoutMs || 5000;
   let pending = null;
+  // Acuse de escritura en curso (uno a la vez, como `pending`): lo resuelve la
+  // llegada de un `0x23`/`0x24` del contrato.
+  let pendingAck = null;
 
   // Activity callback: onActivity({ direction: 'in'|'out', bytes, label })
   const notify = (direction, bytes, label) => {
@@ -80,8 +83,40 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
   const onMessage = event => {
     const raw = new Uint8Array(event.data);
     notify('in', raw, `${raw.length} bytes`);
-    if (!pending) return;
     const messages = splitSysExMessages(raw);
+
+    // El acuse de escritura no es un parche: se mira antes y nunca se confunde con un
+    // dump. Si además hay un fetch esperando, se sigue con el camino de siempre.
+    if (pendingAck && contract.parseAcknowledgement) {
+      const ack = messages.map(m => contract.parseAcknowledgement(m)).find(a => a !== null);
+      if (ack) {
+        const finish = pendingAck.resolve;
+        clearTimeout(pendingAck.timer);
+        pendingAck = null;
+        finish(ack);
+      }
+    }
+
+    if (!pending) return;
+
+    // Petición de **banco completo** (`fetchAll`, sin slot): se recogen los patches de
+    // *todos* los mensajes del evento antes de resolver. Un destino puede contestar con un
+    // único `0x4C` (la memoria entera) o con varias tramas seguidas; quedarse con la primera
+    // truncaba el banco a un solo patch.
+    if (pending.slot === undefined && contract.parseDumpResponse) {
+      const collected = [];
+      for (const message of messages) {
+        const bulkParsed = contract.parseDumpResponse(message);
+        if (bulkParsed && bulkParsed.length > 0) collected.push(...bulkParsed);
+      }
+      if (collected.length > 0) {
+        const resolve = pending.resolve;
+        pending = null;
+        resolve(collected);
+      }
+      return;
+    }
+
     for (const message of messages) {
       // Try single-voice parse first, then bulk dump
       const parsed = contract.parsePatchSysEx?.(message);
@@ -118,6 +153,11 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
     });
   }
 
+  /**
+   * Pide la memoria completa al destino (`0x0E` en Korg y en la casa) y resuelve con los
+   * patches que conteste: un `0x4C` con N programas, o N tramas seguidas. El contrato decide
+   * qué significa "todo" (`buildDumpRequest('all')`).
+   */
   async function fetchAll(signal) {
     if (pending) throw new Error(`A request is already pending for ${contract.displayName}`);
     if (signal?.aborted) throw new DOMException('Operation cancelled', 'AbortError');
@@ -131,30 +171,81 @@ export function createMidiTransport({ modelId, input, output, timeoutMs, onActiv
     });
   }
 
+  /**
+   * Espera el acuse de una escritura (`0x23` Write Completed / `0x24` Write Error).
+   * Resuelve con `{ ok: true }` si el destino confirmó; rechaza si dijo que no o si
+   * nadie contestó antes del timeout. Ojo: una escritura que **no** se espera (el
+   * caso de hoy) sigue siendo "a ciegas", como con el hardware real.
+   */
+  function waitForAcknowledgement({ timeoutMs: ackTimeoutMs, signal } = {}) {
+    if (!contract.parseAcknowledgement)
+      throw new Error(`${contract.displayName} does not acknowledge writes (no parseAcknowledgement)`);
+    if (pendingAck) throw new Error(`An acknowledgement is already pending for ${contract.displayName}`);
+    if (signal?.aborted) return Promise.reject(new DOMException('Operation cancelled', 'AbortError'));
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingAck = null;
+        reject(new Error(`Timeout waiting for the write acknowledgement from ${contract.displayName}`));
+      }, ackTimeoutMs || effectiveTimeout);
+
+      const abort = () => {
+        clearTimeout(timer);
+        pendingAck = null;
+        reject(new DOMException('Operation cancelled', 'AbortError'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+
+      pendingAck = {
+        timer,
+        resolve: ack => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
+          if (ack.ok) resolve(ack);
+          else reject(new Error(`${contract.displayName} rejected the write (0x24 Write Error)`));
+        },
+      };
+    });
+  }
+
   return {
     capabilities: {
       fetch: !!(contract.buildDumpRequest && (contract.parsePatchSysEx || contract.parseDumpResponse)),
       send: !!contract.buildPatchSysEx,
       bulk: !!contract.buildBulkSysEx,
+      /** Contrato con el que habla este transporte (el destino, no el banco). */
+      modelId: contract.modelId,
+      /** El destino es el synth de software de la suite (no hardware real). */
+      softsynth: contract.isSoftsynth === true,
+      /** El destino sabe acusar recibo de una escritura (`0x23`/`0x24`). */
+      confirm: !!contract.parseAcknowledgement,
     },
     fetchPatch,
     fetchAll,
-    sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1) {
+    sendPatch(patch, slot, channel = contract.midi?.defaultChannel ?? 1, options = {}) {
       if (!contract.buildPatchSysEx) throw new Error(`The contract ${contract.displayName} does not allow SysEx export`);
       const msg = contract.buildPatchSysEx(patch.rawData, slot, channel);
       notify('out', msg, `Patch → ${output.name || 'MIDI'}`);
       output.send(msg);
+      // `confirm: true` cambia el retorno: deja de ser el retardo entre mensajes y
+      // pasa a ser la promesa con el acuse del destino.
+      if (options.confirm) return waitForAcknowledgement(options);
       return contract.interMessageDelayMs || 0;
     },
-    sendBulk(patches, channel = contract.midi?.defaultChannel ?? 1) {
+    sendBulk(patches, channel = contract.midi?.defaultChannel ?? 1, options = {}) {
       if (!contract.buildBulkSysEx) throw new Error(`The contract ${contract.displayName} does not allow bulk send`);
       const msg = contract.buildBulkSysEx(patches, channel);
       const delay = contract.interMessageDelayMs || 50;
       notify('out', msg, `Bank (${patches.length} patches) → ${output.name || 'MIDI'}`);
       output.send(msg);
+      if (options.confirm) return waitForAcknowledgement(options);
       return delay * 2;
     },
-    close() { input?.removeEventListener?.('midimessage', onMessage); pending = null; }
+    close() {
+      input?.removeEventListener?.('midimessage', onMessage);
+      pending = null;
+      if (pendingAck) { clearTimeout(pendingAck.timer); pendingAck = null; }
+    }
   };
 }
 

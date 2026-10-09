@@ -1,0 +1,6 @@
+/* ==========================================================================
+   bank-manager.css (@abdsynths/bank-manager-ui export)
+   Importa los estilos canónicos unificados desde @abdsynths/shared
+   ========================================================================== */
+
+@import '@abdsynths/shared/styles/components/bank-manager.css';

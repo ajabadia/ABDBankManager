@@ -1,17 +1,25 @@
 {
   "name": "@abdsynths/bank-manager-ui",
   "version": "0.1.0",
-  "description": "Reusable UI components — BankManagerModal, PatchList, SearchBar",
+  "description": "Reusable UI components — BankManagerModal, modelSelector, panelFactory",
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./BankManagerModal.js": "./src/BankManagerModal.js",
+    "./BankManagerModal.css": "./src/BankManagerModal.css",
+    "./styles": "./src/styles/bank-manager.css",
+    "./styles/bank-manager.css": "./src/styles/bank-manager.css"
   },
+  "files": [
+    "src"
+  ],
   "scripts": {
     "test": "vitest run"
   },
   "dependencies": {
-    "@abdsynths/bank-manager-core": "*",
-    "@abdsynths/bank-manager-contracts": "*"
+    "@abdsynths/bank-manager-core": "workspace:*",
+    "@abdsynths/bank-manager-contracts": "workspace:*",
+    "@abdsynths/shared": "workspace:*"
   }
 }

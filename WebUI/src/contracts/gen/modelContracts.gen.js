@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT
 // Generator: Scripts/build_contracts_web.js
 // Fuente canónica: Source/Contracts/Models/*.ts
-// Source/Contracts/ModelContract.ts
+// ../ABDSharedCode/BankManager/Contracts/ModelContract.ts
 function validateModelContract(contract) {
   const errors = [];
   if (!contract.modelId) errors.push("modelId is required");
@@ -43,6 +43,25 @@ function validateModelContract(contract) {
   if (!Number.isInteger(contract.formatVersion) || contract.formatVersion < 1) {
     errors.push("formatVersion must be positive integer");
   }
+  const transport = contract.transport;
+  if (transport?.software) {
+    const systems = transport.software.systems;
+    if (!Array.isArray(systems) || systems.length === 0) {
+      errors.push("transport.software.systems must be a non-empty array");
+    } else {
+      for (const system of systems) {
+        if (system !== "sysex" && system !== "native") {
+          errors.push(`transport.software.systems has unknown system '${system}'`);
+        }
+      }
+      if (systems.includes("sysex") && !contract.buildPatchSysEx && !contract.parsePatchSysEx) {
+        errors.push("transport.software.systems declares 'sysex' but the contract cannot build or parse SysEx");
+      }
+    }
+    if (contract.isSoftsynth !== true) {
+      errors.push("transport.software requires isSoftsynth: true");
+    }
+  }
   for (let i = 0; i < Math.min(10, contract.bankCapacity); i++) {
     const addr = contract.getProgramAddress(i);
     const parsed = contract.parseProgramAddress(addr);
@@ -53,23 +72,7 @@ function validateModelContract(contract) {
   return { valid: errors.length === 0, errors };
 }
 
-// Source/Contracts/SysEx/codec.ts
-function pack8to7(data) {
-  const packed = [];
-  for (let i = 0; i < data.length; i += 7) {
-    const group = data.slice(i, Math.min(i + 7, data.length));
-    let control = 0;
-    for (let j = 0; j < 7; j++) {
-      const byte = j < group.length ? group[j] : 0;
-      control |= (byte >> 7 & 1) << 6 - j;
-    }
-    packed.push(control);
-    for (let j = 0; j < 7; j++) {
-      packed.push((j < group.length ? group[j] : 0) & 127);
-    }
-  }
-  return new Uint8Array(packed);
-}
+// ../ABDSharedCode/BankManager/Contracts/SysEx/codec.ts
 function pack8to7Dm(data) {
   const packed = [];
   for (let offset = 0; offset < data.length; offset += 7) {
@@ -95,16 +98,31 @@ function unpack7to8Dm(packed) {
 }
 function unpack7to8(packed) {
   const unpacked = [];
-  for (let i = 0; i < packed.length; i += 8) {
-    if (i + 8 > packed.length) break;
-    const group = packed.slice(i, i + 8);
-    const control = group[0];
-    for (let j = 0; j < 7; j++) {
+  let i = 0;
+  while (i < packed.length) {
+    const control = packed[i++];
+    for (let j = 0; j < 7 && i < packed.length; j++) {
       const highBit = control >> 6 - j & 1;
-      unpacked.push((highBit << 7 | group[j + 1] & 127) & 255);
+      unpacked.push((highBit << 7 | packed[i++] & 127) & 255);
     }
   }
   return new Uint8Array(unpacked);
+}
+function pack8to7NoPad(data) {
+  const packed = [];
+  for (let i = 0; i < data.length; i += 7) {
+    const count = Math.min(7, data.length - i);
+    let control = 0;
+    for (let j = 0; j < count; j++) {
+      if ((data[i + j] & 128) !== 0) control |= 1 << 6 - j;
+    }
+    packed.push(control);
+    for (let j = 0; j < count; j++) packed.push(data[i + j] & 127);
+  }
+  return new Uint8Array(packed);
+}
+function unpack7to8Tolerant(packed) {
+  return unpack7to8(packed);
 }
 function pack7to8NoPad(data) {
   const packed = [];
@@ -216,7 +234,7 @@ function splitSysexMessages(raw) {
   return messages;
 }
 
-// Source/Contracts/Models/casio-cz.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/casio-cz.ts
 var BANK_CAPACITY = 16;
 var BANKS_COUNT = 1;
 var PROGRAMS_PER_BANK = 16;
@@ -234,8 +252,17 @@ var MODEL_IDS = {
   "casio-cz5000": 20,
   "casio-cz1": 21
 };
+var MODEL_BY_BYTE = {
+  18: { modelId: "casio-cz101", dataSize: 128 },
+  19: { modelId: "casio-cz1000", dataSize: 128 },
+  20: { modelId: "casio-cz5000", dataSize: 128 },
+  21: { modelId: "casio-cz1", dataSize: 288 }
+};
 function isCasioSysEx(msg, modelId) {
-  return msg.length >= 9 && msg[0] === 240 && msg[1] === 68 && msg[2] === 0 && msg[3] === 0 && msg[4] === modelId && msg[5] === CMD_DUMP && msg[msg.length - 1] === 247;
+  return msg.length >= 9 && msg[0] === 240 && msg[1] === 68 && msg[2] === 0 && msg[3] === 0 && (modelId === void 0 || msg[4] === modelId && MODEL_BY_BYTE[msg[4]] !== void 0) && (modelId !== void 0 || MODEL_BY_BYTE[msg[4]] !== void 0) && msg[5] === CMD_DUMP && msg[msg.length - 1] === 247;
+}
+function czChecksumRegion(msg) {
+  return casioChecksum(msg.slice(6, msg.length - 2));
 }
 function getBankLetter(index) {
   return String.fromCharCode(65 + Math.floor(index / 16));
@@ -282,11 +309,9 @@ var casioCzContract = {
     return casioChecksum(data);
   },
   verifyChecksum(sysex) {
-    if (sysex.length < 9) return false;
-    if (sysex[0] !== 240 || sysex[1] !== 68) return false;
-    if (sysex[sysex.length - 1] !== 247) return false;
-    const nibbles = sysex.slice(7, sysex.length - 2);
-    return sysex[sysex.length - 2] === casioChecksum(nibbles);
+    const msgs = splitSysexMessages(sysex).filter((m) => isCasioSysEx(m));
+    if (msgs.length === 0) return false;
+    return msgs.every((m) => m[m.length - 2] === czChecksumRegion(m));
   },
   buildPatchSysEx(rawData, _slot, channel) {
     const modelId = MODEL_IDS[this.modelId] || 18;
@@ -295,7 +320,6 @@ var casioCzContract = {
     const padded = new Uint8Array(dataSize);
     padded.set(data);
     const nibbles = encodeNibble(padded);
-    const checksum = casioChecksum(nibbles);
     const result = new Uint8Array(7 + nibbles.length + 2);
     result[0] = 240;
     result[1] = 68;
@@ -305,16 +329,16 @@ var casioCzContract = {
     result[5] = CMD_DUMP;
     result[6] = channel & 15;
     result.set(nibbles, 7);
-    result[7 + nibbles.length] = checksum;
+    result[7 + nibbles.length] = casioChecksum(result.slice(6, 7 + nibbles.length));
     result[7 + nibbles.length + 1] = 247;
     return result;
   },
   parsePatchSysEx(sysex) {
-    const modelId = MODEL_IDS[this.modelId] || 18;
-    if (!isCasioSysEx(sysex, modelId)) return null;
+    if (!isCasioSysEx(sysex)) return null;
+    const info = MODEL_BY_BYTE[sysex[4]];
+    const dataSize = info?.dataSize ?? PATCH_DATA_SIZE;
     const nibbles = sysex.slice(7, sysex.length - 2);
     const decoded = decodeNibble(nibbles);
-    const dataSize = this.patchDataSize || PATCH_DATA_SIZE;
     return { rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: 0 };
   },
   buildDumpRequest(_slot, channel) {
@@ -322,22 +346,24 @@ var casioCzContract = {
     return new Uint8Array([240, 68, 0, 0, modelId, CMD_REQUEST, channel & 15, 247]);
   },
   parseDumpResponse(sysex) {
-    const modelId = MODEL_IDS[this.modelId] || 18;
     const msgs = splitSysexMessages(sysex);
     const results = [];
     for (const msg of msgs) {
-      if (isCasioSysEx(msg, modelId)) {
+      if (isCasioSysEx(msg)) {
+        const info = MODEL_BY_BYTE[msg[4]];
+        const dataSize = info?.dataSize ?? PATCH_DATA_SIZE;
         const nibbles = msg.slice(7, msg.length - 2);
         const decoded = decodeNibble(nibbles);
-        results.push({ rawData: new Uint8Array(decoded.slice(0, PATCH_DATA_SIZE)), slot: results.length });
+        results.push({ rawData: new Uint8Array(decoded.slice(0, dataSize)), slot: results.length });
       }
     }
     return results;
   },
   parseFile(data, _filename) {
-    const modelId = MODEL_IDS[this.modelId] || 18;
-    const parsed = splitSysexMessages(data).filter((m) => isCasioSysEx(m, modelId)).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
-    if (parsed.length === 0) return null;
+    const msgs = splitSysexMessages(data).filter((m) => isCasioSysEx(m));
+    if (msgs.length === 0) return null;
+    const firstModel = MODEL_BY_BYTE[msgs[0][4]]?.modelId;
+    const parsed = msgs.map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
     const patches = parsed.map((p, i) => ({
       name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
       category: this.defaultCategory,
@@ -350,7 +376,7 @@ var casioCzContract = {
       creationDate: (/* @__PURE__ */ new Date()).toISOString()
     }));
     return {
-      modelId: this.modelId,
+      modelId: firstModel || this.modelId,
       bankName: `Casio ${this.displayName}`,
       patches,
       warnings: []
@@ -394,6 +420,7 @@ var casioCz1000Contract = {
 var casioCz5000Contract = {
   ...casioCzContract,
   modelId: "casio-cz5000",
+  compatibleModels: ["casio-cz101", "casio-cz1000", "casio-cz1"],
   displayName: "Casio CZ-5000",
   thumbnail: "casio-cz5000.webp",
   bankCapacity: 32,
@@ -403,6 +430,7 @@ var casioCz5000Contract = {
 var casioCz1Contract = {
   ...casioCzContract,
   modelId: "casio-cz1",
+  compatibleModels: ["casio-cz101", "casio-cz1000", "casio-cz5000"],
   displayName: "Casio CZ-1",
   thumbnail: "casio-cz1.webp",
   bankCapacity: 64,
@@ -423,7 +451,7 @@ allCasioContracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/roland-juno.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-juno.ts
 var BANK_CAPACITY2 = 128;
 var BANKS_COUNT2 = 2;
 var PROGRAMS_PER_BANK2 = 64;
@@ -492,10 +520,21 @@ var rolandJuno106Contract = {
     if (sysex.length < 6) return false;
     if (sysex[0] !== 240 || sysex[1] !== 65) return false;
     if (sysex[sysex.length - 1] !== 247) return false;
-    if (sysex.length === 23 && sysex[2] === CMD_PATCH_DUMP) return true;
-    if (sysex.length < 24) return false;
-    const payload = sysex.slice(5, sysex.length - 2);
-    return sysex[sysex.length - 2] === bulkChecksum(payload);
+    if (isJunoBulkDump(sysex)) return true;
+    const FRAME_LEN = 4 + PATCH_DATA_SIZE2 + 1;
+    if (sysex.length >= FRAME_LEN && sysex.length % FRAME_LEN === 0) {
+      let ok = true;
+      for (let off = 0; off + FRAME_LEN <= sysex.length; off += FRAME_LEN) {
+        if (!isJunoSinglePatch(sysex.slice(off, off + FRAME_LEN))) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return true;
+    }
+    const msgs = splitSysexMessages(sysex);
+    if (msgs.length === 0) return false;
+    return msgs.every((m) => isJunoSinglePatch(m) || isJunoBulkDump(m));
   },
   buildPatchSysEx(rawData, _slot, channel) {
     const data = rawData.slice(0, PATCH_DATA_SIZE2);
@@ -528,7 +567,7 @@ var rolandJuno106Contract = {
     return results;
   },
   parseFile(data, _filename) {
-    const parsed = splitSysexMessages(data).flatMap((msg) => {
+    let parsed = splitSysexMessages(data).flatMap((msg) => {
       if (isJunoSinglePatch(msg)) {
         return [{ rawData: msg.slice(4, 4 + PATCH_DATA_SIZE2), slot: 0 }];
       }
@@ -544,6 +583,20 @@ var rolandJuno106Contract = {
       }
       return [];
     });
+    const FRAME_LEN = 4 + PATCH_DATA_SIZE2 + 1;
+    if (data.length >= FRAME_LEN && data.length % FRAME_LEN === 0) {
+      const frames = [];
+      let ok = true;
+      for (let off = 0; off + FRAME_LEN <= data.length; off += FRAME_LEN) {
+        const frame = data.slice(off, off + FRAME_LEN);
+        if (!isJunoSinglePatch(frame)) {
+          ok = false;
+          break;
+        }
+        frames.push({ rawData: frame.slice(4, 4 + PATCH_DATA_SIZE2), slot: frames.length });
+      }
+      if (ok && frames.length > parsed.length) parsed = frames;
+    }
     if (parsed.length === 0) return null;
     const patches = parsed.map((p, i) => ({
       name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(i),
@@ -596,6 +649,7 @@ var rolandJuno60Contract = {
   modelId: "roland-juno60",
   displayName: "Roland Juno-60",
   thumbnail: "roland-juno-60.webp",
+  compatibleModels: ["roland-juno106", "roland-juno6", "roland-hs60"],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 61
@@ -606,6 +660,7 @@ var rolandJuno6Contract = {
   modelId: "roland-juno6",
   displayName: "Roland Juno-6",
   thumbnail: "roland-juno-6.webp",
+  compatibleModels: ["roland-juno106", "roland-juno60", "roland-hs60"],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 60
@@ -616,6 +671,7 @@ var rolandHs60Contract = {
   modelId: "roland-hs60",
   displayName: "Roland HS-60",
   thumbnail: "roland-hs60.webp",
+  compatibleModels: ["roland-juno106", "roland-juno60", "roland-juno6"],
   legacySysEx: {
     ...rolandJuno106Contract.legacySysEx,
     modelIdByte: 62
@@ -634,13 +690,13 @@ allRolandJunoContracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/korg-ms2000.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/korg-ms2000.ts
 var BANK_CAPACITY3 = 128;
 var BANKS_COUNT3 = 8;
 var PROGRAMS_PER_BANK3 = 16;
-var PATCH_DATA_SIZE3 = 288;
+var PATCH_DATA_SIZE3 = 254;
 var PATCH_NAME_MAX_LENGTH3 = 12;
-var CATEGORIES3 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var CATEGORIES3 = ["Bass", "Lead", "Pad", "Motion", "Arp", "Split", "Bell", "Other"];
 var DEFAULT_CATEGORY3 = "Other";
 var SYSEX_MANUFACTURER_ID3 = [66];
 var FORMAT_VERSION3 = 1;
@@ -649,6 +705,8 @@ var CMD_DUMP2 = 64;
 var CMD_ALL_DUMP = 76;
 var CMD_REQUEST2 = 16;
 var CMD_ALL_REQUEST = 14;
+var CMD_ACK = 35;
+var CMD_NACK = 36;
 var MODEL_IDS2 = {
   "korg-ms2000": 88,
   "korg-microkorg": 88,
@@ -660,6 +718,13 @@ function getBankLetter3(index) {
 }
 function getProgramNumber3(index) {
   return index % 16 + 1;
+}
+var KORG_CHANNEL_BYTE_BASE = 48;
+var KORG_CHANNEL_ZERO_BASED = true;
+function korgChannelByte(channel) {
+  const clamped = Math.max(1, Math.min(16, Number(channel) || 1));
+  const value = KORG_CHANNEL_ZERO_BASED ? clamped - 1 : clamped;
+  return KORG_CHANNEL_BYTE_BASE | value & 15;
 }
 function isKorgSysEx(msg, modelIdByte) {
   return msg.length >= 5 && msg[0] === 240 && msg[1] === 66 && msg[3] === modelIdByte && (msg[4] === CMD_DUMP2 || msg[4] === CMD_ALL_DUMP);
@@ -688,7 +753,7 @@ var korgMs2000Contract = {
   patchDataSize: PATCH_DATA_SIZE3,
   patchNameMaxLength: PATCH_NAME_MAX_LENGTH3,
   extractPatchName(data) {
-    const nameOffset = 28;
+    const nameOffset = 0;
     if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
     const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
     return new TextDecoder().decode(nameBytes).replace(/\0/g, "").trim();
@@ -717,7 +782,10 @@ var korgMs2000Contract = {
     if (sysex[0] !== 240 || sysex[1] !== 66 || sysex[3] !== modelId) return false;
     if (sysex[sysex.length - 1] !== 247) return false;
     const packed = sysex.slice(5, sysex.length - 1);
-    if (packed.length % 8 !== 0) return false;
+    if (packed.length === 0) return false;
+    const rem = packed.length % 8;
+    const decoded = Math.floor(packed.length / 8) * 7 + (rem > 0 ? rem - 1 : 0);
+    if (decoded < this.patchDataSize) return false;
     return true;
   },
   buildPatchSysEx(rawData, slot, channel) {
@@ -726,15 +794,15 @@ var korgMs2000Contract = {
     const data = rawData.slice(0, size);
     const padded = new Uint8Array(size);
     padded.set(data);
-    const packed = pack8to7(padded);
-    return new Uint8Array([240, 66, 48 | channel & 15, modelId, CMD_DUMP2, ...packed, 247]);
+    const packed = pack8to7NoPad(padded);
+    return new Uint8Array([240, 66, korgChannelByte(channel), modelId, CMD_DUMP2, ...packed, 247]);
   },
   parsePatchSysEx(sysex) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
     if (!isKorgSysEx(sysex, modelId)) return null;
     if (sysex[sysex.length - 1] !== 247) return null;
     const packed = sysex.slice(5, sysex.length - 1);
-    const unpacked = unpack7to8(packed);
+    const unpacked = unpack7to8Tolerant(packed);
     const rawData = unpacked.slice(0, this.patchDataSize);
     const slot = 0;
     return { rawData: new Uint8Array(rawData), slot };
@@ -742,17 +810,41 @@ var korgMs2000Contract = {
   buildDumpRequest(slot, channel) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
     const cmd = slot === "all" ? CMD_ALL_REQUEST : CMD_REQUEST2;
-    return new Uint8Array([240, 66, 48 | channel & 15, modelId, cmd, 247]);
+    return new Uint8Array([240, 66, korgChannelByte(channel), modelId, cmd, 247]);
   },
   parseDumpResponse(sysex) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
     const msgs = splitSysexMessages(sysex).filter((m) => isKorgSysEx(m, modelId));
     const results = [];
     for (const msg of msgs) {
+      if (msg[4] === CMD_ALL_DUMP) {
+        const unpacked = unpack7to8Tolerant(msg.slice(5, msg.length - 1));
+        const size = this.patchDataSize;
+        for (let off = 0; off + size <= unpacked.length; off += size)
+          results.push({ rawData: new Uint8Array(unpacked.slice(off, off + size)), slot: results.length });
+        continue;
+      }
       const parsed = korgMs2000Contract.parsePatchSysEx?.call(this, msg);
       if (parsed) results.push(parsed);
     }
     return results;
+  },
+  /**
+   * Acuse del equipo: `F0 42 3n 58 23 F7` (guardado) / `... 24 F7` (error). 6 B y
+   * sin payload, así que no se confunde con un dump (`0x40`, 297 B).
+   *
+   * Ojo: no se reutiliza `isKorgSysEx`, que exige un comando de dump (`0x40`/`0x4C`)
+   * en el byte 4 y por eso descarta precisamente estos acuses.
+   */
+  parseAcknowledgement(sysex) {
+    const modelId = MODEL_IDS2[this.modelId] || 88;
+    if (sysex.length !== 6) return null;
+    if (sysex[0] !== 240 || sysex[1] !== 66) return null;
+    if ((sysex[2] & 240) !== 48) return null;
+    if (sysex[3] !== modelId || sysex[5] !== 247) return null;
+    if (sysex[4] === CMD_ACK) return { ok: true };
+    if (sysex[4] === CMD_NACK) return { ok: false };
+    return null;
   },
   parseFile(data, _filename) {
     const modelId = MODEL_IDS2[this.modelId] || 88;
@@ -792,9 +884,19 @@ var korgMs2000Contract = {
     const port = ports.find((p) => /ms.?2000|microkorg/i.test(p.name || ""));
     return port ? { name: port.name || "Korg MS2000", inputId: port.id || "", outputId: port.id || "", manufacturer: "Korg", modelId: this.modelId } : null;
   },
+  // Transporte declarado (ver DOCS/BANK_MANAGER_TRANSPORT_MODEL.md). El MS2000
+  // habla el protocolo de arriba; esto es lo que lee el Bank Manager para saber
+  // qué verbos existen sin mirar si hay función.
+  //
+  // Sin `audition`: el contrato declara `supportsEditBuffer: false`, es decir, el
+  // MS2000 no tiene volcado de buffer de edición. Inventarlo aquí haría que la UI
+  // ofreciera algo que el equipo no sabe hacer.
+  transport: {
+    hardware: { read: true, write: true, bulk: true, dumpRequest: true }
+  },
   legacySysEx: {
     modelIdByte: 88,
-    buildDumpRequest: (ch) => new Uint8Array([240, 66, 48 | ch & 15, 88, CMD_REQUEST2, 247]),
+    buildDumpRequest: (ch) => new Uint8Array([240, 66, korgChannelByte(ch), 88, CMD_REQUEST2, 247]),
     validateSysEx: (bytes) => bytes.length >= 5 && bytes[0] === 240 && bytes[1] === 66 && bytes[3] === 88
   }
 };
@@ -802,16 +904,202 @@ var korgMicrokorgContract = {
   ...korgMs2000Contract,
   modelId: "korg-microkorg",
   displayName: "Korg microKORG",
-  thumbnail: "korg-microkorg.webp"
+  thumbnail: "korg-microkorg.webp",
+  compatibleModels: ["korg-ms2000", "abd-sm002"]
 };
+var ABD_MANUFACTURER_ID = [125];
+var ABD_MODEL_ID = 10;
+var ABD_CMD_DUMP = 64;
+var ABD_CMD_ALL_DUMP = 76;
+var ABD_CMD_ACK = 35;
+var ABD_CMD_NACK = 36;
+var ABD_PATCH_DATA_SIZE = 384;
+var ABD_PATCH_DATA_SIZE_V1 = 128;
+function isAbdSysEx(msg) {
+  return msg.length >= 5 && msg[0] === 240 && msg[1] === 125 && msg[2] === ABD_MODEL_ID && msg[msg.length - 1] === 247 && (msg[3] === ABD_CMD_DUMP || msg[3] === ABD_CMD_ALL_DUMP);
+}
+function isAbdProgramDump(msg) {
+  return msg.length >= 5 && msg[0] === 240 && msg[1] === 125 && msg[2] === ABD_MODEL_ID && msg[3] === ABD_CMD_DUMP && msg[msg.length - 1] === 247;
+}
 var korgAbdSm002Contract = {
-  ...korgMicrokorgContract,
   modelId: "abd-sm002",
   displayName: "ABD MS2000 (SM002)",
   manufacturer: "ABDSynths",
-  isSoftsynth: true,
+  icon: "korg-logo.svg",
+  thumbnail: "korg-ms2000.webp",
+  bankCapacity: BANK_CAPACITY3,
+  banksCount: BANKS_COUNT3,
+  programsPerBank: PROGRAMS_PER_BANK3,
+  getProgramAddress: korgMs2000Contract.getProgramAddress,
+  parseProgramAddress: korgMs2000Contract.parseProgramAddress,
+  patchDataSize: ABD_PATCH_DATA_SIZE,
+  patchNameMaxLength: PATCH_NAME_MAX_LENGTH3,
+  extractPatchName(data) {
+    const nameOffset = 0;
+    if (data.length < nameOffset + PATCH_NAME_MAX_LENGTH3) return "";
+    const nameBytes = data.slice(nameOffset, nameOffset + PATCH_NAME_MAX_LENGTH3);
+    return new TextDecoder().decode(nameBytes).replace(/\0/g, "").trim();
+  },
+  categories: CATEGORIES3,
+  defaultCategory: DEFAULT_CATEGORY3,
   compatibleModels: ["korg-ms2000", "korg-microkorg"],
-  midiDetection: void 0
+  sysexManufacturerId: ABD_MANUFACTURER_ID,
+  sysexModelId: { offset: 2, values: [ABD_MODEL_ID] },
+  formatVersion: FORMAT_VERSION3,
+  isSoftsynth: true,
+  midi: {
+    defaultChannel: 1,
+    defaultDeviceId: ABD_MODEL_ID
+  },
+  supportsEditBuffer: false,
+  interMessageDelayMs: 50,
+  dumpTimeoutMs: 3e3,
+  computeChecksum() {
+    return 0;
+  },
+  verifyChecksum(sysex) {
+    if (!isAbdSysEx(sysex)) return false;
+    const packed = sysex.slice(4, sysex.length - 1);
+    if (packed.length === 0) return false;
+    const rem = packed.length % 8;
+    const decoded = Math.floor(packed.length / 8) * 7 + (rem > 0 ? rem - 1 : 0);
+    if (decoded < ABD_PATCH_DATA_SIZE_V1) return false;
+    return decoded === ABD_PATCH_DATA_SIZE || decoded === ABD_PATCH_DATA_SIZE_V1 || decoded % ABD_PATCH_DATA_SIZE === 0 || decoded % ABD_PATCH_DATA_SIZE_V1 === 0;
+  },
+  buildPatchSysEx(rawData, _slot, _channel) {
+    const size = ABD_PATCH_DATA_SIZE;
+    const data = rawData.slice(0, size);
+    const padded = new Uint8Array(size);
+    padded.set(data);
+    const packed = pack7to8NoPad(padded);
+    return new Uint8Array([240, 125, ABD_MODEL_ID, ABD_CMD_DUMP, ...packed, 247]);
+  },
+  parsePatchSysEx(sysex) {
+    if (!isAbdProgramDump(sysex)) return null;
+    const packed = sysex.slice(4, sysex.length - 1);
+    const unpacked = unpack7to8NoPad(packed);
+    if (unpacked.length === ABD_PATCH_DATA_SIZE_V1) {
+      const padded = new Uint8Array(ABD_PATCH_DATA_SIZE);
+      padded.set(unpacked);
+      return { rawData: padded, slot: 0 };
+    }
+    if (unpacked.length < ABD_PATCH_DATA_SIZE) return null;
+    const rawData = unpacked.slice(0, ABD_PATCH_DATA_SIZE);
+    return { rawData: new Uint8Array(rawData), slot: 0 };
+  },
+  buildDumpRequest(_slot, _channel) {
+    const cmd = _slot === "all" ? ABD_CMD_ALL_DUMP : ABD_CMD_DUMP;
+    return new Uint8Array([240, 125, ABD_MODEL_ID, cmd, 247]);
+  },
+  parseDumpResponse(sysex) {
+    const msgs = splitSysexMessages(sysex).filter((m) => isAbdSysEx(m));
+    const results = [];
+    for (const msg of msgs) {
+      const packed = msg.slice(4, msg.length - 1);
+      const unpacked = unpack7to8NoPad(packed);
+      if (unpacked.length === 0) continue;
+      let blockSize = ABD_PATCH_DATA_SIZE;
+      if (unpacked.length % ABD_PATCH_DATA_SIZE !== 0 && unpacked.length % ABD_PATCH_DATA_SIZE_V1 === 0) {
+        blockSize = ABD_PATCH_DATA_SIZE_V1;
+      } else if (unpacked.length < ABD_PATCH_DATA_SIZE && unpacked.length === ABD_PATCH_DATA_SIZE_V1) {
+        blockSize = ABD_PATCH_DATA_SIZE_V1;
+      } else if (unpacked.length % ABD_PATCH_DATA_SIZE !== 0) {
+        continue;
+      }
+      const count = Math.floor(unpacked.length / blockSize);
+      for (let i = 0; i < count; i++) {
+        const chunk = unpacked.slice(i * blockSize, (i + 1) * blockSize);
+        let raw;
+        if (blockSize === ABD_PATCH_DATA_SIZE_V1) {
+          raw = new Uint8Array(ABD_PATCH_DATA_SIZE);
+          raw.set(chunk);
+        } else {
+          raw = new Uint8Array(chunk);
+        }
+        results.push({ rawData: raw, slot: i });
+      }
+    }
+    return results;
+  },
+  /**
+   * Acuse del **software** (ABDMSynths): `F0 7D 0A 23 F7` guardado / `... 24 F7`
+   * error. Es el mismo par de códigos que el MS2000 real, con la cabecera de la
+   * casa: así el Banco puede tratar al plugin como si fuera un equipo.
+   */
+  parseAcknowledgement(sysex) {
+    if (sysex.length !== 5) return null;
+    if (sysex[0] !== 240 || sysex[1] !== 125 || sysex[2] !== ABD_MODEL_ID || sysex[4] !== 247) return null;
+    if (sysex[3] === ABD_CMD_ACK) return { ok: true };
+    if (sysex[3] === ABD_CMD_NACK) return { ok: false };
+    return null;
+  },
+  parseFile(data, _filename) {
+    const msgs = splitSysexMessages(data).filter((m) => isAbdSysEx(m));
+    if (msgs.length === 0) return null;
+    const all = [];
+    for (const msg of msgs) {
+      const bulk = this.parseDumpResponse?.call(this, msg);
+      if (bulk && bulk.length > 0) {
+        const base = all.length;
+        for (let i = 0; i < bulk.length; i++) all.push({ rawData: bulk[i].rawData, slot: base + i });
+      } else {
+        const single = this.parsePatchSysEx?.(msg);
+        if (single) all.push({ rawData: single.rawData, slot: all.length });
+      }
+    }
+    if (all.length === 0) return null;
+    const patches = all.map((p, idx) => ({
+      name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(idx),
+      category: this.defaultCategory,
+      author: "Unknown",
+      tags: [],
+      notes: "",
+      originAddress: this.getProgramAddress(idx),
+      rawData: new Uint8Array(p.rawData),
+      isFavorite: false,
+      creationDate: (/* @__PURE__ */ new Date()).toISOString()
+    }));
+    return {
+      modelId: this.modelId,
+      bankName: `ABDSynths ${this.displayName}`,
+      patches,
+      warnings: []
+    };
+  },
+  serializeFile(patches, options) {
+    const msgs = patches.map((p) => this.buildPatchSysEx?.(p.rawData, p.slot, options.midiChannel) ?? new Uint8Array());
+    if (msgs.length === 1) return msgs[0];
+    const total = msgs.reduce((n, m) => n + m.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const m of msgs) {
+      out.set(m, off);
+      off += m.length;
+    }
+    return out;
+  },
+  detectHardware() {
+    return null;
+  },
+  // Transporte: híbrido — el hardware real por SysEx Korg (vía korg-ms2000) y
+  // los presets propios del plugin por el bridge (sistema native, 384 B opacos).
+  // `hardware` aquí no se usa para importar 0x7D (ya lo hace este contrato),
+  // sino para documentar que el host físico sigue siendo accesible.
+  transport: {
+    hardware: { read: true, write: true, bulk: true, dumpRequest: true },
+    software: {
+      systems: ["native"],
+      read: true,
+      write: true,
+      audition: true,
+      capture: true
+    }
+  },
+  legacySysEx: {
+    modelIdByte: ABD_MODEL_ID,
+    buildDumpRequest: () => new Uint8Array([240, 125, ABD_MODEL_ID, ABD_CMD_DUMP, 247]),
+    validateSysEx: (bytes) => bytes.length >= 5 && bytes[0] === 240 && bytes[1] === 125 && bytes[2] === ABD_MODEL_ID
+  }
 };
 var allKorgContracts = [
   korgMs2000Contract,
@@ -825,7 +1113,7 @@ allKorgContracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/korg-prophecy.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/korg-prophecy.ts
 var PROPHECY_BANK_CAPACITY = 128;
 var PROPHECY_BANKS_COUNT = 2;
 var PROPHECY_PROGRAMS_PER_BANK = 64;
@@ -838,7 +1126,7 @@ var PROPHECY_CMD_ALLREQ = 14;
 var PROPHECY_BANK_A = 16;
 var PROPHECY_BANK_B = 17;
 var PROPHECY_SINGLE_ADDR = [1, 0];
-var CATEGORIES4 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var CATEGORIES4 = ["Solo", "Bass", "Lead", "Brass", "Reed", "Strings", "Bell", "Other"];
 var DEFAULT_CATEGORY4 = "Other";
 var SYSEX_MANUFACTURER_ID4 = [66];
 var FORMAT_VERSION4 = 1;
@@ -923,7 +1211,7 @@ var korgProphecyContract = {
     const padded = new Uint8Array(size);
     padded.set(data);
     const packed = packProphecy7to8(padded);
-    const hdr = [240, 66, 48 | channel & 15, 65, PROPHECY_CMD_SINGLE, ...PROPHECY_SINGLE_ADDR];
+    const hdr = [240, 66, korgChannelByte(channel), 65, PROPHECY_CMD_SINGLE, ...PROPHECY_SINGLE_ADDR];
     return new Uint8Array([...hdr, ...packed, 247]);
   },
   parsePatchSysEx(sysex) {
@@ -951,7 +1239,7 @@ var korgProphecyContract = {
         off += p.length;
       }
       const packed = packProphecy7to8(concat);
-      const hdr = [240, 66, 48 | channel & 15, 65, PROPHECY_CMD_BANK, getBankAddrByte(bank), 0, 0, 0];
+      const hdr = [240, 66, korgChannelByte(channel), 65, PROPHECY_CMD_BANK, getBankAddrByte(bank), 0, 0, 0];
       messages.push(new Uint8Array([...hdr, ...packed, 247]));
     }
     if (messages.length === 1) return messages[0];
@@ -1027,11 +1315,11 @@ var korgProphecyContract = {
   },
   buildDumpRequest(slot, channel) {
     const cmd = slot === "all" ? PROPHECY_CMD_ALLREQ : PROPHECY_CMD_REQ;
-    return new Uint8Array([240, 66, 48 | channel & 15, 65, cmd, 247]);
+    return new Uint8Array([240, 66, korgChannelByte(channel), 65, cmd, 247]);
   },
   legacySysEx: {
     modelIdByte: 65,
-    buildDumpRequest: (ch) => new Uint8Array([240, 66, 48 | ch & 15, 65, PROPHECY_CMD_REQ, 247]),
+    buildDumpRequest: (ch) => new Uint8Array([240, 66, korgChannelByte(ch), 65, PROPHECY_CMD_REQ, 247]),
     validateSysEx: (bytes) => bytes.length >= 6 && bytes[0] === 240 && bytes[1] === 66 && bytes[3] === 65
   }
 };
@@ -1043,7 +1331,7 @@ allKorgProphecyContracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/behringer-dm12.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/behringer-dm12.ts
 var DM12_PATCH_DATA_SIZE = 242;
 var DM12_PATCH_NAME_MAX_LENGTH = 16;
 var MODEL_ID = 32;
@@ -1054,7 +1342,7 @@ var CMD_DUMP3 = 2;
 var CMD_REQUEST3 = 1;
 var PACKED_SIZE = 278;
 var PROGRAMS_PER_BANK4 = 128;
-var CATEGORIES5 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var CATEGORIES5 = ["Bass", "Lead", "Pad", "Strings", "Brass", "FX", "Keys", "Other"];
 function isDeepMindMessage(message) {
   return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID[0] && message[2] === MANUFACTURER_ID[1] && message[3] === MANUFACTURER_ID[2] && message[4] === MODEL_ID && message[6] === CMD_DUMP3 && message[message.length - 1] === 247;
 }
@@ -1085,7 +1373,7 @@ var behringerDm12Contract = {
   },
   categories: CATEGORIES5,
   defaultCategory: "Other",
-  compatibleModels: [],
+  compatibleModels: ["behringer-deepmind6", "behringer-deepmind12d"],
   sysexManufacturerId: MANUFACTURER_ID,
   formatVersion: 1,
   sysexModelId: { offset: 4, values: [32] },
@@ -1174,7 +1462,7 @@ allBehringerDm12Contracts.forEach((contract) => {
   if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
 });
 
-// Source/Contracts/Models/behringer-dm6.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/behringer-dm6.ts
 var PATCH_DATA_SIZE4 = 242;
 var PATCH_NAME_MAX_LENGTH4 = 16;
 var MODEL_ID2 = 32;
@@ -1185,7 +1473,7 @@ var CMD_DUMP4 = 2;
 var CMD_REQUEST4 = 1;
 var PACKED_SIZE2 = 278;
 var PROGRAMS_PER_BANK5 = 128;
-var CATEGORIES6 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "UNK"];
+var CATEGORIES6 = ["Bass", "Lead", "Pad", "Strings", "Brass", "FX", "Keys", "Other"];
 function isDeepMindMessage2(message) {
   return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID2[0] && message[2] === MANUFACTURER_ID2[1] && message[3] === MANUFACTURER_ID2[2] && message[4] === MODEL_ID2 && message[6] === CMD_DUMP4 && message[message.length - 1] === 247;
 }
@@ -1215,7 +1503,7 @@ var behringerDm6Contract = {
     return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
   },
   categories: CATEGORIES6,
-  defaultCategory: "UNK",
+  defaultCategory: "Other",
   compatibleModels: ["behringer-deepmind12", "behringer-deepmind12d"],
   sysexManufacturerId: MANUFACTURER_ID2,
   formatVersion: 1,
@@ -1306,7 +1594,7 @@ allBehringerDm6Contracts.forEach((contract) => {
   if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
 });
 
-// Source/Contracts/Models/behringer-dm12d.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/behringer-dm12d.ts
 var PATCH_DATA_SIZE5 = 242;
 var PATCH_NAME_MAX_LENGTH5 = 16;
 var MODEL_ID3 = 32;
@@ -1317,7 +1605,7 @@ var CMD_DUMP5 = 2;
 var CMD_REQUEST5 = 1;
 var PACKED_SIZE3 = 278;
 var PROGRAMS_PER_BANK6 = 128;
-var CATEGORIES7 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "UNK"];
+var CATEGORIES7 = ["Bass", "Lead", "Pad", "Strings", "Brass", "FX", "Keys", "Other"];
 function isDeepMindMessage3(message) {
   return message.length >= 13 && message[0] === 240 && message[1] === MANUFACTURER_ID3[0] && message[2] === MANUFACTURER_ID3[1] && message[3] === MANUFACTURER_ID3[2] && message[4] === MODEL_ID3 && message[6] === CMD_DUMP5 && message[message.length - 1] === 247;
 }
@@ -1347,7 +1635,7 @@ var behringerDm12dContract = {
     return new TextDecoder().decode(data.slice(223, 239)).replace(/\0/g, "").trim();
   },
   categories: CATEGORIES7,
-  defaultCategory: "UNK",
+  defaultCategory: "Other",
   compatibleModels: ["behringer-deepmind12", "behringer-deepmind6"],
   sysexManufacturerId: MANUFACTURER_ID3,
   formatVersion: 1,
@@ -1438,7 +1726,7 @@ allBehringerDm12dContracts.forEach((contract) => {
   if (!result.valid) console.error(`\u274C ${contract.modelId} validation failed:`, result.errors);
 });
 
-// Source/Contracts/Models/behringer-pro800.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/behringer-pro800.ts
 var PRO800_BANK_CAPACITY = 400;
 var PRO800_BANKS_COUNT = 4;
 var PRO800_PROGRAMS_PER_BANK = 100;
@@ -1450,7 +1738,7 @@ var PRO800_FORMAT_VERSIONS = {
   111: { firmwareRange: { min: "1.3.6" }, rawDataSize: 173, label: "v111" }
 };
 var PRO800_NAME_OFFSET = 150;
-var CATEGORIES8 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var CATEGORIES8 = ["Bass", "Lead", "Pad", "Strings", "Brass", "FX", "Poly", "Other"];
 var DEFAULT_CATEGORY5 = "Other";
 var SYSEX_MANUFACTURER_ID5 = [0, 32, 50];
 var FORMAT_VERSION5 = 1;
@@ -1643,12 +1931,12 @@ allBehringerPro800Contracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/yamaha-dx7.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/yamaha-dx7.ts
 var DX7_PATCH_DATA_SIZE = 128;
 var DX7_PATCH_NAME_MAX_LENGTH = 10;
 var DX7II_PATCH_DATA_SIZE = 155;
 var DX7II_PATCH_NAME_MAX_LENGTH = 10;
-var CATEGORIES9 = ["Bass", "Lead", "Pad", "FX", "Keys", "Perc", "Synth", "Other"];
+var CATEGORIES9 = ["Piano", "Brass", "Strings", "Bass", "Lead", "Guitar", "Perc", "Other"];
 var DEFAULT_CATEGORY6 = "Other";
 var SYSEX_MANUFACTURER_ID6 = [67];
 var FORMAT_VERSION6 = 1;
@@ -2117,9 +2405,13 @@ var yamahaDx7iiContract = {
   midiDetection: { portPattern: /dx.?7ii|dx7.?ii/i, displayName: "DX7II" },
   parameterSchemaKey: "yamaha-dx7ii",
   bankCapacity: 64,
-  programsPerBank: 64,
+  banksCount: 2,
+  programsPerBank: 32,
   patchDataSize: DX7II_PATCH_DATA_SIZE,
   patchNameMaxLength: DX7II_PATCH_NAME_MAX_LENGTH,
+  // DX7II no comparte formato de volcado con DX7 original (2 banks x 32 + VCED
+  // extendido); la compatibilidad inversa ya la declara el propio DX7.
+  compatibleModels: [],
   getProgramAddress(globalIndex) {
     return `V${String(getDx7iiProgramNumber(globalIndex)).padStart(2, "0")}`;
   },
@@ -2183,7 +2475,7 @@ allYamahaContracts.forEach((c) => {
   }
 });
 
-// Source/Contracts/Models/roland-aira.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira-shared.ts
 var AIRA_MAIN_PARAM_COUNT = 10;
 var AIRA_SLOT_COUNT = 6;
 var AIRA_PARAMS_PER_SLOT = 4;
@@ -2191,8 +2483,13 @@ var AIRA_CONDITION_SOURCES = 22;
 var AIRA_CONDITION_BYTES_PER_SOURCE = 6;
 var AIRA_MAX_CABLES = 64;
 var AIRA_PATCH_DATA_SIZE = 1 + AIRA_MAIN_PARAM_COUNT + AIRA_SLOT_COUNT + AIRA_SLOT_COUNT * AIRA_PARAMS_PER_SLOT + 1 + AIRA_MAX_CABLES * 2 + AIRA_CONDITION_SOURCES * AIRA_CONDITION_BYTES_PER_SOURCE;
-var CATEGORIES10 = ["Patch", "Other"];
-var DEFAULT_CATEGORY7 = "Patch";
+var AIRA_CATEGORIES = {
+  "roland-aira-bitrazer": ["Filter", "Crusher", "Delay", "Custom"],
+  "roland-aira-torcido": ["Distortion", "Overdrive", "Custom"],
+  "roland-aira-demora": ["Delay", "Buffer", "Custom"],
+  "roland-aira-scooper": ["Looper", "Scatter", "Custom"]
+};
+var AIRA_DEFAULT_CATEGORY = "Custom";
 function buildAiraContract(modelId, displayName, modelIdByte, thumbnail) {
   return {
     modelId,
@@ -2208,8 +2505,8 @@ function buildAiraContract(modelId, displayName, modelIdByte, thumbnail) {
     patchDataSize: AIRA_PATCH_DATA_SIZE,
     patchNameMaxLength: 0,
     extractPatchName: () => "",
-    categories: CATEGORIES10,
-    defaultCategory: DEFAULT_CATEGORY7,
+    categories: AIRA_CATEGORIES[modelId] ?? ["Custom"],
+    defaultCategory: AIRA_DEFAULT_CATEGORY,
     compatibleModels: ["roland-aira-bitrazer", "roland-aira-torcido", "roland-aira-demora", "roland-aira-scooper"],
     sysexManufacturerId: [65],
     formatVersion: 1,
@@ -2248,30 +2545,40 @@ function buildAiraContract(modelId, displayName, modelIdByte, thumbnail) {
     }
   };
 }
+
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira-bitrazer.ts
 var rolandAiraBitrazerContract = buildAiraContract(
   "roland-aira-bitrazer",
   "Roland AIRA Bitrazer",
   21,
   "roland-bitrazer.webp"
 );
+
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira-torcido.ts
 var rolandAiraTorcidoContract = buildAiraContract(
   "roland-aira-torcido",
   "Roland AIRA Torcido",
   22,
   "roland-torcido.webp"
 );
+
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira-demora.ts
 var rolandAiraDemoraContract = buildAiraContract(
   "roland-aira-demora",
   "Roland AIRA Demora",
   23,
   "roland-demora.webp"
 );
+
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira-scooper.ts
 var rolandAiraScooperContract = buildAiraContract(
   "roland-aira-scooper",
   "Roland AIRA Scooper",
   24,
   "roland-scooper.webp"
 );
+
+// ../ABDSharedCode/BankManager/Contracts/Models/roland-aira.ts
 var allRolandAiraContracts = [
   rolandAiraBitrazerContract,
   rolandAiraTorcidoContract,
@@ -2279,7 +2586,7 @@ var allRolandAiraContracts = [
   rolandAiraScooperContract
 ];
 
-// Source/Core/MidiSysExQueue.ts
+// ../ABDSharedCode/BankManager/Contracts/HardwareQueueConfigs.ts
 var HARDWARE_QUEUE_CONFIGS = {
   "casio-cz": { interMessageDelayMs: 100, dumpTimeoutMs: 5e3 },
   "roland-juno": { interMessageDelayMs: 50, dumpTimeoutMs: 3e3 },
@@ -2288,7 +2595,7 @@ var HARDWARE_QUEUE_CONFIGS = {
   "yamaha-dx7": { interMessageDelayMs: 20, dumpTimeoutMs: 2e3 }
 };
 
-// Source/Contracts/Models/index.ts
+// ../ABDSharedCode/BankManager/Contracts/Models/index.ts
 var allModelContracts = [
   ...allCasioContracts,
   ...allRolandJunoContracts,
@@ -2347,6 +2654,8 @@ function getMidiConfig(modelId) {
   };
 }
 export {
+  KORG_CHANNEL_BYTE_BASE,
+  KORG_CHANNEL_ZERO_BASED,
   VOICE_KEYS,
   VOICE_PARAMETER_RANGES,
   allBehringerDm12Contracts,
@@ -2370,6 +2679,7 @@ export {
   getMidiConfig,
   getModelContract,
   korgAbdSm002Contract,
+  korgChannelByte,
   korgMicrokorgContract,
   korgProphecyContract,
   modelContractMap,

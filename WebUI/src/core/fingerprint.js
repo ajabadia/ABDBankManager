@@ -1,27 +1,6 @@
-﻿/** Calculate the canonical SHA-256 fingerprint for patch payload bytes. */
-export async function calculateFingerprint(rawData, contract) {
-  if (!rawData || rawData.length === 0) return '';
-
-  const soundBytes = contract?.extractSoundBytes
-    ? contract.extractSoundBytes(rawData)
-    : rawData;
-  const bytes = soundBytes instanceof Uint8Array ? soundBytes : new Uint8Array(soundBytes);
-
-  if (globalThis.crypto?.subtle) {
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-  }
-
-  throw new Error('SHA-256 not available in this environment');
-}
-
-export function checkDuplicate(fingerprint, existingPatches) {
-  if (!fingerprint) return { isDuplicate: false, existingPatch: null };
-  const existingPatch = existingPatches.find(patch => patch.fingerprint === fingerprint) || null;
-  return { isDuplicate: !!existingPatch, existingPatch };
-}
-
-// Version of the fingerprint recipe. Bump when the hashing input changes
-// (e.g. extractSoundBytes scoping) so older libraries can be re-hashed.
-// Must stay in sync with packages/core/src/operations/fingerprint.js.
-export const FINGERPRINT_VERSION = 1;
+/**
+ * GENERATED SHIM — DO NOT EDIT
+ * Sustituye al antiguo fork hand-copiado. Fuente única: packages/core/src/operations/fingerprint.js
+ * (empaquetada en ../contracts/gen/core.gen.js por Scripts/build_core_web.js).
+ */
+export { calculateFingerprint, checkDuplicate, FINGERPRINT_VERSION } from '../contracts/gen/core.gen.js';

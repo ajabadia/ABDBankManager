@@ -8,6 +8,7 @@
 import { file, chevronDown } from '../icons.js';
 
 function escHtml(s) {
+  const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
 }
@@ -43,8 +44,8 @@ export function renderBankDataSheet(bank) {
   return `
     <div class="bank-datasheet" id="bank-datasheet">
       <div class="datasheet-header" id="datasheet-toggle">
-        <span class="datasheet-title">${icons.file} Bank data sheet</span>
-        <span class="datasheet-arrow">${icons.chevronDown}</span>
+        <span class="datasheet-title">${file} Bank data sheet</span>
+        <span class="datasheet-arrow">${chevronDown}</span>
       </div>
       <div class="datasheet-body collapsed" id="datasheet-body">
         <div class="datasheet-grid">

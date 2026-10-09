@@ -17,14 +17,16 @@
     "verificar:entorno": "node scripts/verificar-entorno.mjs"
   },
   "dependencies": {
+    "@abdsynths/shared": "workspace:*",
     "dexie": "^4.4.5",
     "file-saver": "^2.0.5",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "playwright": "^1.64.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2",
     "@eslint/js": "^9.0.0",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.0.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^15.0.0",

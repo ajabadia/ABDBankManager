@@ -12,20 +12,30 @@ import {
 } from './store/persistence.js';
 import { importFile } from './core/importEngine.js';
 import { exportToFile, exportLibraryToFile } from './core/exportEngine.js';
-import { getModelContract, MODEL_CONTRACTS, getHardwareIds } from './contracts/modelContracts.js';
+import { getModelContract, getHardwareIds } from './contracts/modelContracts.js';
 import { patchesToCsv, parseNamesCsv } from './core/patchBulk.js';
-import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getAllModels, getManufacturer } from './core/modelRegistry.js';
+import { getParameterSchema, hasParameterSchema, detectModelFromPortName, getModelDisplayName, getModelThumbnail, getManufacturerLogo, getBankImage, getManufacturer, getVisibleContracts, getVisibleModelIds, getMidiConnectableModels, isHostScopeResolvable, groupContractsByManufacturer, MIDI_ALL_HARDWARE } from './core/modelRegistry.js';
 import { hexDump } from './core/hexDump.js';
+import { planBankFetch, summarizeBankFetch, midiBridgeBlocksFetch } from './core/fetchFlow.js';
 import { buildSysExViewInfo } from './core/patchSysEx.js';
 import icons from './ui/icons.js';
 import { requestMidiAccess, listMidiPorts, createMidiTransport, fetchBank } from './core/pro800Midi.js';
 import { isBridgeMidiAvailable, createBridgeMidiPorts } from './bridge/hardwareMidi.js';
+import { isBridgeMidiPort, preferredInputIndex, bridgeMidiDetection } from './bridge/bridgeMidiPorts.js';
+import { createSoftwareTransport } from './bridge/softwareTransport.js';
+import {
+  describeTransports, softwareCapabilities, PRESET_SYSTEM_LABELS, SOFTWARE_DESTINATION,
+  connectionRequiredMessage, connectionRequiredLabel, awaitsWriteConfirmation,
+} from './core/transportCapabilities.js';
+import { HOST_SCOPE_NOTICE_ID, HOST_SCOPE_CONNECT_BTN_ID, blockedNavHint, hostScopeNotice } from './ui/hostScopeNotice.js';
 import { undoHistory } from './core/undoHistory.js';
 import { initAutoExport, recordChange } from './core/autoExport.js';
 import { renderCategoryBadge, getCategoryStyle } from './ui/categoryStyles.js';
 import { createHexEditor } from './core/hexEditor.js';
 import { computeBankStats } from './core/bankStats.js';
-import { renderModelSelector, getSelectedModelId, setSelectedModelId } from './ui/components/modelSelector.js';
+import { renderModelSelector, getSelectedModelId, setSelectedModelId, setContextModelId, getContextModelId, getHostContextModelId, onContextModelChange, isForeignMidiHardwareAllowed, setForeignMidiHardwareAllowed, setEmbeddedHost, isCatalogBlocked, isUnknownContext } from './ui/components/modelSelector.js';
+import { initHostContext, requestHostInfo, getHostInfo, wasHostAnswered, onHostInfoChange } from './core/hostContext.js';
+import { HOST_DIAG_CHIP_ID, hostDiagnosticsModel, hostDiagnosticsPanel } from './ui/hostDiagnostics.js';
 import { globalSearch, countByType } from './core/searchEngine.js';
 import { processBankImage, promptBankImageUpload } from './core/bankImage.js';
 import { getHardwareSpec } from './core/hardwareSpecs.js';
@@ -34,7 +44,42 @@ import { bridge } from './bridge/bridgeManager.js';
 
 let midiAccess = null;
 let activeMidiTransport = null;
+// Estado del puente MIDI de hardware del anfitrión (`null` = aún sin respuesta).
+let bridgeMidiListening = null;
+let bridgeMidiError = null;
 let activeMidiModelId = null;
+// Extremo del transporte activo: `'hardware'` (MIDI) o `'software'` (el synth que
+// hospeda al Bank Manager) y, en ese caso, su sistema de presets (`sysex`/`native`).
+let activeTransportKind = null;
+let activeTransportSystem = null;
+// Puertos MIDI que reporta el anfitrión (`hardware.listPorts` → `hardware.ports`).
+// `reported: false` = el host aún no ha respondido a la enumeración.
+let hostMidiPorts = { reported: false, outputs: [], inputs: [] };
+const HOST_MIDI_SELECTION_KEY = 'abd-bank-manager-midi-port-selection';
+
+function loadHostMidiSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOST_MIDI_SELECTION_KEY) || 'null');
+    return {
+      outputId: typeof saved?.outputId === 'string' ? saved.outputId : null,
+      inputId: typeof saved?.inputId === 'string' ? saved.inputId : null,
+    };
+  } catch {
+    return { outputId: null, inputId: null };
+  }
+}
+
+function saveHostMidiSelection(outputId, inputId, remember) {
+  try {
+    if (remember && outputId) {
+      localStorage.setItem(HOST_MIDI_SELECTION_KEY, JSON.stringify({ outputId, inputId: inputId || null }));
+    } else {
+      localStorage.removeItem(HOST_MIDI_SELECTION_KEY);
+    }
+  } catch { /* localStorage is optional in embedded/private contexts */ }
+}
+
+let selectedHostMidiPorts = loadHostMidiSelection();
 
 // ─── MF.16 Backup Reminder ───
 const BACKUP_THRESHOLD_PATCHES = 20;  // show reminder if > N patches
@@ -98,20 +143,53 @@ let searchResults = [];
 let searchFilter = 'all'; // 'all' | 'models' | 'banks' | 'patches'
 let treeViewMode = false; // P0.5: tree view (all manufacturers expanded)
 
-// Group contracts by manufacturer
-const manufacturers = {};
-for (const c of MODEL_CONTRACTS) {
-  if (!manufacturers[c.manufacturer]) manufacturers[c.manufacturer] = [];
-  manufacturers[c.manufacturer].push(c);
+// ─── Navigation catalog (host-context aware) ───
+// Contracts grouped by manufacturer. Rebuilt whenever the host context changes
+// (bridge `hostModel` from the hosting synth, or a MIDI connection) so the
+// sidebar, cascade view, tree view and manufacturer page only offer hardware
+// the host actually supports. With no context: every registered model — except
+// embedded, where the catalog stays empty until a hardware context exists (the
+// host owns it; see `isCatalogBlocked`).
+/** @type {Record<string, object[]>} */
+let manufacturers = {};
+
+// ─── Run mode: embedded inside a synth host vs standalone ───
+// The host owns the catalog: unlike the standalone Bank Manager, an embedded
+// instance must not offer the whole registry while it does not know which
+// hardware it manages (see `isCatalogBlocked`). `plugin-host` is precisely the
+// iframe/`__synthBridge` case; the browser build, the stand-alone JUCE app and
+// WebView2 hosts that talk to their own backend stay standalone.
+const EMBEDDED_HOST = bridge.type === 'plugin-host';
+setEmbeddedHost(EMBEDDED_HOST);
+
+// How long the embedded mode waits for the host to answer `requestState` with
+// its modelId before telling the user nothing arrived (the round trip is a few
+// milliseconds, but a silent host must not leave a "waiting" message forever).
+const HOST_ANNOUNCE_GRACE_MS = 1500;
+let hostScopeExpired = false;
+
+function rebuildManufacturers() {
+  // Embedded without a hardware context: the host has not said which hardware it
+  // manages, so there is nothing legitimate to list yet.
+  if (isCatalogBlocked()) { manufacturers = {}; return; }
+  manufacturers = groupContractsByManufacturer(getVisibleContracts(getContextModelId()));
 }
+
+rebuildManufacturers();
 
 // ─── Init ───
 async function init() {
   console.log('[ABD Bank Manager] Starting...', BUILD_VERSION.version);
   document.getElementById('version').textContent = `v${BUILD_VERSION.version}`;
   await runPreMigrationBackup();
+  rebuildManufacturers();
+  renderWelcomeContext();
   renderNav();
   setStatus('connected', 'Ready');
+
+  // Follow the host context wherever it comes from (bridge or MIDI connect).
+  onContextModelChange(handleHostContextChange);
+  scheduleHostAnnouncementDeadline();
 
   // Auto-export: track changes and save .abdlibrary periodically
   initAutoExport(bridge);
@@ -131,8 +209,14 @@ async function init() {
     }
   });
 
-  // MIDI status button
-  document.getElementById('midi-status').onclick = handleMidiConnect;
+  // Chip de destino: embebido el destino puede ser el synth anfitrión, que no es un
+  // dispositivo MIDI, así que ni la etiqueta ni el tooltip iniciales (que en el HTML
+  // dicen «MIDI») pueden dar por hecho el cable.
+  const midiStatusEl = document.getElementById('midi-status');
+  midiStatusEl.title = connectionRequiredLabel({ embedded: EMBEDDED_HOST });
+  midiStatusEl.onclick = handleMidiConnect;
+  const midiLabelEl = document.getElementById('midi-label');
+  if (EMBEDDED_HOST) midiLabelEl.textContent = 'Destination';
 
   // Help button
   document.getElementById('btn-help').onclick = showShortcutsHelp;
@@ -194,10 +278,47 @@ async function init() {
 
   // Native JUCE/WebView bridge: request the persisted library state when hosted in a plugin.
   bridge.on('state', handleNativeLibraryState);
+  // Host synth context: the hosting plugin announces its modelId so the model
+  // selector only offers hardware compatible with it (alternative to MIDI connect).
+  // El tercer argumento solo repinta el aviso que explica el bloqueo: la
+  // identidad ya llega por `setContextModelId` → `onContextModelChange`.
+  initHostContext(bridge, setContextModelId, () => {
+    renderHostDiagnostics();
+    if (isCatalogBlocked()) {
+      renderWelcomeContext();
+      renderNav();
+    }
+  });
+  // La ficha (`hostInfo`) puede llegar también sin anuncio previo, y el chip de
+  // diagnóstico de cabecera tiene que seguirla.
+  onHostInfoChange(renderHostDiagnostics);
   bridge.on('error', ({ message } = {}) => {
     if (message) toast(message, 'error');
   });
+  // Puertos MIDI del anfitrión: es lo que permite elegir en vez de aceptar el
+  // primero disponible (ver showTransportDialog).
+  bridge.on('hardware.ports', (payload) => {
+    hostMidiPorts = {
+      reported: true,
+      outputs: Array.isArray(payload?.outputs) ? payload.outputs : [],
+      inputs: Array.isArray(payload?.inputs) ? payload.inputs : [],
+    };
+    const outputStillPresent = hostMidiPorts.outputs.some(port => port.identifier === selectedHostMidiPorts.outputId);
+    const inputStillPresent = !selectedHostMidiPorts.inputId
+      || hostMidiPorts.inputs.some(port => port.identifier === selectedHostMidiPorts.inputId);
+    if (!outputStillPresent || !inputStillPresent) {
+      bridgeMidiListening = false;
+      bridgeMidiError = 'The selected MIDI device is unavailable';
+      if (activeTransportKind === 'hardware') toast(bridgeMidiError, 'error');
+    }
+  });
   bridge.send('requestState');
+  // Embebido: además del anuncio, se pide la ficha del host (sello de build y
+  // nivel de puente). Es lo que permite decir *si* el binario de al lado es
+  // antiguo, en vez de insinuarlo cuando el catálogo queda bloqueado.
+  if (EMBEDDED_HOST) requestHostInfo(bridge);
+  // Chip de diagnóstico del anfitrión (sello de build + nivel de puente).
+  renderHostDiagnostics();
 
   // MF.16 Backup reminder
   await checkBackupReminder();
@@ -239,7 +360,7 @@ function flashMidiActivity({ direction, bytes, label }) {
   midiActivityTimer = setTimeout(() => {
     dot.style.background = '';
     dot.style.boxShadow = '';
-    statusEl.title = 'Connect MIDI';
+    statusEl.title = connectionRequiredLabel({ embedded: EMBEDDED_HOST });
   }, 400);
 }
 
@@ -278,7 +399,9 @@ function renderManufacturerNav(list, filter) {
   const filtered = filter ? mfrs.filter(m => m.toLowerCase().includes(filter.toLowerCase())) : mfrs;
 
   if (filtered.length === 0) {
-    list.innerHTML = '<li class="list-empty">No results</li>';
+    list.innerHTML = isCatalogBlocked()
+      ? `<li class="list-empty">${navHint()}</li>`
+      : '<li class="list-empty">No results</li>';
     return;
   }
 
@@ -385,6 +508,13 @@ async function renderPatchNav(list, filter) {
 
 // ─── Tree view (P0.5) ───
 function renderTreeNav(list, filter) {
+  // Embedded without a hardware context: nothing to expand. The Tree View toggle
+  // keeps working, so the user can still go back to the cascade hint.
+  if (isCatalogBlocked()) {
+    list.innerHTML = `<li class="list-empty">${navHint()}</li>`;
+    return;
+  }
+
   // Back button (go to cascade mode)
   const back = document.createElement('li');
   back.className = 'list-item';
@@ -583,9 +713,183 @@ async function performGlobalSearch(query) {
   }
 
   searchMode = true;
-  searchResults = await globalSearch(query);
+  // Model hits follow the host context: the Bank Manager must not offer a
+  // synthesiser the host cannot drive. Banks and patches are the user's own
+  // library and stay searchable across the whole catalog.
+  searchResults = await globalSearch(query, {
+    allowedModelIds: isCatalogBlocked() ? [] : getVisibleModelIds(getContextModelId()),
+  });
   searchFilter = 'all';
   renderSearchPanel(query);
+}
+
+/**
+ * Apply a host-context change: rebuild the catalog and repaint the navigation.
+ * If we were browsing a manufacturer/model that the new context hides, return
+ * to the root so the user never lands on an empty branch.
+ */
+function handleHostContextChange() {
+  // A hardware context arrived (host announcement or MIDI connection): the
+  // "no hardware selected" state no longer applies.
+  hostScopeExpired = false;
+  renderHostDiagnostics();
+  rebuildManufacturers();
+  if (selectedManufacturer && !manufacturers[selectedManufacturer]) {
+    selectedManufacturer = null;
+    selectedModelId = null;
+    selectedBankId = null;
+    selectedPatchId = null;
+    navLevel = 'manufacturers';
+  }
+  renderWelcomeContext();
+  renderNav();
+  renderContent();
+}
+
+/**
+ * Welcome panel banner telling the user which hardware the host filters to.
+ * Rendered only while a host context is active (standalone stays untouched).
+ */
+function renderWelcomeContext() {
+  const welcome = document.getElementById('panel-welcome');
+  if (!welcome) return;
+
+  const hostModelId = getContextModelId();
+  const existing = welcome.querySelector('#host-context-banner');
+  const notice = welcome.querySelector('#host-scope-notice');
+
+  // Embedded and still without a hardware context: nothing may be offered, so
+  // explain the situation instead of the usual (standalone) welcome screen.
+  if (isCatalogBlocked()) {
+    if (existing) existing.remove();
+    renderHostScopeNotice(welcome, notice);
+    return;
+  }
+  if (notice) notice.remove();
+
+  if (!hostModelId) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  const modelCount = Object.values(manufacturers).flat().length;
+  const html = `Showing the ${modelCount} model${modelCount === 1 ? '' : 's'} this synth supports — ` +
+    `hardware compatible with <strong>${escHtml(getModelDisplayName(hostModelId))}</strong>`;
+
+  // El atributo tiene que seguir al contexto: si no, queda apuntando al modelo
+  // anterior aunque el texto ya sea el del nuevo (y cualquier automatización que
+  // lo lea —tests de navegador incluidos— ve un valor obsoleto).
+  if (existing) { existing.setAttribute('data-host-model', hostModelId); existing.innerHTML = html; return; }
+
+  const banner = document.createElement('div');
+  banner.id = 'host-context-banner';
+  banner.className = 'host-context-banner';
+  banner.setAttribute('data-host-model', hostModelId);
+  // Sello del binario anfitrión (ficha `hostInfo`): con él, un catálogo
+  // desincronizado se diagnostica sin adivinar qué build está al otro lado.
+  const hostInfo = getHostInfo();
+  if (hostInfo?.buildStamp) banner.setAttribute('data-host-build', hostInfo.buildStamp);
+  if (Number.isFinite(hostInfo?.protocol)) banner.setAttribute('data-host-protocol', String(hostInfo.protocol));
+  banner.style.cssText = 'margin-top:1rem;padding:0.45rem 0.8rem;border-radius:6px;' +
+    'background:rgba(63,185,80,0.12);border:1px solid rgba(63,185,80,0.3);color:var(--success,#3fb950);font-size:0.8rem;';
+  banner.innerHTML = html;
+  welcome.appendChild(banner);
+}
+
+/**
+ * Embedded: schedule the moment we stop saying "waiting for the host" and start
+ * asking the user for a hardware context. The host replies to `requestState` in
+ * a few milliseconds, so this only fires when nothing arrives at all (older
+ * host build, dropped message, or a host whose bridge does not emit it yet).
+ * A host that runs both natively and in the browser answers in each mode:
+ * ABDMS2000 does it from C++ in WebView2 and from its JS bridge in the dev
+ * server (see SYNTH_INTEGRATION_GUIDE.md §PASO 5.1, recommendation 5).
+ */
+function scheduleHostAnnouncementDeadline() {
+  if (!EMBEDDED_HOST) return;
+  setTimeout(() => {
+    if (!isCatalogBlocked()) return; // answered while we waited
+    // An answer we cannot resolve (unknown modelId) is not a silent host: the
+    // "unsupported hardware" notice is more accurate than "no hardware selected".
+    if (getContextModelId()) return;
+    hostScopeExpired = true;
+    renderWelcomeContext();
+    renderNav();
+  }, HOST_ANNOUNCE_GRACE_MS);
+  // El chip de diagnóstico se resuelve a la vez: si el host contestó el estado
+  // pero no la ficha, al vencer el plazo pasa de «sin respuesta» a «contestó sin
+  // sello de build», que es un diagnóstico distinto.
+  setTimeout(renderHostDiagnostics, HOST_ANNOUNCE_GRACE_MS);
+}
+
+/** Short sidebar hint while the catalog is blocked (mirrors the welcome notice). */
+function navHint() {
+  return blockedNavHint({ unknown: isUnknownContext(), expired: hostScopeExpired });
+}
+
+/**
+ * Chip de diagnóstico de la cabecera: el sello de build del anfitrión y su nivel
+ * de puente a la vista, con el detalle completo en un panel al hacer clic.
+ *
+ * En standalone no hay anfitrión que diagnosticar, así que el chip no se muestra
+ * (el panel lo dice por sí solo si se abriera). Embebido se muestra siempre —
+ * también cuando el host no contesta, porque «no contesta» es precisamente el
+ * diagnóstico que hay que poder leer sin adivinar.
+ */
+function renderHostDiagnostics() {
+  const chip = document.getElementById(HOST_DIAG_CHIP_ID);
+  if (!chip) return;
+
+  const model = hostDiagnosticsModel({
+    hostInfo: getHostInfo(),
+    embedded: EMBEDDED_HOST,
+    answered: wasHostAnswered(),
+    bridgeType: bridge.type
+  });
+
+  if (model.chipLabel === null) { chip.hidden = true; return; }
+
+  chip.hidden = false;
+  chip.setAttribute('data-host-diag-state', model.state);
+  chip.title = `Host diagnostics — ${model.chipLabel}`;
+  const label = document.getElementById('host-diag-label');
+  if (label) label.textContent = model.chipLabel;
+  chip.onclick = () => {
+    const html = hostDiagnosticsPanel(model);
+    if (html) showModal(html);
+  };
+}
+
+/**
+ * Welcome-panel counterpart of `isCatalogBlocked()`: explain why there is
+ * nothing to browse and, once the grace period elapsed, offer the one gesture
+ * that gives the Bank Manager a hardware context (the MIDI connection, whose
+ * manual picker is complete while no host context exists).
+ */
+function renderHostScopeNotice(welcome, existing) {
+  // Third state, distinct from "the host is silent": the host *did* answer, with
+  // a modelId this build has no contract for (host/catalog version mismatch).
+  const { scope, message: html } = hostScopeNotice({
+    unknownModelId: isUnknownContext() ? getContextModelId() : null,
+    expired: hostScopeExpired,
+    hostInfo: getHostInfo(),
+    hostAnswered: wasHostAnswered(),
+    esc: escHtml
+  });
+
+  const notice = existing || document.createElement('div');
+  if (!existing) {
+    notice.id = HOST_SCOPE_NOTICE_ID;
+    notice.className = 'host-context-notice';
+    notice.style.cssText = 'margin-top:1rem;padding:0.55rem 0.8rem;border-radius:6px;' +
+      'background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.35);' +
+      'color:var(--text-secondary);font-size:0.8rem;';
+    welcome.appendChild(notice);
+  }
+  notice.setAttribute('data-host-scope', scope);
+  notice.innerHTML = html;
+  const btn = notice.querySelector('#' + HOST_SCOPE_CONNECT_BTN_ID);
+  if (btn) btn.onclick = () => handleMidiConnect();
 }
 
 function exitSearchMode() {
@@ -730,7 +1034,7 @@ function renderManufacturerContent(el) {
 
   el.innerHTML = `
     <div class="manufacturer-header">
-      <img class="manufacturer-logo" src="${logoUrl}" alt="${escHtml(selectedManufacturer)}" onerror="this.src='/images/models/thumbs/placeholder-manufacturer.svg'">
+      <img class="manufacturer-logo" src="${logoUrl}" alt="${escHtml(selectedManufacturer)}" onerror="this.src='/images/thumbs/placeholder-manufacturer.svg'">
     </div>
     <div class="model-grid" id="model-grid"></div>`;
 
@@ -740,10 +1044,11 @@ function renderManufacturerContent(el) {
     card.className = 'model-card';
     const thumb = getModelThumbnail(contract.modelId);
     const thumbHtml = thumb ? `<img class="card-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">` : '';
-    const caps = [];
-    if (contract.buildPatchSysEx) caps.push('Send');
-    if (contract.buildDumpRequest) caps.push('Fetch');
-    if (contract.buildBulkSysEx) caps.push('Bulk');
+    // Extremos del contrato (ver core/transportCapabilities.js): el hardware se
+    // deduce de las funciones, el software solo existe si está declarado. Un
+    // softsynth añade sus sistemas de presets (SysEx / JSON).
+    const transports = describeTransports(contract);
+    const caps = [...transports.badges, ...transports.softwareBadges];
     card.innerHTML = `
       ${thumbHtml}
       <div class="card-name">${escHtml(contract.displayName)}</div>
@@ -760,24 +1065,28 @@ async function renderModelContent(el) {
 
   const thumbUrl = getModelThumbnail(selectedModelId);
   const logoUrl = getManufacturerLogo(contract.manufacturer);
-  const caps = [];
-  if (contract.buildPatchSysEx) caps.push('Send');
-  if (contract.buildDumpRequest) caps.push('Fetch');
-  if (contract.buildBulkSysEx) caps.push('Bulk');
+  const transports = describeTransports(contract);
+  const caps = [...transports.badges, ...transports.softwareBadges];
+  // Un softsynth sin extremo de software no tiene donde escribir sus presets
+  // propios: se dice, en vez de ofrecer botones que fallarian.
+  const transportWarning = transports.missingSoftwareTransport
+    ? `<p style="margin:0.5rem 0 0;color:var(--warning,#d29922);font-size:0.8rem;">This model is a software synth but declares no <code>transport.software</code>: its own presets have no destination. See DOCS/BANK_MANAGER_TRANSPORT_MODEL.md.</p>`
+    : '';
 
   el.innerHTML = `
     <div class="hardware-header">
-      <img class="hardware-logo" src="${logoUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-manufacturer.svg'">
-      <img class="hardware-thumb" src="${thumbUrl}" alt="" onerror="this.src='/images/models/thumbs/placeholder-synth.svg'">
+      <img class="hardware-logo" src="${logoUrl}" alt="" onerror="this.src='/images/thumbs/placeholder-manufacturer.svg'">
+      <img class="hardware-thumb" src="${thumbUrl}" alt="" onerror="this.src='/images/thumbs/placeholder-synth.svg'">
       <div class="hardware-info">
         <h2>${escHtml(contract.displayName)}</h2>
         <div class="hw-meta">${escHtml(contract.manufacturer)} · ${contract.bankCapacity} patches · ${contract.programsPerBank}/bank</div>
         <div class="hw-badges">${caps.map(c => `<span class="item-badge">${c}</span>`).join('')}</div>
       </div>
     </div>
+    ${transportWarning}
     <div class="action-bar">
       <button class="btn btn-primary" id="btn-new-bank-m">+ New Bank</button>
-      <button class="btn" id="btn-midi-fetch-m">Fetch from hardware</button>
+      <button class="btn" id="btn-midi-fetch-m">${fetchButtonLabel(contract)}</button>
     </div>
     <div class="bank-grid" id="bank-grid"></div>`;
 
@@ -848,6 +1157,7 @@ async function renderBankContent(el) {
     </div>
     <div class="action-bar">
       <button class="btn" id="btn-fetch-bank">${icons.download} Fetch</button>
+      ${canCaptureFromSynth() ? `<button class="btn" id="btn-capture-synth" title="Store the synth's current sound in this bank">${icons.save} Capture</button>` : ''}
       <div class="send-dropdown" id="send-dropdown">
         <button class="btn btn-primary" id="btn-send-bank">${icons.upload} Send bank</button>
         <div class="send-dropdown-menu" id="send-dropdown-menu"></div>
@@ -866,6 +1176,8 @@ async function renderBankContent(el) {
 
   // Action handlers
   el.querySelector('#btn-fetch-bank').onclick = () => handleMidiFetch();
+  const captureBtn = el.querySelector('#btn-capture-synth');
+  if (captureBtn) captureBtn.onclick = () => captureFromSynth(bank);
   el.querySelector('#btn-send-bank').onclick = () => toggleSendDropdown(bank);
   renderSendDropdownMenu(bank);
   el.querySelector('#btn-import-bank').onclick = () => document.getElementById('file-input').click();
@@ -1215,7 +1527,6 @@ function findMatchingInput(outputName, inputs) {
   return inputs.find(p => (p.name || '').toLowerCase() === n) || null;
 }
 
-const ALL_MODELS = getAllModels().map(m => ({ id: m.id, name: m.name }));
 const detectModelFromName = detectModelFromPortName;
 
 // ─── MF.13 Undo/Redo ───
@@ -1239,18 +1550,232 @@ async function handleRedo() {
   }
 }
 
-async function handleMidiConnect() {
-  // Inside the JUCE plugin Web MIDI is unavailable: connect through the
-  // C++ hardware bridge using the same contract-driven transport.
-  if (isBridgeMidiAvailable()) {
-    try {
-      const { input, output } = createBridgeMidiPorts();
-      connectMidiDevice(output, input, null);
-      return;
-    } catch (error) {
-      toast(error.message, 'error');
+/**
+ * Estado del puente MIDI de hardware del anfitrión.
+ *
+ * Dentro del plugin el Bank Manager no puede abrir MIDI: le pide los puertos al
+ * anfitrión (`hardware.listen` / `hardware.send`) y este contesta con el
+ * dispositivo que abrió o con el motivo por el que no pudo. Contarlo es la
+ * diferencia entre «no pasa nada» y «no hay dispositivo MIDI de salida».
+ */
+function reportBridgeMidiStatus(status) {
+  if (status.type === 'ack') {
+    bridgeMidiListening = status.listening;
+    if (status.listening) {
+      bridgeMidiError = null;
+      toast(status.device ? `Hardware MIDI via ${status.device}` : 'Hardware MIDI ready', 'info');
+    }
+    return;
+  }
+
+  if (status.type === 'error') {
+    bridgeMidiListening = false;
+    bridgeMidiError = status.message || 'Hardware MIDI unavailable';
+    toast(bridgeMidiError, 'error');
+  }
+}
+
+/** Etiqueta del botón de fetch según el destino conectado. */
+function fetchButtonLabel(_contract) {
+  if (activeTransportKind === SOFTWARE_DESTINATION) {
+    const system = activeTransportSystem ? ` (${PRESET_SYSTEM_LABELS[activeTransportSystem] || activeTransportSystem})` : '';
+    return `Fetch from the host synth${system}`;
+  }
+  return 'Fetch from hardware';
+}
+
+/** Contrato del synth que hospeda al Bank Manager, si lo anunció. */
+function hostContract() {
+  const modelId = getHostContextModelId();
+  return modelId ? getModelContract(modelId) : null;
+}
+
+/**
+ * Destinos disponibles embebido: el synth que hospeda al Bank Manager (transporte
+ * de software, si su contrato lo declara) y el hardware MIDI real.
+ */
+function embeddedDestinations() {
+  const contract = hostContract();
+  const summary = contract ? describeTransports(contract) : null;
+  const destinations = [];
+  if (summary?.software) destinations.push({ kind: SOFTWARE_DESTINATION, contract, software: summary.software });
+  destinations.push({ kind: 'hardware', contract });
+  return destinations;
+}
+
+/** Conecta el transporte de software del anfitrión (mismos cuatro verbos que MIDI). */
+function connectSoftwareTransport(modelId, system) {
+  const contract = getModelContract(modelId);
+  if (!contract) { toast('Contract not found', 'error'); return; }
+
+  activeMidiTransport?.close();
+  try {
+    activeMidiTransport = createSoftwareTransport({
+      contract,
+      system,
+      onActivity: flashMidiActivity,
+      onError: message => toast(message, 'error'),
+    });
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+
+  activeTransportKind = SOFTWARE_DESTINATION;
+  activeTransportSystem = activeMidiTransport.system;
+  activeMidiModelId = modelId;
+  setContextModelId(modelId, 'session');
+
+  const displayName = getModelDisplayName(modelId);
+  const systemLabel = PRESET_SYSTEM_LABELS[activeTransportSystem] || activeTransportSystem;
+  document.getElementById('midi-status').classList.add('connected');
+  document.getElementById('midi-label').textContent = `${displayName} · ${systemLabel}`;
+  toast(`Connected to ${displayName} (${systemLabel} presets)`, 'success');
+}
+
+/**
+ * Diálogo de destino cuando el Bank Manager está embebido y hay más de uno:
+ * el synth que lo hospeda (transporte de software) o hardware MIDI real.
+ *
+ * Los puertos del hardware los elige el usuario de la lista que reporta el
+ * anfitrión (`hardware.listPorts`); si su build no los reporta, se sigue usando el
+ * primer dispositivo disponible y se dice, en vez de fingir que se eligió.
+ */
+function showTransportDialog(destinations) {
+  const software = destinations.find(destination => destination.kind === SOFTWARE_DESTINATION);
+  const systems = software?.software.systems ?? [];
+  const systemOptions = systems
+    .map((system, index) => `<option value="${escHtml(system)}"${index === 0 ? ' selected' : ''}>${escHtml(PRESET_SYSTEM_LABELS[system] || system)}</option>`)
+    .join('');
+
+  const softwareRow = software ? `<label style="display:flex;gap:0.6rem;align-items:flex-start;padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;cursor:pointer;background:var(--bg-tertiary);">
+      <input type="radio" name="transport-dest" value="${SOFTWARE_DESTINATION}" checked style="margin-top:0.25rem;">
+      <span style="flex:1;"><strong>${escHtml(software.contract.displayName)}</strong> — the plugin hosting this Bank Manager
+        <br><small style="color:var(--text-secondary);">Reads and writes its own presets through the bridge.${systems.length > 1 ? ' It exposes two preset systems: SysEx (what it emulates) and its own.' : ''}</small>
+      </span>
+      ${systems.length > 1 ? `<select class="param-select" id="transport-system" style="width:auto;">${systemOptions}</select>` : ''}
+    </label>` : '';
+
+  showModal(`<div style="padding:1rem;">
+    <h3 style="margin:0 0 0.6rem;">Connect to</h3>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">This Bank Manager runs inside a synthesizer. Choose what to read and write presets with:</p>
+    ${softwareRow}
+    <label style="display:flex;gap:0.6rem;align-items:flex-start;padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--bg-tertiary);">
+      <input type="radio" name="transport-dest" value="hardware"${software ? '' : ' checked'} style="margin-top:0.25rem;">
+      <span style="flex:1;"><strong>MIDI hardware</strong> — a physical device on this computer
+        <br><small style="color:var(--text-secondary);">The host opens the MIDI ports; the Bank Manager sends the contract's SysEx.</small>
+      </span>
+    </label>
+    <div id="transport-hardware-ports" style="margin:0.5rem 0 0 1.4rem;${software ? 'opacity:0.45;' : ''}">
+      <div class="patch-info-field">
+        <span class="patch-info-label">MIDI Output</span>
+        <select class="param-select" id="transport-out" style="width:100%"></select>
+      </div>
+      <div class="patch-info-field" style="margin-top:0.5rem;">
+        <span class="patch-info-label">MIDI Input</span>
+        <select class="param-select" id="transport-in" style="width:100%"><option value="-1">— No input connection —</option></select>
+      </div>
+      <label style="display:flex;gap:0.4rem;align-items:center;margin-top:0.5rem;font-size:0.78rem;color:var(--text-secondary);">
+        <input type="checkbox" id="transport-remember-ports"${selectedHostMidiPorts.outputId ? ' checked' : ''}> Remember these port identifiers
+      </label>
+      <p id="transport-ports-note" style="margin:0.3rem 0 0;color:var(--text-secondary);font-size:0.78rem;"></p>
+    </div>
+    <div class="modal-actions" style="margin-top:1rem;">
+      <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
+      <button class="btn btn-primary" id="transport-connect">Connect</button>
+    </div>
+  </div>`);
+
+  const radios = document.querySelectorAll('input[name="transport-dest"]');
+  const portsBox = document.getElementById('transport-hardware-ports');
+  radios.forEach(radio => {
+    radio.onchange = () => { if (portsBox) portsBox.style.opacity = radio.value === 'hardware' ? '1' : '0.45'; };
+  });
+
+  renderHostPortsInto(document.getElementById('transport-out'), document.getElementById('transport-in'),
+    document.getElementById('transport-ports-note'));
+
+  document.getElementById('transport-connect').onclick = () => {
+    const picked = document.querySelector('input[name="transport-dest"]:checked')?.value;
+    if (picked === SOFTWARE_DESTINATION && software) {
+      const system = document.getElementById('transport-system')?.value ?? null;
+      hideModal();
+      connectSoftwareTransport(software.contract.modelId, system);
       return;
     }
+    const outSelect = document.getElementById('transport-out');
+    const inSelect = document.getElementById('transport-in');
+    const outputId = outSelect?.value || null;
+    const inputId = inSelect && inSelect.value !== '-1' ? inSelect.value : null;
+    const rememberPorts = document.getElementById('transport-remember-ports')?.checked === true;
+    if (!outputId || !hostMidiPorts.outputs.some(port => port.identifier === outputId)) {
+      toast('Select an available MIDI output first', 'error');
+      return;
+    }
+    saveHostMidiSelection(outputId, inputId, rememberPorts);
+    selectedHostMidiPorts = { outputId, inputId };
+    hideModal();
+    connectHardwareBridge({ outputId, inputId });
+  };
+}
+
+/**
+ * Rellena los desplegables de puertos con lo que reporte el anfitrión
+ * (`hardware.listPorts`). Si su build no contesta, no se selecciona ningún
+ * dispositivo automáticamente y la conexión queda pendiente de una lista válida.
+ */
+function renderHostPortsInto(outSelect, inSelect, noteEl) {
+  const fill = (selectedOutputId = selectedHostMidiPorts.outputId, selectedInputId = selectedHostMidiPorts.inputId) => {
+    if (!outSelect) return;
+    outSelect.innerHTML = hostMidiPorts.outputs.length > 0
+      ? '<option value="">— Select MIDI output —</option>'
+        + hostMidiPorts.outputs.map(port => `<option value="${escHtml(port.identifier)}"${port.identifier === selectedOutputId ? ' selected' : ''}>${escHtml(port.name)}</option>`).join('')
+      : '<option value="">— no MIDI output available —</option>';
+    if (inSelect) {
+      inSelect.innerHTML = '<option value="-1">— No input connection —</option>'
+        + hostMidiPorts.inputs.map(port => `<option value="${escHtml(port.identifier)}"${port.identifier === selectedInputId ? ' selected' : ''}>${escHtml(port.name)}</option>`).join('');
+    }
+    if (noteEl) {
+      noteEl.textContent = hostMidiPorts.reported
+        ? `${hostMidiPorts.outputs.length} output(s) and ${hostMidiPorts.inputs.length} input(s) reported by the host.`
+        : 'The host has not reported its MIDI ports yet; no device is selected.';
+    }
+  };
+
+  fill();
+  if (hostMidiPorts.reported) return;
+
+  // Petición perezosa: solo cuando alguien va a elegir puertos.
+  const off = bridge.on('hardware.ports', () => { fill(); off(); });
+  bridge.send('hardware.listPorts', {});
+}
+
+/** Conecta por el puente MIDI del anfitrión, con los puertos elegidos (si los hay). */
+function connectHardwareBridge({ outputId = null, inputId = null } = {}) {
+  if (!outputId) {
+    toast('Select an available MIDI output first', 'error');
+    return;
+  }
+  bridge.send('hardware.selectPorts', { outputId, inputId });
+  try {
+    const { input, output } = createBridgeMidiPorts({ onStatus: reportBridgeMidiStatus });
+    activeTransportKind = 'hardware';
+    activeTransportSystem = null;
+    connectMidiDevice(output, input, null);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function handleMidiConnect() {
+  // Inside the JUCE plugin Web MIDI is unavailable: connect through the
+  // C++ hardware bridge, or with the synth that hosts the Bank Manager (software
+  // transport) when its contract declares one. Con un solo destino, directo.
+  if (isBridgeMidiAvailable()) {
+    const destinations = embeddedDestinations();
+    // Incluso con un único destino físico, la elección de puerto es explícita.
+    showTransportDialog(destinations);
+    return;
   }
   try {
     midiAccess = await requestMidiAccess();
@@ -1299,13 +1824,58 @@ function showKnownDevicePicker(known, inputs) {
   });
 }
 
-function showManualSelector(outputs, inputs) {
+/** Options of the manual MIDI model picker (shared by the first render and the escape hatch). */
+function buildMidiModelOptions(models, preselectedModelId) {
+  return models.map(m => {
+    const selected = m.id === preselectedModelId ? ' selected' : '';
+    return `<option value="${escHtml(m.id)}"${selected}>${escHtml(m.name)}</option>`;
+  }).join('');
+}
+
+function showManualSelector(outputs, inputs, options = {}) {
   const outOpts = outputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Untitled')}</option>`).join('');
-  const inOpts = inputs.map((p, i) => `<option value="${i}">${escHtml(p.name || 'Untitled')}</option>`).join('');
+  // The bridge hands us its port pair together: pre-select the matching input, or a
+  // bridge session stays on "No input connection" and never gets SysEx back.
+  const preferredIn = preferredInputIndex(inputs, options.preferredInputId);
+  const inOpts = inputs.map((p, i) =>
+    `<option value="${i}"${i === preferredIn ? ' selected' : ''}>${escHtml(p.name || 'Untitled')}</option>`
+  ).join('');
+  const usingBridgePorts = outputs.length === 1 && isBridgeMidiPort(outputs[0]);
+
+  // Host-scoped picker: inside a plugin only the hardware its build supports can
+  // be driven, so the manual model list follows the announced context. In the
+  // standalone Bank Manager the whole registry stays selectable.
+  //
+  // Escape hatch (explicit, session-only): the list itself offers "Other
+  // hardware…", so a user inside the plugin can still drive a device of another
+  // family. Only this picker widens — the host keeps its scope, the navigation
+  // keeps its scope, and nothing is persisted.
+  const hostContextModelId = getHostContextModelId();
+  const allowForeign = isForeignMidiHardwareAllowed();
+  // An announced modelId with no contract cannot scope anything: the list falls
+  // back to the whole registry (getMidiConnectableModels), so neither the sentinel
+  // nor the "only this synth's models" hint may claim otherwise.
+  const scopedToHost = isHostScopeResolvable(hostContextModelId) && !allowForeign;
+  const manualModels = getMidiConnectableModels(hostContextModelId, { allowForeign });
+  const preselectedModelId = getContextModelId();
+  const modelOpts = buildMidiModelOptions(manualModels, preselectedModelId)
+    + (scopedToHost
+      ? `<option value="${MIDI_ALL_HARDWARE}">— Other hardware… (show all models) —</option>`
+      : '');
+  const scopeHintText = scopedToHost
+    ? 'Only the models this synth supports are listed.'
+    : (allowForeign && hostContextModelId
+      ? 'Scope overridden for this session — all models are listed.'
+      : '');
+  const scopeHint = scopeHintText
+    ? `<p id="midi-scope-hint" style="margin:0.3rem 0 0;color:var(--text-secondary);font-size:0.78rem;">${scopeHintText}</p>`
+    : '';
 
   showModal(`<div style="padding:1rem;">
     <h3 style="margin:0 0 0.6rem;">MIDI Connection</h3>
-    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">Select the ports:</p>
+    <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.85rem;">${usingBridgePorts
+      ? 'Using the plugin\'s own MIDI bridge to the host.'
+      : 'Select the ports:'}</p>
     <div class="patch-info-field">
       <span class="patch-info-label">MIDI Output</span>
       <select class="param-select" id="midi-out" style="width:100%">${outOpts}</select>
@@ -1318,7 +1888,8 @@ function showManualSelector(outputs, inputs) {
     <div id="midi-detect-result"></div>
     <div id="midi-model-manual" style="display:none;margin-top:0.5rem;" class="patch-info-field">
       <span class="patch-info-label">Model</span>
-      <select class="param-select" id="midi-port-model" style="width:100%">${ALL_MODELS.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name)}</option>`).join('')}</select>
+      <select class="param-select" id="midi-port-model" style="width:100%">${modelOpts}</select>
+      ${scopeHint}
     </div>
     <div class="modal-actions" style="margin-top:1rem;">
       <button class="btn" onclick="document.getElementById('modal-overlay').classList.remove('active')">Cancel</button>
@@ -1326,14 +1897,46 @@ function showManualSelector(outputs, inputs) {
     </div>
   </div>`);
 
+  // Escape hatch: choosing the sentinel widens this picker to the whole registry.
+  // The value is never handed to `connectMidiDevice` (see the confirm handler).
+  const modelSelect = document.getElementById('midi-port-model');
+  modelSelect.onchange = () => {
+    if (modelSelect.value !== MIDI_ALL_HARDWARE) return;
+    setForeignMidiHardwareAllowed(true);
+    modelSelect.innerHTML = buildMidiModelOptions(
+      getMidiConnectableModels(hostContextModelId, { allowForeign: true }),
+      preselectedModelId
+    );
+    const hintEl = document.getElementById('midi-scope-hint');
+    if (hintEl) hintEl.textContent = 'Scope overridden for this session — all models are listed.';
+  };
+
   let detectedId = null;
   document.getElementById('midi-detect-btn').onclick = () => {
     const outIdx = parseInt(document.getElementById('midi-out').value);
     const port = outputs[outIdx];
-    const found = detectModelFromName(port?.name);
+    // The bridge port is ours, not a device: there is no name to sniff, so the
+    // verdict is the model the host announced (or an explanation) instead of the
+    // "Not recognized" we reserve for hardware we actually failed to identify.
+    const onBridgePort = bridgeMidiDetection({
+      port,
+      hostContextModelId,
+      hostModelDisplayName: hostContextModelId ? getModelDisplayName(hostContextModelId) : null,
+      resolvable: isHostScopeResolvable(hostContextModelId)
+    });
+    const found = onBridgePort ? null : detectModelFromName(port?.name);
     const result = document.getElementById('midi-detect-result');
     const manualDiv = document.getElementById('midi-model-manual');
     const confirmBtn = document.getElementById('midi-confirm');
+    if (onBridgePort) {
+      detectedId = onBridgePort.modelId;
+      result.innerHTML = onBridgePort.tone === 'success'
+        ? `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.3);color:var(--success);font-weight:600;">${onBridgePort.message}</div>`
+        : `<div id="midi-bridge-note" style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(210,153,34,0.15);border:1px solid rgba(210,153,34,0.35);color:var(--text-secondary);">${onBridgePort.message}</div>`;
+      manualDiv.style.display = onBridgePort.modelId ? 'none' : '';
+      confirmBtn.style.display = '';
+      return;
+    }
     if (found) {
       detectedId = found.modelId;
       result.innerHTML = `<div style="margin-top:0.6rem;padding:0.5rem 0.7rem;border-radius:6px;background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.3);color:var(--success);font-weight:600;">Detected: <strong>${escHtml(found.displayName)}</strong></div>`;
@@ -1349,7 +1952,10 @@ function showManualSelector(outputs, inputs) {
   document.getElementById('midi-confirm').onclick = () => {
     const outIdx = parseInt(document.getElementById('midi-out').value);
     const inIdx = parseInt(document.getElementById('midi-in').value);
-    const modelId = detectedId || document.getElementById('midi-port-model').value;
+    // The sentinel is a UI affordance, not a contract: fall back to the model the
+    // host announced instead of passing it through as a modelId.
+    const pickedModelId = document.getElementById('midi-port-model').value;
+    const modelId = detectedId || (pickedModelId === MIDI_ALL_HARDWARE ? hostContextModelId : pickedModelId);
     hideModal();
     connectMidiDevice(outputs[outIdx], inIdx === -1 ? null : inputs[inIdx], modelId);
   };
@@ -1357,13 +1963,18 @@ function showManualSelector(outputs, inputs) {
 
 function connectMidiDevice(output, input, modelId) {
   if (modelId == null) {
-    // Bridge MIDI (no port names to sniff): show the manual model picker.
-    showManualSelector([output], input ? [input] : []);
+    // Bridge MIDI (no port names to sniff): show the manual model picker, with the
+    // bridge's own input already selected.
+    showManualSelector([output], input ? [input] : [], { preferredInputId: input?.id });
     return;
   }
   activeMidiTransport?.close();
   activeMidiTransport = createMidiTransport({ modelId, input, output, onActivity: flashMidiActivity });
   activeMidiModelId = modelId;
+  // Filter the model selector to this synth's compatible hardware (context-aware).
+  // `session`: a MIDI connection is a user choice, so it never touches the sticky
+  // host constraint the plugin announced.
+  setContextModelId(modelId, 'session');
   const displayName = getModelDisplayName(modelId);
   const statusEl = document.getElementById('midi-status');
   statusEl.classList.add('connected');
@@ -1371,8 +1982,68 @@ function connectMidiDevice(output, input, modelId) {
   toast(`${displayName} connected${input ? '' : ' (output only)'}`, 'success');
 }
 
+/**
+ * `preset.capture` desde la UI: guarda en el banco el preset activo del synth
+ * anfitrión (dirección Software → Bank Manager).
+ *
+ * Es el inverso de `Send`: el host devuelve su patch actual y se añade al banco —
+ * en el slot que él diga, o como preset nuevo. Solo existe con el transporte de
+ * software y si el contrato declara `transport.software.capture` (§7.2 del modelo
+ * de transporte).
+ */
+async function captureFromSynth(bank) {
+  if (!activeMidiTransport?.capture) { toast('The connected destination cannot be captured', 'error'); return; }
+  try {
+    const captured = await activeMidiTransport.capture();
+    const rawData = captured.rawData instanceof Uint8Array ? captured.rawData : new Uint8Array(captured.rawData || []);
+    if (rawData.length === 0) { toast('The host returned an empty patch', 'error'); return; }
+
+    // Un preset nativo no tiene offsets del equipo: se respeta el nombre del host.
+    const name = captured.name || `Captured ${new Date().toLocaleTimeString()}`;
+    const patches = await getPatchesForBank(bank.id);
+    const slot = Number.isInteger(captured.slot) ? captured.slot : null;
+    const existing = slot === null ? null : patches.find(p => p.index === slot);
+
+    if (existing) {
+      await updatePatch(existing.id, { rawData, name });
+    } else {
+      const index = slot ?? patches.reduce((max, p) => Math.max(max, p.index), -1) + 1;
+      await createPatch(bank.id, { index, rawData, name });
+    }
+
+    // El banco aprende de dónde salió si aún no lo declaraba (§7.3).
+    if (bank.presetFormat == null) await updateBank(bank.id, { presetFormat: activeTransportSystem });
+
+    toast(`Captured "${name}" from ${getModelDisplayName(activeMidiModelId)}`, 'success');
+    recordChange();
+    await renderNav();
+    await renderContent();
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+/** ¿El destino conectado sabe devolver su preset activo? (contrato + transporte) */
+function canCaptureFromSynth() {
+  if (activeTransportKind !== SOFTWARE_DESTINATION) return false;
+  if (typeof activeMidiTransport?.capture !== 'function') return false;
+  const contract = activeMidiModelId ? getModelContract(activeMidiModelId) : null;
+  return !!softwareCapabilities(contract)?.capture;
+}
+
 async function handleMidiFetch() {
-  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
+  if (!activeMidiTransport) { toast(connectionRequiredMessage({ embedded: EMBEDDED_HOST }), 'error'); return; }
+
+  // El anfitrión ya avisó de que no hay hardware: traer un banco **por MIDI** significa
+  // un timeout por slot (128 × 5 s con el contrato por defecto), así que mejor decirlo
+  // que esperar a que caduque. Con el destino **software** el banco va por el bridge
+  // (`bank.read` → `bank.data`), así que no hace falta ningún puerto MIDI — ni virtual.
+  if (midiBridgeBlocksFetch({
+    software: activeTransportKind === SOFTWARE_DESTINATION,
+    midiError: bridgeMidiError,
+    midiListening: bridgeMidiListening,
+  })) {
+    toast(bridgeMidiError, 'error');
+    return;
+  }
   const contract = getModelContract(activeMidiModelId);
   if (!contract) { toast('Contract not found', 'error'); return; }
 
@@ -1381,27 +2052,63 @@ async function handleMidiFetch() {
   if (!bank || !isCompatible(bank.modelId)) {
     const allBanks = await getAllBanks();
     bank = allBanks.find(b => isCompatible(b.modelId));
-    if (!bank) bank = await createBank({ name: contract.displayName, modelId: activeMidiModelId, hardwareIds: getHardwareIds(activeMidiModelId), manufacturer: contract.manufacturer || '' });
+    if (!bank) {
+      bank = await createBank({
+        name: contract.displayName,
+        modelId: activeMidiModelId,
+        hardwareIds: getHardwareIds(activeMidiModelId),
+        manufacturer: contract.manufacturer || '',
+        // De dónde salió: el mismo modelo puede tener un banco de SysEx (emulación
+        // o equipo físico) y otro de presets nativos, y no son intercambiables.
+        presetFormat: activeTransportKind === SOFTWARE_DESTINATION ? activeTransportSystem : 'sysex',
+      });
+      // El núcleo construye una forma fija: el resto de campos del banco se
+      // persisten con el update (Dexie guarda el objeto entero).
+      await updateBank(bank.id, { presetFormat: bank.presetFormat ?? null });
+    }
     selectedBankId = bank.id;
   }
 
   try {
+    // De una vez (un `bank.read` por el bridge o un `0x0E`/`0x4C` por MIDI) o slot a
+    // slot: la decisión está en `core/fetchFlow.js` para poder comprobarla sin la app.
+    const plan = planBankFetch({
+      transport: activeMidiTransport,
+      contract,
+      software: activeTransportKind === SOFTWARE_DESTINATION,
+    });
     let patches;
-    if (contract.parseDumpResponse) {
-      patches = await activeMidiTransport.fetchAll();
+    if (plan.mode === 'bulk') {
+      // La memoria completa en una respuesta o en varias tramas seguidas.
+      const dump = await activeMidiTransport.fetchAll();
+      patches = Array.isArray(dump) ? dump : [dump];
     } else {
-      patches = await fetchBank(activeMidiTransport, { count: contract.bankCapacity || 128 });
+      patches = await fetchBank(activeMidiTransport, { count: plan.count });
     }
     for (const patch of patches) {
       const existing = (await getPatchesForBank(bank.id)).find(c => c.index === patch.slot);
-      const name = contract.extractPatchName?.(patch.rawData) || `P${patch.slot + 1}`;
+      // El nombre del contrato solo vale para presets en SysEx: un preset nativo
+      // (JSON) no tiene offsets del equipo, así que se respeta el que manda el host.
+      const name = (activeTransportSystem === 'native' && patch.name)
+        || contract.extractPatchName?.(patch.rawData)
+        || patch.name
+        || `P${patch.slot + 1}`;
       if (existing) await updatePatch(existing.id, { rawData: patch.rawData, name });
       else await createPatch(bank.id, { index: patch.slot, rawData: patch.rawData, name });
     }
     navLevel = 'patches';
     await renderNav();
     await renderContent();
-    toast(`Fetch completado — ${patches.length} patches`, 'success');
+
+    // Cuántas plazas llegaron, explícito y con su direccionamiento (A.01–H.16): un volcado
+    // puede venir incompleto (el destino tiene menos memoria de la que declara, o no
+    // contestó a todo) y el banco se queda con lo que sí llegó. Nadie debe suponer el resto.
+    const { message, level } = summarizeBankFetch({
+      patches,
+      expected: contract.bankCapacity,
+      getProgramAddress: contract.getProgramAddress,
+    });
+    toast(message, level);
     recordChange();
   } catch (error) { toast(error.message, 'error'); }
 }
@@ -1450,7 +2157,7 @@ function toggleSendDropdown(bank) {
 }
 
 async function handleMidiSendBank(targetModelId = null) {
-  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
+  if (!activeMidiTransport) { toast(connectionRequiredMessage({ embedded: EMBEDDED_HOST }), 'error'); return; }
   if (!selectedBankId) { toast('Select a bank', 'error'); return; }
   const bank = await getBank(selectedBankId);
   // MF.18: Use target model's contract if specified (compatible hardware), otherwise bank's own
@@ -1482,15 +2189,25 @@ async function handleMidiSendBank(targetModelId = null) {
 }
 
 window.handleMidiSendPatch = async function () {
-  if (!activeMidiTransport) { toast('Connect a MIDI device first', 'error'); return; }
+  if (!activeMidiTransport) { toast(connectionRequiredMessage({ embedded: EMBEDDED_HOST }), 'error'); return; }
   if (!selectedPatchId) { toast('Select a patch', 'error'); return; }
   const patch = await getPatch(selectedPatchId);
   const bank = await getBank(patch.bankId);
   const contract = getModelContract(bank.modelId);
   const rawData = patch.rawData instanceof Uint8Array ? patch.rawData : new Uint8Array(patch.rawData);
   try {
-    activeMidiTransport.sendPatch({ rawData }, patch.index, contract.midi?.defaultChannel ?? 1);
-    toast(`Patch "${patch.name}" sent`, 'success');
+    const channel = contract.midi?.defaultChannel ?? 1;
+    // Si el destino sabe acusar recibo (el synth de software siempre; el hardware real
+    // todavía no, ver `awaitsWriteConfirmation`), se espera la confirmación: «sent» deja
+    // de ser una promesa a ciegas y un rechazo del destino se ve como error, no como
+    // éxito.
+    if (awaitsWriteConfirmation(activeMidiTransport.capabilities)) {
+      await activeMidiTransport.sendPatch({ rawData }, patch.index, channel, { confirm: true });
+      toast(`Patch "${patch.name}" sent and confirmed by ${contract.displayName}`, 'success');
+    } else {
+      activeMidiTransport.sendPatch({ rawData }, patch.index, channel);
+      toast(`Patch "${patch.name}" sent`, 'success');
+    }
   } catch (error) { toast(error.message, 'error'); }
 }
 
@@ -1514,6 +2231,11 @@ function promptNewBank(preSelectedModelId = null) {
   renderModelSelector(container, {
     manufacturerFilter: null,
     showAutoConfig: true,
+    // The New Bank modal follows the *current* context (host announcement or MIDI
+    // connection). Passing `activeMidiModelId || null` used to reset the module
+    // context to standalone when no MIDI was connected, so opening the modal
+    // inside a plugin brought back all 22 models.
+    contextModelId: getContextModelId(),
     onSelect: (modelId, meta) => {
       // Update the hidden modelId for the form
       selectedModelId = modelId;
@@ -1947,7 +2669,7 @@ function showShortcutsHelp() {
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+E</kbd><span>Export bank</span>
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Shift+E</kbd><span>Export Library</span>
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+S</kbd><span>Save</span>
-      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+M</kbd><span>Connect MIDI</span>
+      <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+M</kbd><span>${connectionRequiredLabel({ embedded: EMBEDDED_HOST })}</span>
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+F</kbd><span>Search</span>
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Z</kbd><span>Undo</span>
       <kbd style="font-family:monospace;background:var(--bg-primary);padding:0.2rem 0.5rem;border-radius:4px;border:1px solid var(--border);">${mod}+Y</kbd><span>Redo</span>
@@ -2017,6 +2739,11 @@ document.body.appendChild(csvInput);
 
 // ─── MF.9 Drag & Drop ───
 let dragCounter = 0;
+/** @type {HTMLElement|null} */
+let dropOverlay = null;
+/** @type {{enter: Function, leave: Function, over: Function, drop: Function}|null} */
+let dragHandlers = null;
+
 function setupDragDrop() {
   const main = document.getElementById('main-content');
   if (!main) return;
@@ -2027,24 +2754,25 @@ function setupDragDrop() {
   overlay.innerHTML = `<div class="drop-overlay-content">${icons.folder} Drop file here<br><small>.syx · .sysex · .abdlibrary</small></div>`;
   overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,212,255,0.1);border:3px dashed var(--accent);z-index:999;justify-content:center;align-items:center;pointer-events:none;';
   document.body.appendChild(overlay);
+  dropOverlay = overlay;
 
-  document.addEventListener('dragenter', (e) => {
+  const onDragEnter = (e) => {
     e.preventDefault();
     dragCounter++;
     if (dragCounter === 1) overlay.style.display = 'flex';
-  });
+  };
 
-  document.addEventListener('dragleave', (e) => {
+  const onDragLeave = (e) => {
     e.preventDefault();
     dragCounter--;
-    if (dragCounter === 0) overlay.style.display = 'none';
-  });
+    if (dragCounter <= 0) { dragCounter = 0; overlay.style.display = 'none'; }
+  };
 
-  document.addEventListener('dragover', (e) => {
+  const onDragOver = (e) => {
     e.preventDefault();
-  });
+  };
 
-  document.addEventListener('drop', async (e) => {
+  const onDrop = async (e) => {
     e.preventDefault();
     dragCounter = 0;
     overlay.style.display = 'none';
@@ -2116,7 +2844,30 @@ function setupDragDrop() {
       }
 
     setStatus('connected', 'Ready');
-  });
+  };
+
+  document.addEventListener('dragenter', onDragEnter);
+  document.addEventListener('dragleave', onDragLeave);
+  document.addEventListener('dragover', onDragOver);
+  document.addEventListener('drop', onDrop);
+  dragHandlers = { enter: onDragEnter, leave: onDragLeave, over: onDragOver, drop: onDrop };
+}
+
+// ─── Cleanup on page unload ───
+function cleanup() {
+  // Remove document event listeners added by init/setupDragDrop
+  document.removeEventListener('keydown', handleKeyboard);
+  document.removeEventListener('DOMContentLoaded', init);
+  if (dragHandlers) {
+    document.removeEventListener('dragenter', dragHandlers.enter);
+    document.removeEventListener('dragleave', dragHandlers.leave);
+    document.removeEventListener('dragover', dragHandlers.over);
+    document.removeEventListener('drop', dragHandlers.drop);
+  }
+  if (dropOverlay?.parentNode) dropOverlay.parentNode.removeChild(dropOverlay);
+  
+  // Clean up bridge
+  bridge.destroy();
 }
 
 // ─── Start ───
@@ -2126,3 +2877,6 @@ if (document.readyState === 'loading') {
   init();
 }
 setupDragDrop();
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', cleanup);
