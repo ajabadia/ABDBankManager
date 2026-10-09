@@ -177,6 +177,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
+        root: path.resolve(__dirname, 'root.html'),
         ...extraHtmlEntries()
       }
     }
