@@ -13,3 +13,4 @@
  */
 
 export { BankManagerModal } from './BankManagerModal.js';
+export { mountBankManager, BANK_MANAGER_HTML } from './mountBankManager.js';

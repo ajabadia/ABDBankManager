@@ -16,7 +16,8 @@ const ROOT = join(here, '..', '..', '..');
 
 const PAIRS = [
   ['packages/ui/src/BankManagerModal.js', 'WebUI/src/components/BankManagerModal.js'],
-  ['packages/ui/src/BankManagerModal.css', 'WebUI/src/components/BankManagerModal.css']
+  ['packages/ui/src/BankManagerModal.css', 'WebUI/src/components/BankManagerModal.css'],
+  ['packages/ui/src/mountBankManager.js', 'WebUI/src/components/mountBankManager.js']
 ];
 
 describe('BankManagerModal anti-drift (packages/ui ↔ WebUI copy)', () => {
