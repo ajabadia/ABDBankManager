@@ -134,8 +134,8 @@ describe('getContractForSysex — contract identification', () => {
   // Compatible variants that share SysEx with a canonical contract
   // getContractForSysex returns the canonical contract for these
   const VARIANT_TO_CANONICAL = {
-    'korg-microkorg': 'korg-ms2000',
-    'abd-sm002': 'korg-ms2000', // softsynth; byte-identical MS2000 SysEx, not detectable
+    // korg-microkorg has its own distinct Model ID (0x71) in SysEx
+    // abd-sm002 has its own SysEx (F0 7D 0A) distinct from Korg hardware (F0 42)
     'casio-cz1': 'casio-cz101',
     'casio-cz1000': 'casio-cz101',
     'casio-cz5000': 'casio-cz101',

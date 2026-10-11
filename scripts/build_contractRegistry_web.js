@@ -3,8 +3,8 @@
  * ABD Bank Manager — ContractRegistry Data Build (WebUI)
  *
  * Genera `contractRegistry.gen.js` desde `modelContracts.gen.js` (ya existente).
- * El ContractRegistry standalone solo registra los 15 modelos, así que los
- * datos son determinísticos y derivables del modelContracts gen.
+ * El artefacto web contiene descriptores serializables de los adapters y links
+ * registrados en Source/Contracts; no arrastra implementaciones TypeScript ni Zod.
  *
  * Uso: node Scripts/build_contractRegistry_web.js   (parte de `npm run generate`)
  *
@@ -31,26 +31,49 @@ async function main() {
   // Cargar modelContracts.gen.js usando file:// URL
   const modelContractsUrl = 'file://' + MODEL_CONTRACTS_GEN.replace(/\\/g, '/');
   const modelContractsModule = await import(modelContractsUrl);
-  const { allModelContracts, modelContractMap, getHardwareIds, getMidiConfig } = modelContractsModule;
+  const { allModelContracts, modelContractMap } = modelContractsModule;
 
-  // Simular createStandaloneRegistry(): registrar todos los modelos
-  // Como modelContractMap ya tiene todos los modelos, los datos son equivalentes
   const modelIds = allModelContracts.map(c => c.modelId);
+
+  // Descriptores serializables equivalentes a los registros concretos del
+  // ContractRegistry TypeScript. Las implementaciones siguen viviendo en
+  // Source/Contracts/Adapters; la WebUI solo necesita estos metadatos.
+  const importAdapters = [
+    { adapterId: 'sysex-casio-cz', displayName: 'Casio CZ SysEx', targetModelIds: ['casio-cz101', 'casio-cz1000', 'casio-cz5000', 'casio-cz1'] },
+    { adapterId: 'sysex-roland-juno', displayName: 'Roland Juno SysEx', targetModelIds: ['roland-juno106', 'roland-juno60', 'roland-juno6', 'roland-hs60'] },
+    { adapterId: 'sysex-korg-ms2000', displayName: 'Korg MS2000 SysEx', targetModelIds: ['korg-ms2000', 'korg-microkorg', 'korg-prophecy'] },
+    { adapterId: 'sysex-behringer-dm12', displayName: 'Behringer DeepMind 12 / Pro-800 SysEx', targetModelIds: ['behringer-deepmind12', 'behringer-pro800'] },
+    { adapterId: 'sysex-yamaha-dx7', displayName: 'Yamaha DX7 SysEx', targetModelIds: ['yamaha-dx7', 'yamaha-dx7ii'] }
+  ];
+  const exportAdapters = [
+    { adapterId: 'export-casio-cz', displayName: 'Casio CZ SysEx', targetModelIds: ['casio-cz101', 'casio-cz1000', 'casio-cz5000', 'casio-cz1'] },
+    { adapterId: 'export-roland-juno', displayName: 'Roland Juno SysEx', targetModelIds: ['roland-juno106', 'roland-juno60', 'roland-juno6', 'roland-hs60'] },
+    { adapterId: 'export-korg-ms2000', displayName: 'Korg MS2000 SysEx', targetModelIds: ['korg-ms2000', 'korg-microkorg', 'korg-prophecy'] },
+    { adapterId: 'export-behringer-dm12', displayName: 'Behringer DeepMind 12 / Pro-800 SysEx', targetModelIds: ['behringer-deepmind12', 'behringer-pro800'] },
+    { adapterId: 'export-yamaha-dx7', displayName: 'Yamaha DX7 SysEx', targetModelIds: ['yamaha-dx7', 'yamaha-dx7ii'] }
+  ];
+  const hardwareLinks = [
+    { modelId: 'casio-cz101', displayName: 'Casio CZ Hardware Link' },
+    { modelId: 'roland-juno106', displayName: 'Roland Juno Hardware Link' },
+    { modelId: 'korg-ms2000', displayName: 'Korg MS2000 Hardware Link' },
+    { modelId: 'behringer-deepmind12', displayName: 'Behringer DeepMind 12 Hardware Link' },
+    { modelId: 'yamaha-dx7', displayName: 'Yamaha DX7 Hardware Link' }
+  ];
 
   const data = {
     // Modo: 'standalone' porque hay >1 modelo
     mode: 'standalone',
 
-    // Issues: en un registry limpio sin adapters/links, no hay warnings
+    // Issues: el bundle concreto no contiene referencias huérfanas.
     issues: [],
 
-    // HardwareLinks: no implementados aún (P1.4 pendiente)
+    // Descriptores de HardwareLinks, agrupados por modelo.
     hardwareLinks: {},
 
-    // ImportAdapters: no implementados aún
+    // Descriptores de ImportAdapters, agrupados por modelo.
     importAdapters: {},
 
-    // ExportAdapters: no implementados aún
+    // Descriptores de ExportAdapters, agrupados por modelo.
     exportAdapters: {},
 
     // Lista de modelIds registrados (orden de allModelContracts)
@@ -64,16 +87,18 @@ async function main() {
     const model = modelContractMap.get(modelId);
     if (!model) continue;
 
-    // HardwareLinks vacíos (no implementados)
-    data.hardwareLinks[modelId] = [];
-
-    // Import/Export adapters vacíos (no implementados)
-    data.importAdapters[modelId] = [];
-    data.exportAdapters[modelId] = [];
+    data.hardwareLinks[modelId] = hardwareLinks.filter(link => link.modelId === modelId);
+    data.importAdapters[modelId] = importAdapters.filter(adapter => adapter.targetModelIds.includes(modelId));
+    data.exportAdapters[modelId] = exportAdapters.filter(adapter => adapter.targetModelIds.includes(modelId));
 
     // Metadatos para UI
+    // Nota: `modelId` se incluye aunque sea la clave del mapa; la UI necesita
+    // el id dentro del objeto (p. ej. data-model-id del selector) y no debe
+    // depender de tener la clave a mano.
     data.modelMetadata[modelId] = {
+      modelId,
       displayName: model.displayName,
+      thumbnail: model.thumbnail,
       manufacturer: model.manufacturer,
       bankCapacity: model.bankCapacity,
       programsPerBank: model.programsPerBank,

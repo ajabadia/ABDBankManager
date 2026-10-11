@@ -5,7 +5,7 @@
 
 import { HARDWARE_QUEUE_CONFIGS } from '../Contracts/HardwareQueueConfigs.ts';
 
-export interface SysExMessage {
+interface SysExMessage {
   data: Uint8Array;
   delay: number;
   timestamp: number;
@@ -14,11 +14,11 @@ export interface SysExMessage {
   reject: (reason: Error) => void;
 }
 
-export interface MidiOutputPort {
+interface MidiOutputPort {
   send(data: Uint8Array): void;
 }
 
-export interface MidiSysExQueueOptions {
+interface MidiSysExQueueOptions {
   maxRetries?: number;
   retryDelayMs?: number;
   onProgress?: (remaining: number) => void;
@@ -26,7 +26,10 @@ export interface MidiSysExQueueOptions {
   onError?: (error: Error, message: SysExMessage) => void;
 }
 
-export class MidiSysExQueue {
+/**
+ * Class for managing MIDI SysEx message queues.
+ */
+class MidiSysExQueue {
   private queue: SysExMessage[] = [];
   private processing = false;
   private readonly options: Required<MidiSysExQueueOptions>;
@@ -100,20 +103,24 @@ export class MidiSysExQueue {
           await this.sleep(msg.delay);
         }
       } catch (error) {
-        if (msg.retries < this.options.maxRetries) {
-          msg.retries++;
-          // Re-queue with exponential backoff
-          const backoffDelay = this.options.retryDelayMs * Math.pow(2, msg.retries);
-          this.queue.unshift({ ...msg, delay: backoffDelay });
-        } else {
-          msg.reject(error as Error);
-          this.options.onError(error as Error, msg);
-        }
+        this.handleError(msg, error as Error);
       }
     }
 
     this.processing = false;
     this.options.onComplete();
+  }
+
+  private handleError(msg: SysExMessage, error: Error): void {
+    if (msg.retries < this.options.maxRetries) {
+      msg.retries++;
+      // Re-queue with exponential backoff
+      const backoffDelay = this.options.retryDelayMs * Math.pow(2, msg.retries);
+      this.queue.unshift({ ...msg, delay: backoffDelay });
+    } else {
+      msg.reject(error);
+      this.options.onError(error, msg);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
@@ -137,7 +144,7 @@ export class MidiSysExQueue {
 /**
  * Factory for creating hardware-specific queues
  */
-export function createHardwareQueue(
+function createHardwareQueue(
   output: MidiOutputPort,
   hardwareLink: { interMessageDelayMs: number; dumpTimeoutMs: number },
   options: MidiSysExQueueOptions = {}
@@ -148,6 +155,14 @@ export function createHardwareQueue(
   });
 }
 
-export type HardwareModelId = keyof typeof HARDWARE_QUEUE_CONFIGS;
+type HardwareModelId = keyof typeof HARDWARE_QUEUE_CONFIGS;
 
-export { HARDWARE_QUEUE_CONFIGS };
+export {
+  SysExMessage,
+  MidiOutputPort,
+  MidiSysExQueueOptions,
+  MidiSysExQueue,
+  createHardwareQueue,
+  HARDWARE_QUEUE_CONFIGS,
+  HardwareModelId
+};

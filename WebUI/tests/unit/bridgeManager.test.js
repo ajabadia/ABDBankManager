@@ -46,4 +46,17 @@ describe('BridgeManager native callback protocol', () => {
 
     expect(listener).toHaveBeenCalledWith({ currentBankIndex: 0, currentPatchIndex: 3 });
   });
+
+  it('emits the host synth modelId (hostModel, Juce → JS)', async () => {
+    const listener = vi.fn();
+    bridge.on('hostModel', listener);
+
+    bridge._handleMessage({
+      action: 'hostModel',
+      schemaVersion: 1,
+      data: { modelId: 'abd-sm002' }
+    });
+
+    expect(listener).toHaveBeenCalledWith({ modelId: 'abd-sm002' });
+  });
 });

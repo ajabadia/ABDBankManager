@@ -17,6 +17,9 @@ const modelContractsUrl = 'file://' + path.join(ROOT, 'WebUI', 'src', 'contracts
 async function main() {
   const { modelContractMap } = await import(modelContractsUrl);
 
+  // Filtro opcional por subcadena (p.ej. "juno") para regenerar solo una familia.
+  const filter = (process.argv[2] || '').toLowerCase();
+
   const fixtures = [
     // Casio CZ
     { modelId: 'casio-cz101', bankCount: 1, outDir: 'fixtures/sysex/casio-cz/factory', prefix: 'CZ101' },
@@ -37,6 +40,7 @@ async function main() {
   ];
 
   for (const { modelId, bankCount, outDir, prefix } of fixtures) {
+    if (filter && !modelId.toLowerCase().includes(filter)) continue;
     const contract = modelContractMap.get(modelId);
     if (!contract) {
       console.warn(`⚠️  ${modelId}: contrato no encontrado`);
@@ -76,8 +80,11 @@ async function main() {
 
 function generateDeterministicPatch(size, index) {
   const data = new Uint8Array(size);
+  // Los datos dentro de un mensaje SysEx MIDI son de 7 bits (0x00-0x7F):
+  // bytes con bit alto (>= 0x80) serian ilegales en el cable y rompen el
+  // framing F0..F7 de los mensajes posteriores al concatenar.
   for (let i = 0; i < size; i++) {
-    data[i] = (i * 37 + index * 13 + 7) & 0xFF;
+    data[i] = (i * 37 + index * 13 + 7) & 0x7F;
   }
   return data;
 }

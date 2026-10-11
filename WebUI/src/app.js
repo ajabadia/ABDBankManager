@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ABD Bank Manager — App Entry Point (MF.8 cascade navigation)
  * Navigation: Manufacturer → Model → Bank → Patch
  */
@@ -2870,13 +2870,16 @@ function cleanup() {
   bridge.destroy();
 }
 
-// ─── Start ───
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
-setupDragDrop();
+// ─── Exportable API for direct DOM mounting ───
+export { init, cleanup, setupDragDrop };
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', cleanup);
+// ─── Auto-start in standalone HTML / iframe environment ───
+if (typeof window !== 'undefined' && document.getElementById('panel-welcome')) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  setupDragDrop();
+  window.addEventListener('beforeunload', cleanup);
+}

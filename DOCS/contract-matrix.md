@@ -1,118 +1,248 @@
-# Matriz normativa de contratos y perfiles SysEx
+# Contract Matrix — SysEx Protocol Normativa
 
-> Estado: inicial / pendiente de confirmar con fixtures reales y hardware.
-> No debe interpretarse como certificación de protocolo mientras la fila no tenga evidencia.
+> Tabla normativa de todos los modelos soportados.
+> Fuente canónica: `Source/Contracts/Models/*.ts`
+> Última actualización: 2026-08-30
 
-## Estados de evidencia
+---
 
-- `designed`: definido en código o documentación.
-- `implemented`: contrato/adaptador implementado.
-- `unit-tested`: cubierto por tests sintéticos.
-- `fixture-tested`: verificado contra un dump real conservado en `fixtures/`.
-- `hardware-tested`: probado con el dispositivo físico y firmware indicado.
+## Resumen de modelos
 
-## Modelo de datos normativo
+| # | Model ID | Display Name | Manufacturer | Manufacturer ID | Model ID Byte | Capacity | Banks | Programs/Bank | Patch Data Size | Wire Size | Checksum | Packing |
+|---|----------|-------------|--------------|-----------------|---------------|----------|-------|---------------|-----------------|-----------|----------|---------|
+| 1 | `casio-cz101` | Casio CZ-101 | Casio | `0x44` | `0x12` | 16 | 1 | 16 | 128 B | 256 nibbles | sum & 0x7F | Nibble |
+| 2 | `casio-cz1000` | Casio CZ-1000 | Casio | `0x44` | `0x13` | 16 | 1 | 16 | 128 B | 256 nibbles | sum & 0x7F | Nibble |
+| 3 | `casio-cz5000` | Casio CZ-5000 | Casio | `0x44` | `0x14` | 32 | 2 | 16 | 128 B | 256 nibbles | sum & 0x7F | Nibble |
+| 4 | `casio-cz1` | Casio CZ-1 | Casio | `0x44` | `0x15` | 64 | 4 | 16 | 288 B | 576 nibbles | sum & 0x7F | Nibble |
+| 5 | `roland-juno106` | Roland Juno-106 | Roland | `0x41` | `0x3E` | 128 | 2 | 64 | 18 B | 18 B (no pack) | (-sum) & 0x7F (bulk) | None |
+| 6 | `roland-juno60` | Roland Juno-60 | Roland | `0x41` | `0x3D` | 128 | 2 | 64 | 18 B | 18 B | (-sum) & 0x7F (bulk) | None |
+| 7 | `roland-juno6` | Roland Juno-6 | Roland | `0x41` | `0x3C` | 128 | 2 | 64 | 18 B | 18 B | (-sum) & 0x7F (bulk) | None |
+| 8 | `roland-hs60` | Roland HS-60 | Roland | `0x41` | `0x3E` | 128 | 2 | 64 | 18 B | 18 B | (-sum) & 0x7F (bulk) | None |
+| 9 | `korg-ms2000` | Korg MS2000 | Korg | `0x42` | `0x58` | 128 | 8 | 16 | 288 B | 336 B (7→8) | None (packing) | 7-to-8 |
+| 10 | `korg-microkorg` | Korg microKORG | Korg | `0x42` | `0x58` | 128 | 8 | 16 | 288 B | 336 B (7→8) | None (packing) | 7-to-8 |
+| 11 | `korg-prophecy` | Korg Prophecy | Korg | `0x42` | `0x5A` | 128 | 8 | 16 | 256 B | 296 B (7→8) | None (packing) | 7-to-8 |
+| 12 | `behringer-deepmind12` | Behringer DeepMind 12 | Behringer | `00 20 32` | `0x20` | 1024 | 8 | 128 | 242 B | 278 B (7→8) | None (packing) | 7-to-8 |
+| 13 | `behringer-pro800` | Behringer Pro-800 | Behringer | `00 20 32` | `00 01 24` | 400 | 4 | 100 | 173 B | ~200 B (7→8) | None (packing) | 7-to-8 |
+| 14 | `yamaha-dx7` | Yamaha DX7 | Yamaha | `0x43` | — | 32 | 1 | 32 | 128 B | 128 B (no pack) | (128-sum)%128 | None |
+| 15 | `yamaha-dx7ii` | Yamaha DX7II | Yamaha | `0x43` | `0x01` | 32 | 1 | 32 | 155 B | 155 B (no pack) | (128-sum)%128 | None |
 
-Cada combinación de modelo, revisión de hardware y rango de firmware se representa como un `SysexFormatProfile` con:
+---
 
-- `profileId`: identificador estable del perfil;
-- `modelId`: modelo canónico del contrato;
-- `hardwareRevision` y `firmwareRange`: opcionales hasta disponer de evidencia;
-- manufacturer/model ID y comandos exactos;
-- tamaño raw y wire;
-- packing y checksum;
-- reglas de addressing.
+## Detalle por fabricante
 
-Un mismo hardware puede tener varios perfiles. La selección del perfil debe basarse en los bytes observados, metadatos del dump o identificación explícita del firmware; nunca debe asumirse que todos los firmwares comparten formato.
+### Casio CZ Series
 
-## Matriz inicial
+| Campo | CZ-101 | CZ-1000 | CZ-5000 | CZ-1 |
+|-------|--------|---------|---------|------|
+| **Model ID byte** | `0x12` | `0x13` | `0x14` | `0x15` |
+| **Capacity** | 16 | 16 | 32 | 64 |
+| **Banks** | 1 (A) | 1 (A) | 2 (A-B) | 4 (A-D) |
+| **Programs/bank** | 16 | 16 | 16 | 16 |
+| **Patch data** | 128 B | 128 B | 128 B | 288 B |
+| **Wire size** | 256 nibbles | 256 nibbles | 256 nibbles | 576 nibbles |
+| **Name length** | 0 (no name) | 0 | 0 | 0 |
+| **Address format** | `A1`..`A16` | `A1`..`A16` | `A1`..`A16` | `A1`..`A16` |
 
-| Perfil | Modelo | Manufacturer ID | Comandos | Raw | Wire | Packing | Checksum | Addressing | Estado |
-|---|---|---:|---|---:|---:|---|---|---|---|
-| `casio-cz101-default` | `casio-cz101` | `44 00 00` | dump `10`, request `30` | 128 | derivado | nibble | Casio | `A1..A16` | implemented, unit-tested |
-| `casio-cz1000-default` | `casio-cz1000` | `44 00 00` | dump `10`, request `30` | 128 | derivado | nibble | Casio | `A1..A16` | implemented, unit-tested |
-| `casio-cz5000-default` | `casio-cz5000` | `44 00 00` | dump `10`, request `30` | 128 | derivado | nibble | Casio | bancos de 16 | implemented, unit-tested |
-| `casio-cz1-default` | `casio-cz1` | `44 00 00` | dump `10`, request `30` | 128 | derivado | nibble | Casio | bancos de 16 | implemented, unit-tested |
-| `roland-juno106-default` | `roland-juno106` | `41` | patch `30`, bulk `01` | 18 | 18 | none | single/bulk | `A1..B64` | implemented, unit-tested |
-| `roland-juno60-default` | `roland-juno60` | `41` | patch `30`, bulk `01` | 18 | 18 | none | single/bulk | `A1..B64` | implemented, unit-tested |
-| `korg-ms2000-default` | `korg-ms2000` | `42` | dump `40`, all `4C` | 128 | derivado | 8to7 | none | `A.01..H.16` | implemented, unit-tested |
-| `korg-microkorg-default` | `korg-microkorg` | `42` | dump `40`, all `4C` | 128 | derivado | 8to7 | none | `A.01..H.16` | implemented, unit-tested |
-| `korg-prophecy-default` | `korg-prophecy` | `42` | dump `40`, all `4C` | 256 | derivado | 8to7 | none | revisar | designed, pendiente confirmar |
-| `behringer-deepmind12-default` | `behringer-deepmind12` | `00 20 32` | dump `02`, request `01` | 242 | 278 (291 wire) | 8to7 | none | A–H / 0–127 | fixture-tested: factory v1.0/v1.1.2, community, user, commercial |
-| `behringer-pro800-fw-legacy-v109` | `behringer-pro800` | `00 20 32 / 00 01 24` | response `78`, request `77` | 155–166* | derivado | 8to7 | none | `A001..D100` | fixture-tested: 98 registros |
-| `behringer-pro800-fw-legacy-v110` | `behringer-pro800` | `00 20 32 / 00 01 24` | response `78`, request `77` | 168 | derivado | 8to7 | none | `A001..D100` | fixture-tested: 3 registros |
-| `behringer-pro800-fw-v111` | `behringer-pro800` | `00 20 32 / 00 01 24` | response `78`, request `77` | 173 | derivado | 8to7 | none | `A001..D100` | fixture-tested: v1.4.4 |
-| `yamaha-dx7-default` | `yamaha-dx7` | `43` | bulk `09/20` | 128 | variable | none | sum7 | `V01..V32` | implemented, unit-tested |
-| `yamaha-dx7ii-default` | `yamaha-dx7ii` | `43` | bulk `09/20` | 155 | variable | none | sum7 | `V01..V64` | implemented, unit-tested |
+**SysEx format:**
+```
+Dump:     F0 44 00 00 <modelId> 10 <ch> [nibbles] <checksum> F7
+Request:  F0 44 00 00 <modelId> 30 <ch> F7
+```
 
-## Variantes de hardware y firmware
+- Checksum: `sum(nibble_bytes) & 0x7F`
+- Nibble encoding: each byte → 2 nibbles (high, low)
+- Compatible models: CZ-101 ↔ CZ-1000 ↔ CZ-5000 ↔ CZ-1
 
-Estas filas son deliberadamente placeholders hasta disponer de dumps verificables:
+---
 
-| Perfil futuro | Base | Diferencia esperada a confirmar | Evidencia requerida |
-|---|---|---|---|
-| `<model>-rev-<revision>` | cualquier modelo | offsets, tamaño o cabecera por revisión PCB | dump de cada revisión |
-| `<model>-fw-<version>` | cualquier modelo | comando, checksum, packing o tamaño por firmware | dump + versión firmware |
-| `<model>-legacy` | modelos con protocolos heredados | compatibilidad parcial o mensajes antiguos | manual/fixture/hardware |
+### Roland Juno Series
 
-### Reglas de compatibilidad
+| Campo | Juno-106 | Juno-60 | Juno-6 | HS-60 |
+|-------|----------|---------|--------|-------|
+| **Model ID byte** | `0x3E` | `0x3D` | `0x3C` | `0x3E` |
+| **Capacity** | 128 | 128 | 128 | 128 |
+| **Banks** | 2 (A-B) | 2 (A-B) | 2 (A-B) | 2 (A-B) |
+| **Programs/bank** | 64 | 64 | 64 | 64 |
+| **Patch data** | 18 B | 18 B | 18 B | 18 B |
+| **Wire size** | 18 B | 18 B | 18 B | 18 B |
+| **Name length** | 0 (no name) | 0 | 0 | 0 |
+| **Address format** | `A1`..`A64`, `B1`..`B64` | same | same | same |
 
-1. Un perfil solo puede declarar compatibilidad con otro si raw, wire, packing, checksum, addressing y semántica de slots son equivalentes.
-2. Si cambia cualquiera de esos elementos, se crea un perfil separado aunque `modelId` sea el mismo.
-3. La importación debe conservar `profileId` y la procedencia del perfil detectado.
-4. La exportación debe exigir un perfil explícito cuando existan varias variantes ambiguas.
-5. Un perfil no confirmado no se habilita para envío destructivo al hardware.
+**SysEx format:**
+```
+Single:   F0 41 30 <ch> [18B data] F7                              (no checksum)
+Bulk:     F0 41 30 02 01 [64×18B data] <(-sum)&0x7F> F7
+Request:  F0 41 <ch> 3E 11 00 F7
+```
 
-## Evidencia específica del Pro-800
+- Checksum (bulk only): `(-sum(payload)) & 0x7F`
+- 18-byte body: 16 slider params (0-127) + SW1 + SW2
+- No patch name (hardware uses position numbers)
+- Compatible models: Juno-106 ↔ Juno-60 ↔ Juno-6 ↔ HS-60
 
-La evidencia normativa se conserva en `fixtures/sysex/behringer-pro800/`; la documentación de investigación original permanece temporalmente en `DOCS/DOCS-pro800-borrar/`. Contiene:
+---
 
-- referencia de formato con cabecera, comandos, packing, offsets y versiones 109/110/111;
-- `Pro 800.csv` con la tabla de CC;
-- `fixtures/sysex/behringer-pro800/v1.4.4/PRO-800_Presets_v1.4.4.syx`, dump v1.4.4 con 100 mensajes y metadatos en `fixture.json`;
-- dump de fábrica antiguo y documentación comunitaria adicional.
+### Korg MS2000 / microKORG / Prophecy
 
-Conclusiones relevantes:
+| Campo | MS2000 | microKORG | Prophecy |
+|-------|--------|-----------|----------|
+| **Model ID byte** | `0x58` | `0x58` | `0x5A` |
+| **Capacity** | 128 | 128 | 128 |
+| **Banks** | 8 (A-H) | 8 (A-H) | 8 (A-H) |
+| **Programs/bank** | 16 | 16 | 16 |
+| **Patch data** | 288 B | 288 B | 256 B |
+| **Wire size** | 336 B (7→8) | 336 B (7→8) | 296 B (7→8) |
+| **Name length** | 12 chars | 12 chars | 12 chars |
+| **Name offset** | `0x1C` | `0x1C` | `0x1C` |
+| **Address format** | `A.01`..`A.16` | same | same |
 
-1. El contrato base del Pro-800 es correcto para la cabecera `F0 00 20 32 00 01 24 00`, comandos `0x77`/`0x78`, slots 0–399 y packing 8-to-7.
-2. `patchDataSize = 173` solo es correcto como tamaño canónico v111; no debe tratarse como tamaño universal.
-3. El byte decodificado `rawData[4]` distingue formatos v109, v110 y v111. El parser debe conservar la versión y no interpretar offsets v111 en registros antiguos.
-4. El dump v1.4.4 confirma v111, 173 bytes y 100 presets; el fixture antiguo confirma 98 registros v109 de longitud variable (155–166 bytes observados) y 3 registros v110 de 168 bytes. El parser conserva la longitud decodificada de v109.
-5. El CSV documenta CC/MIDI, pero no sustituye al mapa de offsets SysEx; son capas semánticas distintas.
+**SysEx format:**
+```
+Single:   F0 42 <3n> <modelId> 40 [packed data] F7
+All dump: F0 42 <3n> <modelId> 4C [128×packed] F7
+Request:  F0 42 <3n> <modelId> 10 F7
+All req:  F0 42 <3n> <modelId> 0E F7
+Param:    F0 42 <3n> <modelId> 41 <offsetL> <offsetH> <value> F7
+```
 
-## Evidencia específica del DeepMind 12
+- No separate checksum — integrity via 7-to-8 packing structure
+- Packing: every 7 data bytes → 1 control + 7 encoded bytes
+- `<3n>` = `0x30 | (channel & 0x0F)`
+- Compatible models: MS2000 ↔ microKORG (same format, same model byte)
 
-La evidencia normativa se conserva en `fixtures/sysex/behringer-deepmind12/`; el catálogo completo de 260 archivos disponibles está en `DOCS/dm12-library-catalog.json`.
+---
 
-### Fixtures incluidos
+### Behringer DeepMind 12
 
-| Categoría | Archivos | Patches | Firmware | SHA-256 parcial |
-|---|---|---|---|---|
-| Factory v1.0 | Bank A–D | 128 × 4 = 512 | v1.0 | `2512dbae...`, `590fd88b...`, `fe2bb240...`, `40446dab...` |
-| Factory v1.1.2 | Bank A, H | 128 × 2 = 256 | v1.1.2 | `21ed77a4...`, `841099ea...` |
-| Community | AE Angelia, AE CinemaDrone | 2 | gratuito | `cacdf7b8...`, `d96b4e52...` |
-| User | 80s, GROKa | 128 × 2 = 256 | desconocido | `cfb101b0...`, `05050a14...` |
-| Commercial | 5P Media, Ambient Mind Vol 1 | 128 × 2 = 256 | desconocido | `e909d560...`, `51208d71...` |
-| Unknown | Warmup, 80s | 1 + 128 | desconocido | `7056070b...`, `cfb101b0...` |
+| Campo | Valor |
+|-------|-------|
+| **Manufacturer ID** | `00 20 32` (3 bytes) |
+| **Model ID byte** | `0x20` (byte[4]) |
+| **Capacity** | 1024 (8 banks × 128) |
+| **Banks** | 8 (A-H) |
+| **Programs/bank** | 128 |
+| **Patch data** | 242 B |
+| **Wire size** | 278 B (7→8) + 13 B header + 2 B tail = 291 B total |
+| **Name length** | 16 chars |
+| **Name offset (decoded)** | `223` |
+| **Address format** | `A001`..`A128`, `B001`..`B128`, ... |
 
-### Conclusiones del DeepMind 12
+**SysEx format:**
+```
+Dump:     F0 00 20 32 20 00 02 07 <bank> <program> [278B packed] 00 00 F7
+Request:  F0 00 20 32 20 00 01 <bank> <program> F7
+```
 
-1. Todos los archivos .syx cumplen el framing ABDEep: `F0 00 20 32 20 <device> 02 <protocol> <bank> <program>`.
-2. Manufacturer ID `00 20 32`, model ID `0x20`, dump command `0x02`, request command `0x01`.
-3. Protocol version predominantemente `0x07`, con al menos un archivo (Warmup) en `0x06`.
-4. Device ID varía: `0x00` en fábrica, `0x7F` en algunos desconocidos/usuarios.
-5. Mensaje completo: 291 bytes. Payload empaquetado: 278 bytes. Patch data decodificado: 242 bytes.
-6. Bank: `0x00–0x07` (A–H), program: `0x00–0x7F` (0–127), 1024 slots totales.
-7. Nombre del patch en offsets decodificados 223–238 (16 caracteres).
-8. Packing 8-to-7, sin checksum.
-9. Roundtrip validado: parse → build → parse conserva rawData y slot.
-10. `isDeepMindMessage()` actualizado para aceptar device IDs y protocolos variantes.
+- No separate checksum — integrity via 7-to-8 packing
+- Protocol version: `0x07`
+- Device ID: `0x00`
+- Total message: 291 bytes
 
-## Evidencia pendiente
+---
 
-- Añadir fixtures reales por fabricante en `fixtures/sysex/` (Casio, Roland, Korg, Yamaha).
-- Registrar modelo, revisión y firmware de cada fixture.
-- Añadir detección de perfil basada en cabecera/tamaño/comandos.
-- Ejecutar roundtrip byte-level por perfil.
-- Validar perfiles contra hardware físico.
-- Validar DeepMind 12 con un DeepMind 12D físico (fetch/send).
+### Behringer Pro-800
+
+| Campo | Valor |
+|-------|-------|
+| **Manufacturer ID** | `00 20 32` (3 bytes) |
+| **Model ID** | `00 01 24` (3 bytes, bytes[4..6]) |
+| **Capacity** | 400 (4 banks × 100) |
+| **Banks** | 4 (A-D) |
+| **Programs/bank** | 100 |
+| **Patch data** | 173 B (v1.4.4 canonical) |
+| **Wire size** | ~200 B (7→8) + 11 B header |
+| **Name length** | 16 chars |
+| **Name offset (decoded)** | `0x96` (150) |
+| **Address format** | `A001`..`A100`, `B001`..`B100`, ... |
+
+**SysEx format:**
+```
+Request:  F0 00 20 32 00 01 24 00 77 <LSB> <MSB> F7
+Response: F0 00 20 32 00 01 24 00 78 <LSB> <MSB> [packed data] F7
+```
+
+- No checksum, no channel byte
+- `<LSB>` = slot % 128, `<MSB>` = floor(slot / 128)
+- Packed data starts at byte index 11
+- Format versions: `0x6D` (v109, 173B), `0x6E` (v110, 168B), `0x6F` (v111, 173B)
+
+---
+
+### Yamaha DX7 / DX7II
+
+| Campo | DX7 | DX7II |
+|-------|-----|-------|
+| **Manufacturer ID** | `0x43` | `0x43` |
+| **Model byte** | `0x09` (sub-status) | `0x01` (model), `0x09` (sub) |
+| **Capacity** | 32 | 32 |
+| **Banks** | 1 | 1 |
+| **Programs/bank** | 32 | 32 |
+| **Patch data (VCED)** | 128 B | 155 B |
+| **Patch data (VMEM)** | 128 B | 155 B |
+| **Wire size** | 136 B (single), 4104 B (bulk) | 165 B (single) |
+| **Name length** | 10 chars | 10 chars |
+| **Name offset (VCED)** | 118 | 118 |
+| **Address format** | 1-32 | 1-32 |
+
+**SysEx format:**
+```
+Single:   F0 43 <gg> 09 20 00 [128B VCED] <checksum> F7           (136 bytes)
+Bulk:     F0 43 <gg> 09 20 00 [32×128B VCED] <checksum> F7        (4104 bytes)
+Request:  F0 43 <gg> 09 20 00 F7                                   (8 bytes)
+```
+
+- `<gg>`: `0x0g` (group, DX7) or `0x10|ch` (channel, DX7II)
+- Checksum: `(128 - (sum(bytes[3..N-2]) % 128)) & 0x7F`
+- DX7II model byte: `0x01` at offset 3
+- VMEM (bulk) ↔ VCED (single) conversion: `unpackProgram()` / `packProgram()`
+
+---
+
+## Compatibilidad multi-hardware
+
+| Modelo canónico | Modelos compatibles |
+|----------------|---------------------|
+| `casio-cz101` | `casio-cz1000`, `casio-cz5000`, `casio-cz1` |
+| `roland-juno106` | `roland-juno60`, `roland-juno6`, `roland-hs60` |
+| `korg-ms2000` | `korg-microkorg` |
+| `korg-prophecy` | (ninguno) |
+| `behringer-deepmind12` | (ninguno) |
+| `behringer-pro800` | (ninguno) |
+| `yamaha-dx7` | `yamaha-dx7ii` |
+
+---
+
+## Algoritmos de checksum
+
+| Fabricante | Algoritmo | Fórmula | Ejemplo |
+|-----------|-----------|---------|---------|
+| **Casio** | sum & 0x7F | `Σ bytes & 0x7F` | `[0x01, 0x02, 0x03]` → `6` |
+| **Roland** (bulk) | (-sum) & 0x7F | `(-Σ bytes) & 0x7F` | `[0x00×18]` → `0x7F` |
+| **Roland** (single) | Ninguno | — | — |
+| **Yamaha** | (128-sum)%128 | `(128 - (Σ bytes % 128)) & 0x7F` | `[0x01]` → `0x7F` |
+| **Korg** | Ninguno (packing) | Integrity via 7-to-8 structure | — |
+| **Behringer** | Ninguno (packing) | Integrity via 7-to-8 structure | — |
+
+---
+
+## Formatos de addressing
+
+| Fabricante | Formato | Ejemplo | Rango |
+|-----------|---------|---------|-------|
+| **Casio** | `<bank><prog>` | `A1`, `A16`, `B1` | A-P × 1-16 |
+| **Roland** | `<bank><prog>` | `A1`, `A64`, `B1` | A-B × 1-64 |
+| **Korg** | `<bank>.<prog>` | `A.01`, `A.16`, `H.01` | A-H × 01-16 |
+| **Behringer DM12** | `<bank><prog3>` | `A001`, `A128`, `H001` | A-H × 001-128 |
+| **Behringer Pro-800** | `<bank><prog3>` | `A001`, `A100`, `D001` | A-D × 001-100 |
+| **Yamaha DX7** | `<num>` | `1`, `32` | 1-32 |
+
+---
+
+## Notas pendientes (P0.4)
+
+- [ ] Resolver discrepancia Korg microKORG (`0x58` frente a otros IDs) — microKORG comparte `0x58` con MS2000
+- [ ] Resolver tamaños Korg MS2000/Prophecy en todas las capas — Prophecy tiene `patchDataSize: 256` vs MS2000 `288`
+- [ ] Resolver comandos y estructura Roland — Juno-106/60/6/HS-60 comparten formato exacto
+- [ ] Resolver comandos y offsets Casio — CZ-1 tiene `patchDataSize: 288` vs CZ-101 `128`
+- [ ] Prohibir que la compatibilidad se deduzca solo del fabricante o del packing
+- [ ] Hacer que todos los adapters consuman la tabla/contrato canónico

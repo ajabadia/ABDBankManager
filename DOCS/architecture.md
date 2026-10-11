@@ -9,6 +9,12 @@ Un **sistema universal de gestión de bancos y patches** para todos los proyecto
 3. **Componente WebView2/WebUI** reutilizable como panel modal dentro de los plugins JUCE.
 4. **Formato nativo `.abdbank`** para intercambio entre proyectos y persistencia en DAW.
 
+> **Modelo de transporte (hardware y synths virtuales):** este documento describe el sistema completo
+> (capas, contratos, adapters y migración). El modelo concreto de **cómo viajan los presets** —una
+> descripción (`ModelContract`) y dos transportes, con los tres modos de uso (standalone sobre
+> hardware, synth propio y híbrido)— y qué falta hoy para que un synth virtual se gestione igual que
+> un equipo físico está en `DOCS/BANK_MANAGER_TRANSPORT_MODEL.md`.
+
 ---
 
 ## 2. Problemas que Resuelve
@@ -20,7 +26,7 @@ Un **sistema universal de gestión de bancos y patches** para todos los proyecto
 | Los formatos de importación (SysEx Casio, Roland, Korg, DeepMind) están hardcoded en cada proyecto | Sistema de **Import Adapters** enchufables, uno por formato de hardware |
 | No existe dump bidireccional unificado (fetch from synth / dump to synth) | Capa **HardwareLink** con contratos MIDI por fabricante |
 | Sin formato propio — los patches viven en localStorage o en ValueTree del DAW sin portabilidad | Formato `.abdbank` (JSON + binario empaquetado) exportable e importable |
-| La app JUCE embebe la lógica de presets pero la WebUI no puede funcionar sin el motor C++ | Separación completa: la librería JS es 100% independiente del motor DSP |
+| La app JUCE embebe la lógica de presets pero la WebUI no puede funcionar sin el motor C++ | Separación completa: la librería JS es 100% independiente del motor DSP; el transporte C++↔WebUI usa un adaptador JSON por callbacks sin depender de WebView2 |
 
 ---
 

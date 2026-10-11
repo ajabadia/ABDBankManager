@@ -8,17 +8,38 @@ export default [
       '**/node_modules/**',
       '**/GITS/**',
       '**/build/**',
+      '**/build-*/**',
+      '**/*.WebView2/**',
       '**/dist/**',
       '**/vendor/**',
       '**/*.gen.js',
       '**/*.gen.ts',
+      'WebUI/src/contracts/gen/_extractRegistryData.mjs',
+      'WebUI/src/contracts/gen/_extractorBundle.js',
+      'WebUI/src/components/contracts/gen/_extractRegistryData.mjs',
+      'WebUI/src/components/contracts/gen/_extractorBundle.js',
       '**/*.min.js',
-      '**/*.map'
+      '**/*.map',
+      'DOCS/librerías yamaha dx7/**',
+      'analyze_dx7.mjs',
+      'check_names.mjs',
+      'debug_contract.mjs',
+      'debug_format.mjs',
+      'deep_debug.mjs',
+      'scripts/fetch-fm1-dump.mjs',
+      'scripts/try-fm1-fetch.mjs'
     ]
   },
-  js.configs.recommended,
   {
-    files: ['**/*.js'],
+    ...js.configs.recommended,
+    files: ['**/*.js', '**/*.mjs'],
+    languageOptions: {
+      ...js.configs.recommended.languageOptions,
+      globals: { ...globals.browser, ...globals.node, ...globals.vitest }
+    }
+  },
+  {
+    files: ['**/*.js', '**/*.mjs'],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node, ...globals.vitest },
       sourceType: 'module',

@@ -113,7 +113,7 @@ describe('Korg MS2000 Import Adapter — Parse MS2000 fixtures', () => {
       expect(result.patches).toHaveLength(16);
     });
 
-    it(`MS2000_Bank_${bank}: each patch has 288-byte rawData`, async () => {
+    it(`MS2000_Bank_${bank}: each patch has 254-byte rawData (real program size)`, async () => {
       const { KorgMs2000ImportAdapter } = await getAdapter();
       const a = new KorgMs2000ImportAdapter();
       const data = new Uint8Array(readFileSync(join(FIXTURES.ms2000, `MS2000_Bank_${bank}.syx`)));
@@ -121,7 +121,7 @@ describe('Korg MS2000 Import Adapter — Parse MS2000 fixtures', () => {
 
       for (const p of result.patches) {
         expect(p.rawData).toBeInstanceOf(Uint8Array);
-        expect(p.rawData.length).toBe(288);
+        expect(p.rawData.length).toBe(254);
       }
     });
 
@@ -367,5 +367,114 @@ describe('Korg MS2000 — Edge cases', () => {
     const result = a.parse(combined, 'mixed.syx');
     expect(result.success).toBe(true);
     expect(result.patches).toHaveLength(2);
+  });
+});
+
+// ─── Canal 16 por todas las rutas de serialización ───
+//
+// Regresión: el adapter enmascaraba el canal antes de delegar en el contrato
+// (`opts.midiChannel & 0x0F`), y como `16 & 0x0F === 0` el canal 16 se colapsaba en el 1
+// —el 16 quedaba inalcanzable—. El contrato ya acota a 1..16 (`korgChannelByte`), así que
+// el adapter pasa el canal tal cual. Estos tests fijan el byte `3n` en **todas** las rutas
+// que serializan, no solo en la que ya cubría el contrato.
+
+describe('Korg MS2000 — Channel 16 on every serialization route (no collapse into channel 1)', () => {
+  const rawPatch = () => {
+    const d = new Uint8Array(288);
+    for (let i = 0; i < d.length; i++) d[i] = i & 0x7F;
+    return d;
+  };
+  const patchFor = (hardwareId) => ({
+    rawData: rawPatch(),
+    name: 'Test',
+    originAddress: 'A.01',
+    hardwareIds: [hardwareId],
+  });
+
+  // El byte que el MS2000 lee como canal 16: 0x3F (y nunca el 0x30 del canal 1).
+  const CHANNEL_16 = 0x3F;
+  const CHANNEL_1 = 0x30;
+
+  it('ExportAdapter.serialize (MS2000) puts 0x3F in the 3n byte, not 0x30', async () => {
+    const { KorgMs2000ExportAdapter } = await getAdapter();
+    const a = new KorgMs2000ExportAdapter();
+
+    const sysex = a.serialize([patchFor('korg-ms2000')], 'Test', { midiChannel: 16 });
+    expect(sysex[0]).toBe(0xF0);
+    expect(sysex[1]).toBe(0x42);
+    expect(sysex[2]).toBe(CHANNEL_16);
+    expect(sysex[2]).not.toBe(CHANNEL_1);
+    expect(sysex[3]).toBe(0x58);
+  });
+
+  it('ExportAdapter.serialize (microKORG) uses the same 3n byte', async () => {
+    const { KorgMs2000ExportAdapter } = await getAdapter();
+    const a = new KorgMs2000ExportAdapter();
+
+    const sysex = a.serialize([patchFor('korg-microkorg')], 'Test', { midiChannel: 16 });
+    expect(sysex[2]).toBe(CHANNEL_16);
+    expect(sysex[3]).toBe(0x58);
+  });
+
+  it('ExportAdapter.serialize (Prophecy legacy retag) keeps channel 16 and retags the model byte', async () => {
+    const { KorgMs2000ExportAdapter } = await getAdapter();
+    const a = new KorgMs2000ExportAdapter();
+
+    const sysex = a.serialize([patchFor('korg-prophecy')], 'Test', { midiChannel: 16 });
+    expect(sysex[2]).toBe(CHANNEL_16);
+    expect(sysex[3]).toBe(0x5A);
+  });
+
+  it('HardwareLink.buildPatchDump keeps channel 16', async () => {
+    const { KorgMs2000HardwareLink } = await getAdapter();
+    const hw = new KorgMs2000HardwareLink();
+
+    const msgs = hw.buildPatchDump(patchFor('korg-ms2000'), 15, 16);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0][2]).toBe(CHANNEL_16);
+    expect(msgs[0][4]).toBe(0x40);
+  });
+
+  it('HardwareLink.buildBankDump keeps channel 16 on every message of the bank', async () => {
+    const { KorgMs2000HardwareLink } = await getAdapter();
+    const hw = new KorgMs2000HardwareLink();
+    const patches = Array.from({ length: 16 }, () => patchFor('korg-ms2000'));
+
+    const msgs = hw.buildBankDump(patches, 16);
+    expect(msgs).toHaveLength(16);
+    for (const msg of msgs) expect(msg[2]).toBe(CHANNEL_16);
+  });
+
+  it('HardwareLink.buildDumpRequest keeps channel 16 for a slot and for the whole bank', async () => {
+    const { KorgMs2000HardwareLink } = await getAdapter();
+    const hw = new KorgMs2000HardwareLink();
+
+    expect(Array.from(hw.buildDumpRequest(0, 16))).toEqual([0xF0, 0x42, CHANNEL_16, 0x58, 0x10, 0xF7]);
+    expect(Array.from(hw.buildDumpRequest('all', 16))).toEqual([0xF0, 0x42, CHANNEL_16, 0x58, 0x0E, 0xF7]);
+  });
+
+  it('the whole 1..16 range is addressable: 16 distinct bytes, none shared', async () => {
+    const { KorgMs2000ExportAdapter } = await getAdapter();
+    const a = new KorgMs2000ExportAdapter();
+
+    const bytes = [];
+    for (let channel = 1; channel <= 16; channel++) {
+      bytes.push(a.serialize([patchFor('korg-ms2000')], 'Test', { midiChannel: channel })[2]);
+    }
+    expect(bytes[0]).toBe(CHANNEL_1);
+    expect(bytes[15]).toBe(CHANNEL_16);
+    expect(new Set(bytes).size).toBe(16);
+    // El caso exacto de la regresión: 16 y 1 no pueden compartir byte.
+    expect(bytes[15]).not.toBe(bytes[0]);
+  });
+
+  it('an out-of-range channel clamps to 1 / 16 instead of wrapping into another channel', async () => {
+    const { KorgMs2000ExportAdapter } = await getAdapter();
+    const a = new KorgMs2000ExportAdapter();
+
+    const below = a.serialize([patchFor('korg-ms2000')], 'Test', { midiChannel: 0 });
+    const above = a.serialize([patchFor('korg-ms2000')], 'Test', { midiChannel: 17 });
+    expect(below[2]).toBe(CHANNEL_1);
+    expect(above[2]).toBe(CHANNEL_16);
   });
 });

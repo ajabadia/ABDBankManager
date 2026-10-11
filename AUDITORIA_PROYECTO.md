@@ -1,587 +1,239 @@
 # Auditoría del proyecto ABD Universal Bank Manager
 
-> Fecha de auditoría: 2026-08-27  
-> Estado evaluado: rama `main`, versión `0.1.0`  
-> Alcance: documentación, arquitectura, calidad de código, funcionalidad, persistencia, SysEx/MIDI, WebUI, C++/JUCE, pruebas, CI y preparación para producción.
+> **Auditoría de seguimiento** del snapshot del 2026-08-27.
+> Fecha de esta revisión: **2026-08-31** · rama `main` · versión `0.1.0`.
+>
+> Esta revisión contrasta el roadmap y las afirmaciones de `HANDOFF.md`, `PLAN_MEJORAS.md` y `CHANGELOG.md` con el código y las validaciones ejecutadas. Los estados se clasifican como: **implementado**, **probado**, **fixture-tested**, **hardware-tested** y **pendiente**.
 
 ---
 
-## 1. Veredicto ejecutivo
+## 1. Veredicto ejecutivo actual
 
-El proyecto tiene una **base arquitectónica razonable y una documentación bastante transparente**, pero actualmente es un **prototipo avanzado / MVP parcial**, no una solución terminada ni preparada para producción.
+El proyecto ha avanzado de forma sustancial desde la auditoría anterior: ya existe un core inmutable con búsqueda, persistencia Dexie con migraciones y backup/restore, adapters SysEx para varios fabricantes, fixtures reales y un standalone Tauri con persistencia SQLite y transporte MIDI.
 
-| Área | Evaluación |
-|---|---:|
-| Documentación | 7/10 |
-| Arquitectura conceptual | 7/10 |
-| Calidad del código | 5/10 |
-| Funcionalidad real | 4/10 |
-| Persistencia | 5/10 |
-| SysEx/MIDI | 3/10 |
-| WebUI | 5/10 |
-| C++/JUCE | 3/10 |
-| Testing | 5/10 |
-| Preparación para producción | 2–3/10 |
+Sin embargo, **todavía no es correcto considerarlo terminado ni listo para producción**. La evidencia actual muestra tres riesgos principales:
 
-La documentación reconoce muchas carencias, lo cual es positivo. Sin embargo, existe una diferencia relevante entre:
+1. **La validación local está verde**: typecheck, lint y tests pasan; ESLint termina con 0 errores y 0 warnings.
+2. **La integración host del bridge C++ sigue pendiente**: el core ya serializa `Library/Bank/Patch` y el adaptador JSON ya traduce IPC por callback, pero falta conectarlo a la WebView concreta de cada plugin.
+3. **La integración universal sigue incompleta**: el registry ya registra los adapters y HardwareLinks disponibles, pero no todos los 17 modelos tienen cobertura de hardware y el standalone aún necesita cerrar la integración funcional completa.
 
-- interfaces diseñadas;
-- implementaciones conceptuales;
-- adaptadores que compilan;
-- funcionalidad real validada con hardware y formatos reales.
+### Scores revisados
 
-En varios puntos se presenta como implementado algo que en realidad es parcial o inconsistente.
+| Área | 2026-08-27 | 2026-08-31 | Evaluación |
+|---|---:|---:|---|
+| Documentación | 7/10 | 7/10 | Buena, pero contiene estados optimistas y duplicación arquitectónica |
+| Arquitectura conceptual | 7/10 | 7/10 | Mejorada con core inmutable y contratos canónicos; integración aún parcial |
+| Calidad del código | 5/10 | 7/10 | Typecheck y lint verdes; sin warnings ESLint en el checkout actual |
+| Funcionalidad real | 4/10 | 6/10 | CRUD, búsqueda, backup y varios adapters funcionan; falta cierre vertical universal |
+| Persistencia | 5/10 | 7/10 | Dexie y SQLite tienen cobertura, aunque hay que separar evidencia real de claims |
+| SysEx/MIDI | 3/10 | 6/10 | Fixtures y transportes fake/verticales; hardware físico limitado |
+| WebUI | 5/10 | 7/10 | Build funciona y está autocontenida; queda deuda de integración nativa |
+| C++/JUCE | 3/10 | 6/10 | ValueTree e IPC del core implementados; integración con plugins pendiente |
+| Testing | 5/10 | 7/10 | 851 tests pasan en 49 archivos, sin skips; faltan pruebas físicas y WebView2 real |
+| Preparación para producción | 2–3/10 | 4/10 | No apta todavía: integración de host, pluginval, release y validación física incompletos |
 
----
+**Cumplimiento estimado:**
 
-## 2. Ajuste a lo solicitado
-
-### 2.1. Implementado o parcialmente implementado
-
-- Estructura inicial del monorepo.
-- Documentación de arquitectura, roadmap y handoff.
-- ModelContracts para 15 variantes de hardware.
-- Registro declarativo de contratos.
-- Persistencia Dexie con migraciones.
-- CRUD básico de bancos y patches en la WebUI.
-- Formato ZIP `.abdbank`.
-- Formato `.abdlibrary`.
-- Validación con Zod.
-- Gestión de bancos de fábrica.
-- Límite de capacidad por banco en determinadas rutas.
-- Fingerprinting SHA-256 en una utilidad independiente.
-- Cola MIDI con rate limiting y reintentos.
-- Adaptadores TypeScript con framing, packing y checksums conceptuales.
-- Tests unitarios para modelos, registry, utilidades SysEx y reglas de negocio.
-
-### 2.2. No terminado o no validado
-
-- La aplicación standalone Tauri no está implementada.
-- El bridge C++ ↔ WebUI es un no-op.
-- `toValueTree()` solo guarda dos índices.
-- No existe persistencia completa de la librería en C++.
-- No hay comunicación MIDI real integrada en la aplicación.
-- No hay migración efectiva de ABDCZ101, ABDEep, ABDJUNiO601 ni ABDMS2000.
-- No existe búsqueda pura completa en `packages/core`.
-- No existe el core inmutable de operaciones definido en la arquitectura.
-- El fingerprinting no está integrado en el flujo principal de importación de la WebUI.
-- El auto-backup no se invoca antes de las migraciones.
-- La persistencia real está omitida en los tests.
-- Tape `.wav`, `.mid`, clipboard hex y JSON de terceros no están implementados como adapters completos.
-- La mayoría de los adapters de hardware no están integrados en un flujo operativo.
-- No hay pruebas contra dumps reales de hardware.
-- La CI contiene jobs declarados como válidos que en realidad son stubs o pueden pasar sin ejecutar validaciones relevantes.
-
-### 2.3. Estimación de cumplimiento
-
-- Si el objetivo era un **gestor universal funcional e integrable en plugins**: aproximadamente **35–45 %**.
-- Si el objetivo era una **base arquitectónica/prototipo**: aproximadamente **65–70 %**.
+- Base arquitectónica/MVP: **75–80 %**.
+- Gestor universal funcional e integrable en plugins: **50–60 %**.
+- Producto listo para producción: **menos de 40 %**.
 
 ---
 
-## 3. Verificación ejecutada
+## 2. Evidencia reproducible ejecutada
 
-### Tests
+Se ejecutaron estos comandos con `pnpm` (el proyecto declara `pnpm@9.0.0`):
 
-```text
-248 tests passed
-5 tests skipped
-16 test files passed
-1 test file skipped
-```
-
-La suite es un buen punto de partida, pero no cubre completamente persistencia, hardware real ni integración extremo a extremo.
-
-### Lint
+### 2.1. Generación — PASS
 
 ```text
-npm run lint → falla
+pnpm run generate → PASS
 ```
 
-Motivo: no existe configuración ESLint.
+Genera correctamente los artefactos de registry, contratos, core, ContractRegistry web y versión. La configuración de workspace ya es nativa de pnpm mediante `pnpm-workspace.yaml` y no aparece la advertencia histórica.
 
-### Build WebUI
+La generación informa `Parameters: 0`, `Sysex parameters: 0` y `CC parameters: 0`. Esto puede ser correcto por el diseño actual, pero debe documentarse como decisión y no confundirse con un registro de parámetros poblado.
+
+### 2.2. Typecheck — PASS
 
 ```text
-npm run build:webui → falla
+pnpm run typecheck → PASS
 ```
 
-Motivo: el script apunta a `WebUI/vite.config.js`, archivo que no existe.
+La forma multic-byte de `sysexModelId` usada por Pro-800 está formalizada en `ModelContract`; no quedan errores de TypeScript.
 
-### Generación
+### 2.3. Lint — PASS
 
 ```text
-npm run generate → funciona
+pnpm run lint → PASS
 ```
 
-Produce warnings de módulos ESM por falta de configuración coherente del tipo de módulo en los scripts.
+Resultado: **0 errores y 0 warnings**.
+
+Se eliminaron imports, variables y helpers no utilizados en `app.js`, componentes WebUI, tests y scripts auxiliares. No quedan errores de símbolos no definidos, bloques vacíos ni problemas de tipado `any` en la capa de contratos MIDI.
+
+### 2.4. Build WebUI — PASS CON WARNINGS DE VITE
+
+```text
+pnpm run build:webui → PASS
+```
+
+Resultado principal:
+
+```text
+dist/webui/index.html       43.92 kB
+assets/main-*.js            407.23 kB
+```
+
+Warnings:
+
+- uso de `__dirname` con el futuro `configLoader: native` de Vite;
+- scripts UMD de JSZip y FileSaver no pueden ser bundleados porque no tienen `type="module"`.
+
+El build ya no falla por falta de `vite.config.js`, por lo que ese hallazgo histórico está resuelto.
+
+### 2.5. Tests — PASS
+
+```text
+pnpm test -- --reporter=dot → PASS
+```
+
+Resultado actual:
+
+```text
+Test Files: 49 passed (49)
+Tests:      851 passed (851)
+Skipped:    0
+Errors:     0
+```
+
+La suite principal ya no incluye el proyecto externo DX7 bajo `DOCS/`, y los tests propios de `midiQueue` están activos. La cobertura sigue siendo principalmente unitaria/fixture-based: no sustituye pruebas físicas de cada hardware ni pruebas C++ del bridge.
+
+### 2.6. CI y package manager
+
+El workspace ya está declarado para pnpm mediante `pnpm-workspace.yaml` y la validación local principal es reproducible. Aun así, la CI contiene jobs parciales/stub que deben revisarse para que no presenten como validaciones completas el pluginval, WASM o auditorías de seguridad que todavía no ejecutan comprobaciones exhaustivas.
 
 ---
 
-## 4. Documentación
+## 3. Estado del roadmap contrastado
 
-### 4.1. Puntos positivos
+### Implementado y con evidencia razonable
 
-- README, roadmap, handoff y arquitectura están alineados en muchos aspectos.
-- Se indican explícitamente funcionalidades parciales.
-- Se documentan decisiones arquitectónicas importantes.
-- Se explica el principio de “asepsia”: el gestor trata los patches como blobs opacos.
-- Se documenta la distinción entre `.abdbank` y `.abdlibrary`.
-- Se especifican modelos, capacidades, addressing, compatibilidades y formatos.
-- `HANDOFF.md` es útil para continuar el trabajo.
+- Core inmutable en `packages/core/src/operations/library.js`.
+- Búsqueda pura en `packages/core/src/search/searchPatches.js`.
+- Fingerprinting SHA-256 centralizado en `packages/core/src/operations/fingerprint.js`.
+- Adaptador WebUI ↔ core mediante `libraryAdapter.js`.
+- Dexie con migraciones y pruebas con `fake-indexeddb`.
+- Backup/restore ZIP `.abdlibrary` con validación y pruebas de rollback.
+- Contrato canónico `PatchData`.
+- ModelContracts para 17 modelos según el registry generado.
+- Fixtures y roundtrips para Casio CZ, Roland Juno, Korg MS2000/microKORG/Prophecy, Behringer Pro-800/DeepMind 12 y Yamaha DX7.
+- Build WebUI offline/autocontenido.
+- Backend Tauri con SQLite y comandos MIDI declarados.
+- Tests fake para varios transportes MIDI y verticales Pro-800/DeepMind/DX7.
 
-### 4.2. Riesgos documentales
+### Parcial: no debe marcarse como terminado
 
-#### Documentación duplicada
+- **Tooling:** typecheck, suite principal y ESLint pasan sin errores ni warnings.
+- **Registry universal:** `createStandaloneRegistry()` registra 5 ImportAdapters, 5 ExportAdapters y 5 HardwareLinks únicos; `getCoverage()` expone la cobertura por modelo.
+- **Hardware:** existen transportes, contratos y fixtures; la validación física sigue limitada y el DeepMind 12D continúa pendiente.
+- **Standalone:** shell, SQLite, MIDI e import/export base existen; la vista multi-modelo y el cierre de todos los flujos siguen pendientes.
+- **Compatibilidad retro:** los tests de `.abdbank` v2 pasan.
+- **Fixtures Pro-800:** los fixtures v1.4.4 y legacy se resuelven y pasan sus tests.
+- **Validación de dominio:** hay validación central, pero el plan aún deja pendientes categorías, rating, fechas ISO y aplicación completa a restore/migration/export.
+- **Parámetros:** el generador declara cero parámetros; la UI tiene esquemas específicos independientes. Falta una política clara de SSOT para estos mapas.
 
-`DOCS/architecture.md` y `DOCS/implementation_plan.md` contienen grandes bloques prácticamente duplicados. Esto genera riesgo de divergencia.
+### Pendiente o bloqueado
 
-Recomendación:
+- Prueba manual con WebView2 real dentro de un DAW y validación de la interacción visual.
+- Conexión del adaptador dentro de plugins ABD de producción (el host actual es `apps/juce-plugin`, de referencia).
+- Validación física MIDI, pluginval y persistencia en hosts DAW reales.
+- `import_bank`, `export_bank`, `import_sys_ex` y `export_sys_ex` del standalone como integración completa con el core, no solo comandos/infraestructura.
+- Adapters tape `.wav` y clipboard hex.
+- Migración real de proyectos ABDCZ101, ABDEep y ABDJUNiO601.
+- pluginval, release pipeline, pruebas de resiliencia de plugins y CI completa.
 
-- `architecture.md`: decisiones y diseño estable.
-- `implementation_plan.md`: tareas ejecutables y estado.
-- Eliminar del plan la copia completa de la arquitectura y enlazar a las secciones correspondientes.
+---
 
-#### Estados demasiado optimistas
+## 4. Hallazgos técnicos prioritarios
 
-La documentación menciona adaptadores “implementados”, mientras que `HANDOFF.md` aclara que faltan adaptadores reales por fabricante.
+### P0 — Riesgos inmediatos
 
-Debe distinguirse formalmente entre:
+1. **Mantener ESLint en 0 warnings** y evitar que vuelvan a entrar imports/variables muertos en código de producto o tests.
+2. **Aplicar la validación central a todas las rutas**, especialmente restore, migration y export, y eliminar padding/truncado silencioso salvo opción explícita.
+3. **Resolver la SSOT de parámetros**: el generador declara cero parámetros mientras existen esquemas específicos en la WebUI.
+4. **Verificar la semántica de cobertura del registry web**, manteniendo sincronizados los descriptores generados con `Source/Contracts/Adapters`.
 
-- `designed`;
-- `implemented`;
-- `unit-tested`;
-- `validated-with-real-dumps`;
-- `validated-on-hardware`.
+### P1 — Cierre del MVP universal
 
-#### Falta una matriz de requisitos
+5. Validar físicamente al menos un flujo completo por familia prioritaria y registrar modelo, firmware, dispositivo, resultado y fixture.
+6. Completar integración de import/export del standalone con el core existente y cerrar la vista multi-modelo.
+7. Formalizar la especificación normativa de `.abdbank` v2/v3 y sus límites de compatibilidad.
+8. Resolver discrepancias restantes de protocolos Korg, Roland y Casio en todas las capas.
+9. Completar adapters tape `.wav` y clipboard hex.
+10. Completar migraciones reales de los proyectos ABDCZ101, ABDEep y ABDJUNiO601.
 
-Conviene crear una matriz con:
+### P2 — Producto/release
 
-| Requisito | Evidencia | Estado | Test |
+11. Ejecutar la prueba manual WebView2 dentro de un DAW y trasladar el host de referencia a los plugins ABD de producción.
+12. Añadir pluginval, tests de sample rate/buffer y jobs CI que fallen ante stubs o validaciones omitidas.
+13. Completar migraciones de los proyectos ABD existentes.
+14. Revisar dependencias y vulnerabilidades desde el lockfile vigente.
+
+---
+
+## 5. Matriz resumida de trazabilidad
+
+| Requisito | Evidencia actual | Estado | Falta |
 |---|---|---|---|
-
-#### Falta especificación normativa completa del formato
-
-El formato `.abdbank` necesita decisiones formales sobre:
-
-- compatibilidad entre versiones;
-- campos obligatorios;
-- blobs ausentes;
-- límites de tamaño;
-- IDs duplicados;
-- modelos incompatibles;
-- versionado semántico del formato.
+| CRUD inmutable | `packages/core/src/operations`, 49 tests | implemented + unit-tested | integración completa de todas las entradas |
+| Búsqueda | `packages/core/src/search`, 25 tests | implemented + unit-tested | confirmar integración UI en build real |
+| Persistencia Dexie | `PersistenceEngine`, migraciones reales | implemented + tested | cierre de rutas restore/export pendientes |
+| Backup/restore | ZIP `.abdlibrary`, tests de rollback y compatibilidad monobanco | implemented + unit-tested | formalizar casos v2/v3 y límites normativos |
+| SHA-256 | implementación única y tests | implemented + unit-tested | estabilidad Node/navegador pendiente |
+| Casio/Roland/Korg | adapters + fixtures/roundtrip | fixture-tested | hardware-tested no acreditado |
+| Pro-800 | adapter, fixtures v1.4.4/legacy y MIDI fake | fixture-tested + fake-transport-tested | evidencia formal con hardware |
+| DeepMind 12 | adapter, fixture y MIDI fake | fixture-tested + fake-transport-tested | validación física 12D |
+| Yamaha DX7 | adapter, fixtures y vertical MIDI | fixture-tested + fake-transport-tested | hardware evidence formal |
+| Registry | 17 ModelContracts, 5 ImportAdapters, 5 ExportAdapters, 5 HardwareLinks y `getCoverage()` | implemented + unit-tested | cobertura física y variantes sin adapter propio |
+| Standalone Tauri | shell, SQLite, comandos MIDI e import/export base | implemented parcial | vista multi-modelo, cierre E2E y release |
+| Bridge JUCE | ValueTree v1 + IPC callback + adaptador JSON + host WebBrowserComponent + CTest | implemented + build-verified | WebView2/DAW real, pluginval y host de producción |
+| Tooling | scripts, workspace pnpm y ESLint | implemented + verified | build WebUI debe seguir monitorizado |
+| Producción | CI y release incompletos | not ready | pluginval, seguridad, reproducibilidad |
 
 ---
 
-## 5. Arquitectura
+## 6. Conclusión
 
-### 5.1. Aspectos bien planteados
+La auditoría anterior acertaba al identificar duplicación, falta de fixtures, persistencia desigual y exceso de optimismo documental. Desde entonces se han cerrado varias partes importantes: core inmutable, búsqueda, SHA-256, backup/restore, fixtures de protocolo, build WebUI y una primera integración standalone.
 
-- Separación entre `ModelContract`, `ImportAdapter`, `ExportAdapter`, `HardwareLinkContract` y `ContractRegistry`.
-- Registro declarativo para evitar hardcodear completamente los modelos en la UI.
-- Principio de blobs opacos: el gestor no debe convertirse en editor de todos los sintetizadores.
-- Distinción conceptual entre standalone y plugin mediante el conjunto de contratos registrados.
+La conclusión actual es más precisa:
 
-### 5.2. Problemas
+> **El proyecto es ahora un MVP técnico avanzado con varios verticales funcionales y una base razonable para universalizar, pero no un producto terminado.**
 
-#### Existen dos arquitecturas de facto
-
-Hay dos caminos paralelos:
-
-1. `WebUI/src/store/persistence.js`.
-2. `packages/core/src/PersistenceEngine.ts`.
-
-También existen distintas fuentes de lógica SysEx y contratos. Esto puede provocar que:
-
-- una importación funcione en la WebUI y otra no en el core;
-- el fingerprint sea distinto según el camino;
-- el backup tenga formatos diferentes;
-- las reglas de fábrica/capacidad no se apliquen homogéneamente.
-
-Debe existir un único core funcional y una política única de datos.
-
-#### Paquetes parcialmente integrados
-
-`packages/core`, `packages/contracts`, `packages/adapters` y `packages/ui` existen, pero la aplicación principal continúa importando directamente desde `Source/` y `WebUI/src/`.
-
-Debe decidirse si:
-
-- `packages/*` es la API pública y contiene la lógica real;
-- `Source/` es solo fuente canónica para C++/generación;
-- o se usa otra estructura, pero sin duplicaciones ni shims innecesarios.
-
-#### Contrato excesivamente amplio
-
-`ModelContract` mezcla identidad, capacidad, addressing, SysEx, MIDI, checksum y hardware link.
-
-A medio plazo sería más mantenible separar:
+No recomiendo ampliar todavía indiscriminadamente el número de sintetizadores. El siguiente objetivo debe ser hacer reproducible y verde el vertical existente:
 
 ```text
-HardwareIdentity
-BankLayout
-PatchCodec
-SysExProtocol
-HardwareTransport
-```
-
----
-
-## 6. Problemas funcionales
-
-### 6.1. Capacidad no aplicada consistentemente
-
-`createPatch()` recibe opcionalmente `maxPatches`, pero la integridad depende de que el caller recuerde pasarlo.
-
-`importBank()` inserta directamente en Dexie sin comprobar necesariamente:
-
-- capacidad;
-- índice duplicado;
-- modelo válido;
-- tamaño de `rawData`;
-- compatibilidad entre `hardwareIds` y `modelId`.
-
-Debe existir una validación central que se aplique a creación, importación, duplicado, movimiento, restauración y exportación.
-
-### 6.2. `movePatch()` es incompleto
-
-No valida de forma suficiente:
-
-- capacidad del destino;
-- compatibilidad de hardware;
-- colisión de índices;
-- origen y destino iguales;
-- reindexación del origen.
-
-### 6.3. `importBank()` puede saltarse las reglas de fábrica
-
-Aunque `createPatch`, `updatePatch` y `deletePatch` tienen guards, `importBank()` escribe directamente en Dexie.
-
-Puede importar contenido marcado como banco de fábrica sin pasar por la política de inmutabilidad.
-
-### 6.4. Índices inconsistentes
-
-`createPatch()` usa el número de patches como siguiente índice. Eso no garantiza que sea el siguiente índice libre tras eliminaciones o importaciones con índices no secuenciales.
-
-### 6.5. Búsqueda insuficiente
-
-La búsqueda actual contempla básicamente `name` y `category`, mientras que el diseño promete también:
-
-- author;
-- tags;
-- notes;
-- model;
-- favoritos;
-- rating;
-- ordenación.
-
-### 6.6. Tamaño de patches no validado
-
-Se truncan o rellenan datos con ceros en varias rutas. Para SysEx, esto puede producir patches aparentemente válidos pero corruptos.
-
-Debe rechazarse por defecto o permitirse explícitamente mediante una opción como `allowPartial`.
-
----
-
-## 7. SysEx y MIDI
-
-Esta es la zona de mayor riesgo técnico.
-
-### 7.1. Tests no equivalentes a validación real
-
-Los tests actuales validan principalmente algoritmos y mensajes artificiales. Eso no demuestra que el protocolo sea correcto para hardware real.
-
-Se necesitan fixtures reales por fabricante y modelo con:
-
-- dump original;
-- modelo esperado;
-- número de patches;
-- payload esperado;
-- checksum esperado;
-- roundtrip byte a byte.
-
-### 7.2. Inconsistencias observadas
-
-#### Korg
-
-El adapter usa IDs distintos de los definidos en ModelContracts para microKORG y hay discrepancias de tamaño de patch entre capas.
-
-#### Roland
-
-La documentación y las implementaciones no coinciden completamente en comandos, posición de canal, modelo, dirección y checksum.
-
-#### Casio
-
-Existen discrepancias entre comandos, offsets de dirección, modelos y capacidades.
-
-#### Behringer
-
-`compatibleModels` declara compatibilidades que no deberían asumirse solo por compartir una técnica de empaquetado.
-
-### 7.3. `hardwareIds` asignado incorrectamente
-
-Varios adapters generan:
-
-```ts
-[modelId, ...ALL_MODEL_IDS.filter(id => id !== modelId)]
-```
-
-Esto marca el patch como compatible con todos los modelos del fabricante, aunque el contrato indique compatibilidades limitadas.
-
-Debe utilizarse una función canónica equivalente a:
-
-```ts
-getHardwareIds(modelId)
-```
-
-### 7.4. Adapters no registrados completamente
-
-`createStandaloneRegistry()` registra modelos, pero no registra import adapters, export adapters ni hardware links. Por tanto, el registry no ofrece todavía el comportamiento universal descrito.
-
-### 7.5. Interfaces débiles
-
-Se utiliza `any[]` para dispositivos MIDI y se duplican interfaces `PatchData` en distintos contratos.
-
-Debe existir un tipo compartido y una abstracción de transporte MIDI claramente definida.
-
----
-
-## 8. Persistencia y backups
-
-### 8.1. Backup incompleto
-
-La interfaz documenta un backup `.abdbank` ZIP, pero `packages/core/src/PersistenceEngine.ts` devuelve JSON plano y referencia blobs que no se incorporan realmente.
-
-Ese backup no es equivalente al formato documentado ni garantiza restauración.
-
-### 8.2. Fingerprint incorrecto en una capa
-
-`PersistenceEngine` usa una función hash simple aunque el comentario la describe como SHA-256. Existe una utilidad SHA-256 independiente, pero no se usa desde esa capa.
-
-Esto puede generar fingerprints incompatibles.
-
-### 8.3. Auto-backup no integrado
-
-`backupBeforeMigration()` está definido, pero no se invoca en el ciclo de migración y además crea JSON descargable en lugar de `.abdbank`.
-
-### 8.4. Tests de persistencia omitidos
-
-La suite de persistencia aparece completa en `describe.skip`, por lo que una parte crítica no está verificada.
-
----
-
-## 9. WebUI
-
-### 9.1. Aspectos positivos
-
-- La UI se inicializa correctamente en el entorno comprobado.
-- Hay escape HTML para varios nombres.
-- Se muestran reglas de bancos de fábrica.
-- Existen importación/exportación, CSV y renombrado masivo.
-- Hay feedback de estado y toast.
-
-### 9.2. Problemas
-
-- `app.js` concentra demasiadas responsabilidades.
-- Se usa HTML inline y handlers inline.
-- La UI real es mucho menor que la UI descrita en arquitectura.
-- No hay standalone multi-modelo implementado.
-- Falta integración visible de Dump/Fetch.
-- El build de Vite falla por configuración inexistente.
-- Se cargan dependencias desde CDN, lo cual es inadecuado para plugin y desktop offline.
-
----
-
-## 10. C++ / JUCE
-
-El estado actual es un skeleton.
-
-### Implementado
-
-- Compilación de una librería estática.
-- Clase `BankManagerCore`.
-- Guardado de dos índices en `ValueTree`.
-- API preliminar del bridge.
-
-### No implementado
-
-```cpp
-void handleWebUIMessage(...)
-void sendToWebUI(...)
-```
-
-son no-op.
-
-`toValueTree()` no persiste bancos, patches, rawData, metadatos, favoritos ni versionado.
-
-Por tanto, no cumple todavía la especificación de persistencia DAW.
-
----
-
-## 11. Testing
-
-### Fortalezas
-
-- Tests de registry.
-- Tests de contratos.
-- Tests de reglas de fábrica/capacidad.
-- Tests de packing y checksums.
-- Tests de roundtrip ZIP.
-- Tests de nomenclatura y operaciones masivas.
-
-### Debilidades
-
-- Persistencia omitida.
-- Tests SysEx principalmente conceptuales.
-- Falta cobertura de archivos corruptos, blobs ausentes, checksums inválidos, modelos incompatibles, restauración y migraciones.
-- Falta una prueba completa de importación → validación → fingerprint → persistencia → exportación → reimportación.
-- No existen fixtures reales de hardware.
-
----
-
-## 12. Calidad y tooling
-
-### ESLint
-
-`npm run lint` falla por falta de configuración ESLint.
-
-### Typecheck
-
-No existe un script de typecheck ni un flujo `tsc --noEmit` claramente integrado.
-
-### Warnings ESM
-
-`npm run generate` produce warnings por configuración incoherente de módulos.
-
-### CI
-
-La CI contiene varios jobs que no validan realmente lo que anuncian:
-
-- pluginval está comentado;
-- `audit-ci` usa `|| true`;
-- allocation audit no falla si no encuentra tests;
-- los tests C++ pueden no existir y solo producir warning;
-- WASM no verifica suficientemente el resultado.
-
----
-
-## 13. Buenas prácticas de mercado
-
-### Se siguen parcialmente
-
-- Separación por contratos.
-- Migraciones versionadas.
-- ZIP con manifest y blobs.
-- Validación runtime con Zod.
-- Tests unitarios.
-- Generación desde una fuente de verdad.
-- Blobs binarios opacos.
-- Documentación de decisiones.
-
-### Pendientes
-
-- Un único core de dominio.
-- Tipado estricto extremo a extremo.
-- CI fiable.
-- Builds reproducibles.
-- Tests de integración.
-- Fixtures reales.
-- Contratos versionados.
-- Seguridad del parsing de ZIP y JSON.
-- Validación centralizada de invariantes.
-- Release pipeline real.
-- Manejo transaccional completo.
-- Separación clara entre prototipo y funcionalidad certificada.
-
----
-
-## 14. Mejoras prioritarias
-
-### P0 — Antes de añadir más hardware
-
-1. Unificar el core.
-2. Resolver autoridad de contratos y protocolos SysEx.
-3. Crear validación central de bancos y patches.
-4. Corregir el backup y hacerlo restaurable.
-5. Eliminar el hash falso y usar SHA-256 común.
-6. Corregir el build de WebUI.
-7. Añadir typecheck y lint funcionales.
-
-### P1 — MVP funcional
-
-8. Implementar búsqueda completa.
-9. Implementar operaciones puras inmutables.
-10. Completar y probar persistencia.
-11. Registrar adapters y hardware links en el registry.
-12. Integrar MIDI real.
-13. Añadir fixtures reales de hardware.
-
-### P2 — Producto y release
-
-14. Completar standalone Tauri.
-15. Completar bridge JUCE.
-16. Añadir mensajes IPC versionados.
-17. Reforzar seguridad y CSP.
-18. Eliminar dependencias CDN en producción.
-19. Hacer que la CI falle ante validaciones no ejecutadas.
-
----
-
-## 15. Orden recomendado
-
-```text
-build + typecheck + lint
-→ core único
-→ matriz de requisitos
-→ protocolos reales y fixtures
-→ validación central
-→ fingerprint y backup
-→ persistencia real
-→ operaciones puras y búsqueda
-→ registry completo
-→ MIDI real
-→ bridge C++
-→ standalone
-→ integración y release
-```
-
----
-
-## Conclusión
-
-El proyecto **no está listo para considerarse una solución universal de producción**, pero tiene una base prometedora.
-
-Lo mejor del proyecto es:
-
-- intención arquitectónica;
-- documentación;
-- separación conceptual por contratos;
-- transparencia sobre lo que falta;
-- cobertura inicial de tests.
-
-Los principales riesgos son:
-
-- duplicación de fuentes de verdad;
-- protocolos SysEx potencialmente incorrectos o inconsistentes;
-- validación incompleta;
-- backup no funcional en una de las capas;
-- C++ y standalone todavía como skeleton;
-- CI que puede dar una falsa sensación de calidad;
-- ausencia de fixtures y pruebas con hardware real.
-
-La recomendación principal es **no ampliar todavía el número de sintetizadores**. Primero debe cerrarse un vertical completo y fiable:
-
-```text
-import real SysEx
-→ validate checksum
-→ extract patch
+fixture real
+→ detección inequívoca
+→ parse + checksum
 → fingerprint SHA-256
-→ persist in Dexie
-→ edit metadata
-→ export native SysEx
-→ byte-level roundtrip
-→ hardware send/fetch
+→ persistencia Dexie/SQLite
+→ edición de metadata
+→ export nativo
+→ reimportación byte-level
+→ send/fetch físico
+→ integración en registry y standalone
 ```
 
-Cuando ese flujo esté validado extremo a extremo, se puede generalizar con seguridad al resto de fabricantes.
+Después debe cerrarse el equivalente C++:
+
+```text
+librería completa
+→ ValueTree versionado
+→ IPC WebUI/JUCE
+→ restauración de sesión DAW
+→ pruebas de plugin
+```
+
+Hasta que esos dos verticales estén verdes y documentados con evidencia, el roadmap no debe darse por terminado.

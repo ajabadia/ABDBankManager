@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   pack8to7,
+  pack8to7NoPad,
   unpack7to8,
   encodeNibble,
   decodeNibble,
@@ -27,12 +28,29 @@ describe('SysEx Utilities — Roundtrip', () => {
       const packed = pack8to7(original);
       const unpacked = unpack7to8(packed);
 
-      // unpacked is longer than original: the last 7-byte group is zero-padded,
-      // so unpacked.length = ceil(original.length/7)*7. Leading bytes must match.
+      // pack8to7 zero-pads the last group, and the tolerant unpack decodes that tail
+      // as trailing zeros (same behavior as the C++ codec), so unpacked.length =
+      // ceil(original.length/7)*7. Leading bytes must match.
       expect(unpacked.length).toBe(Math.ceil(original.length / 7) * 7);
       for (let i = 0; i < original.length; i++) {
         expect(unpacked[i]).toBe(original[i]);
       }
+    });
+
+    it('decodes a real Korg 291-byte payload to the full 254-byte program (no padding)', () => {
+      // The MS2000/microKORG pack 254 B as 36 full groups + 1 control + 2 data = 291 B,
+      // NOT as 296 zero-padded bytes. A decoder that required a multiple of 8 lost the
+      // last 2 bytes of every program.
+      const program = new Uint8Array(254);
+      for (let i = 0; i < 254; i++) program[i] = (i * 53 + 29) & 0xFF;
+
+      const payload = pack8to7NoPad(program);
+      expect(payload.length).toBe(291); // 36*8 + 3
+      expect(payload.length % 8).not.toBe(0);
+
+      const unpacked = unpack7to8(payload);
+      expect(unpacked.length).toBe(254);
+      for (let i = 0; i < 254; i++) expect(unpacked[i]).toBe(program[i]);
     });
 
     it('roundtrips 288 bytes (Korg MS2000 patch size)', () => {
@@ -335,6 +353,21 @@ describe('Full SysEx Message Roundtrip', () => {
       for (let i = 0; i < 242; i++) {
         expect(unpacked[i]).toBe(patchData[i]);
       }
+    });
+
+    it('decodes the real 278-byte DM12 payload without losing the trailing bytes', () => {
+      // The DeepMind transmits 278 packed bytes for a 242-byte patch (35*8 = 280 > 278),
+      // so the wire payload is NOT a multiple of 8. A strict decoder emitted 238 bytes
+      // here and the adapter's slice(0, 242) hid the loss of the last 4.
+      const patch = new Uint8Array(242);
+      for (let i = 0; i < 242; i++) patch[i] = (i * 97 + 5) & 0xFF;
+
+      const packed = pack8to7(patch).slice(0, 278); // exact wire length, partial tail group
+      expect(packed.length).toBe(278);
+
+      const unpacked = unpack7to8(packed);
+      expect(unpacked.length).toBe(243); // 34*7 + 5 decoded from the partial group
+      for (let i = 0; i < 242; i++) expect(unpacked[i]).toBe(patch[i]);
     });
   });
 });

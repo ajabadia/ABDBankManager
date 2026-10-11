@@ -15,12 +15,12 @@ function writeString(data, offset, str, maxLen) {
 }
 
 describe('extractPatchName — extracción según el contrato', () => {
-  it('Korg MS2000: name at 0x1C, 12 chars ASCII, null-trimmed', () => {
+  it('Korg MS2000: name at 0x00, 12 chars ASCII, null-trimmed', () => {
     const ms2000 = getModelContract('korg-ms2000');
-    const data = new Uint8Array(288);
-    writeString(data, 0x1C, 'BRASS LEAD', 12);
+    const data = new Uint8Array(254);
+    writeString(data, 0x00, 'BRASS LEAD', 12);
     expect(ms2000.extractPatchName(data)).toBe('BRASS LEAD');
-    expect(ms2000.extractPatchName(data.slice(0, 20))).toBe(''); // too short
+    expect(ms2000.extractPatchName(data.slice(0, 11))).toBe(''); // shorter than the 12-char name
   });
 
   it('Behringer DM12: name at 223-238, 16 chars', () => {

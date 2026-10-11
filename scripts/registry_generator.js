@@ -10,10 +10,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { loadAndValidateSchema, generateSysexOffsetMap, generateCcMap, __dirname } from './registry_core.js';
-
-const __filename = fileURLToPath(import.meta.url);
 
 const ROOT = path.resolve(__dirname, '..');
 const SCHEMA_PATH = path.join(ROOT, 'schemas', 'parameters-spec.schema.v1.json');

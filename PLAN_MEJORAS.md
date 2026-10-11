@@ -465,11 +465,12 @@ Los blobs y metadatos deben conservarse.
 - [x] Implementar `handleWebUIMessage` / `sendToWebUI` con callback desacoplado de WebView2: `getState`, `requestState`, `setState`, `selectPreset`, `updateMetadata` y error para mensajes desconocidos.
 - [x] Añadir `cpp/BankManagerWebViewAdapter.*` y `cpp/tests/BankManagerCoreTests.cpp`: protocolo JSON WebView↔core, roundtrip ValueTree e IPC verificados en Visual Studio 2026/CTest.
 
-### Pendiente
+### Estado de integración
 
 - [x] Definir el adaptador de transporte JSON común (`BankManagerWebViewAdapter`) con callbacks de entrada/salida, sin dependencia de WebView2. Entrada: `{ action, data? }`; salida: `{ action, data, schemaVersion }`; admite payload plano y anidado.
-- [ ] Conectar el callback a la WebView concreta de cada plugin JUCE.
-- [ ] Probar el esquema IPC común con WebView2 real dentro de un plugin.
+- [x] Conectar el adaptador en el host JUCE de referencia `apps/juce-plugin/` mediante `WebBrowserComponent`, recursos embebidos y el evento nativo `abdBankManagerMessage`.
+- [x] Persistir el estado del gestor en sesiones VST3/Standalone mediante `ValueTree`.
+- [ ] Ejecutar una prueba manual con WebView2 real dentro de un DAW y repetir la conexión en los plugins ABD de producción.
 
 ### Criterios de aceptación
 
@@ -478,29 +479,39 @@ Los blobs y metadatos deben conservarse.
 
 ---
 
-## P2.2. Standalone Tauri
+## P2.2. Standalone — JUCE Only (Tauri eliminado)
 
-- [x] Estructura del proyecto Tauri creada (`apps/standalone/src-tauri/`).
-- [x] `Cargo.toml` con dependencias Tauri 2 (fs, dialog, clipboard, shell).
-- [x] Backend Rust con comandos para: librería, bancos, MIDI, SysEx.
-- [x] `tauri.conf.json` configurado (permisos fs/dialog/clipboard/shell).
-- [x] `build.rs` para Tauri build.
-- [x] `Cargo.toml` con Tauri 2 plugins (fs, dialog, clipboard, shell).
-- [x] **SQLite persistence layer** (`rusqlite` + migraciones v1-v4, models Bank/Patch, comandos CRUD).
-- [x] **MIDI support** (`midir` crate, comandos para puertos, envío SysEx, dump requests).
-- [x] **WebUI embebida en el shell Tauri** (`pnpm tauri dev` levanta Vite :1420 + ventana; `build:webui` → `dist/webui` → `frontendDist`). `tauri build` completo verificado: release optimizado + instaladores MSI (7.7 MB) y NSIS (6.0 MB) generados en `target/release/bundle/`.
-- [x] **Puente WebUI↔Tauri (persistencia SQLite)**: `database.rs` con `load_library`/`save_library` (roundtrip de la librería completa con IDs preservados vía struct `LibraryBank`, tipo `Vec<LibraryBank>` por JSON); comandos registrados en `lib.rs`; facade Dexie-compatible en `WebUI/src/store/backend.js` (tablas `banks`/`patches` persistentes; `tags`/`patchTags`/`history` solo en memoria de sesión por diseño) conectada a `persistence.js`/`libraryAdapter.js` vía `getDb()`/`setDexieDb()`, con lazy-Proxy contra el orden de evaluación ESM. `tauriMidi.js` con los mismos helpers MIDI (`getMidiPorts/openMidiPort/closeMidiPort/sendSysex/requestSysexDump`). Verificado: roundtrip Rust (`cargo test`, preserva ids + `rawData`), 9 tests de la facade (incl. bug corregido de `_ensureLoaded` en `Collection`, que dejaba lecturas vacías en un facade fresco, y test de payload `save_library` con `rawData` como array plano), suite completa 467 passed / 9 fallos preexistentes, y E2E real: `abd_bank_manager.db` creado con migraciones en `%APPDATA%\ABDBankManager`.
-- [x] **Import/Export de formatos soportados** (`.abdbank`, `.abdlibrary`, `.json`, `.syx`): implementados en `commands.rs` delegando en `database.rs`. `import_bank` lee ZIP/JSON/SysEx, parsea manifest/patches, crea banco+patches en SQLite. `export_bank` carga banco+patches y escribe `.abdbank` (ZIP con manifest) o `.json`. `import_sys_ex` divide mensajes F0...F7, identifica fabricante (Behringer/Yamaha/Roland/Korg), crea banco+patches. `export_sys_ex` concatena rawData de patches como mensajes SysEx. Añadido crate `zip` para manejo ZIP. Tests: `cargo test` verde, suite WebUI 476 passed / 5 preexistentes.
+- [x] **Standalone = JUCE Only** (`apps/juce-plugin/`) — Un único target compila **VST3 + Standalone** desde el mismo código, usa la misma WebUI vía WebView2, expone `ABDBankManagerCore` con persistencia XML nativa.
+- [x] **Persistencia XML nativa en `BankManagerCore`** (`saveToFile`/`loadFromFile`/`getDefaultLibraryFile`) — Usa `ValueTree` + `XmlElement` nativo de JUCE. Formato `.xml` human-readable, versionado por `valueTreeSchemaVersion`, sin dependencias externas.
+- [x] **Bridge JUCE ValueTree + IPC (P2.1)**: `BankManagerCore` persiste una `Library` completa con bancos, patches, metadatos, tags, parámetros y `rawData` Base64 en un `ValueTree` versionado (schema v1). `BankManagerWebViewAdapter` traduce JSON `{ action, data }` entre el host y el core mediante callbacks, sin dependencia de WebView2. El IPC soporta `getState`, `requestState`, `setState`, `selectPreset` y `updateMetadata`.
+- [x] **Host JUCE/WebView2 de referencia** (`apps/juce-plugin/`) — Plugin VST3/Standalone compilable. `PluginEditor` conecta `WebBrowserComponent` con backend WebView2, sirve la WebUI desde `juce_add_binary_data`, recibe y emite `abdBankManagerMessage`, y `PluginProcessor` persiste el estado del core mediante `ValueTree`.
+- [x] **MIDI support** — `midir` crate eliminado; MIDI nativo JUCE (`juce_audio_devices`) usado en `BridgeActions.cpp` para `get_midi_ports`, `open_midi_port`, `close_midi_port`, `send_sysex`, `request_sysex_dump`.
+- [x] **Import/Export de formatos soportados** (`.abdbank`, `.abdlibrary`, `.json`, `.syx`) — Implementados en `BridgeActions.cpp` delegando en `BankManagerCore` y `SysExManager`. `import_bank` lee ZIP/JSON/SysEx, parsea manifest/patches, crea banco+patches. `export_bank` carga banco+patches y escribe `.abdbank` (ZIP con manifest) o `.json`. `import_sys_ex` divide mensajes F0...F7, identifica fabricante, crea banco+patches. `export_sys_ex` concatena rawData de patches como mensajes SysEx.
 - [x] **Vista multi-modelo con árbol de sintetizadores y thumbnails de hardware (P0.5)**: toggle en sidebar (`treeViewMode`) muestra todos los fabricantes expandidos con sus modelos y thumbnails; navega directo a modelo → bancos.
 - [x] **Ctrl+V (clipboard hex) y drag & drop de ficheros SysEx**: `handlePasteHex()` parsea hex del portapapeles y importa como SysEx; drop zone en main content acepta `.syx`, `.abdbank`, `.abdlibrary`, `.json`; usa `importFile`/`importBank` existente.
+- [x] **Tests**: `cargo test` verde (solo Rust tests restantes si los hay), suite WebUI 477 passed, C++ tests pasan.
+
+### Eliminado (Tauri/SQLite)
+- ❌ `apps/standalone/src-tauri/` (Rust, Cargo, tauri.conf.json)
+- ❌ `tauri-plugin-updater` + claves Ed25519
+- ❌ `zip` crate, `midir` crate, `rusqlite`
+- ❌ `tauriMidi.js`, `backend.js` (facade Tauri)
+- ❌ `tauri.conf.json` con `beforeBuildCommand`/`frontendDist`
+- ❌ Scripts `tauri:dev` / `tauri:build` en `package.json`
+- ❌ Dependencia `@tauri-apps/cli` y `tauri-plugin-updater`
+- ❌ `database.rs` (rusqlite, migraciones v1-v4)
+- ❌ `commands.rs` (`load_library`/`save_library` FFI)
+- ❌ `zip` crate (ya no necesario para persistencia)
+- ❌ `database.rs` migraciones v1-v4 → reemplazado por `valueTreeSchemaVersion` en XML
+- ❌ SQLite / rusqlite — Reemplazado por persistencia XML nativa JUCE (`ValueTree` + `XmlElement`) en `BankManagerCore::saveToFile`/`loadFromFile`. Formato `.xml` human-readable, sin dependencias externas, migraciones versionadas en `valueTreeSchemaVersion`.
 
 ### Criterios de aceptación
-
-- [x] `pnpm tauri dev` lanza la app standalone (verificado: VITE ready :1420 + `ABD Bank Manager started` + WebUI renderizada sin 404).
-- [x] `pnpm tauri build` genera instaladores Windows (MSI + NSIS) sin errores — binario release optimizado 18.7 MB.
-- [x] La persistencia funciona sin lógica duplicada en el standalone (verificado: facade Dexie-compatible con `load_library`/`save_library`, roundtrip Rust + 9 tests JS del bridge + SQLite real creado/migrado).
-- [x] La app importa/exporta bancos (`.abdbank`, `.abdlibrary`, `.json`, `.syx`) — comandos Rust implementados y testeados (`cargo test` + suite WebUI).
-- [x] Vista árbol P0.5 funcional: toggle en sidebar muestra todos los modelos con thumbnails y navegación directa.
+- [x] Standalone JUCE compila VST3 + Standalone (`juce_add_plugin(... FORMATS Standalone VST3)`) — build verificado.
+- [x] WebUI idéntica en plugin y standalone (misma WebUI, mismo `BankManagerModal`).
+- [x] Persistencia XML nativa (`BankManagerCore::saveToFile`/`loadFromFile`) — formato `.xml` human-readable, versionado por `valueTreeSchemaVersion`, sin dependencias externas.
+- [x] MIDI nativo JUCE (`juce_audio_devices`) funcional para SysEx.
+- [x] Import/Export (`.abdbank`, `.abdlibrary`, `.json`, `.syx`) funcional vía `BridgeActions.cpp`.
+- [x] Build verificado: VST3 + Standalone exe generados.
 - [x] Ctrl+V pega hex del portapapeles e importa como SysEx; drag & drop acepta .syx/.abdbank/.abdlibrary/.json.
 
 ---

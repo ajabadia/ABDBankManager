@@ -23,3 +23,13 @@
 - `HANDOFF.md` outro below registers the cut and the dead-code status; the phase table no longer lists "Standalone Tauri app" as an open phase.
 
 **Cut document:** `DOCS/bank-manager-module-cut.md` — full design of the cut (what goes where, contracts disposition, what stays in ABDBankManager, what later goes to ABDSharedCode, why Tauri/SQLite/Rust are dead, what is out of date in the docs).
+**2026-09-27 — overlay focus contract.** BankManagerModal (packages/ui/src,
+canonical) adopts the family's overlay focus contract: closed => `inert` +
+`aria-hidden`; focus enters the first control on open (the header close button);
+Tab is trapped while open; focus returns to the trigger on close (double close is a
+safe no-op when the host's Escape handler also calls close). The engine is inlined
+in BankManagerModal.js because this repo's static WebUI serves with CSP
+`default-src 'self'` and cannot resolve `@abdsynths/shared`; drift.test.js now also
+asserts the contract pieces and their order inside open()/close(). The WebUI copy
+and the ABDMS2000 vendor copy stay byte-identical (the sync script is a pure copy,
+unchanged). Suites: packages/ui 4/4, WebUI 809/809.

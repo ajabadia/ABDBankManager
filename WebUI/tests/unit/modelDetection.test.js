@@ -197,6 +197,13 @@ describe('Model disambiguation', () => {
     expect(ms2000Result.contract.sysexManufacturerId).toEqual(mkResult.contract.sysexManufacturerId);
   });
 
+  it('identifies microKORG specifically from dump with Model ID 0x71', () => {
+    const mk71Msg = new Uint8Array([0xF0, 0x42, 0x30, 0x71, 0x40, 0x00, 0xF7]);
+    const result = identifyModel(mk71Msg);
+    expect(result).not.toBeNull();
+    expect(result.modelId).toBe('korg-microkorg');
+  });
+
   it('Roland Juno-106 and Juno-60 share manufacturer byte 0x41 — both identify as Roland Juno', () => {
     const j106Raw = readFixture('fixtures/sysex/roland-juno/factory/Juno106_Bank_A.syx');
     const j60Raw = readFixture('fixtures/sysex/roland-juno/factory/Juno60_Bank_A.syx');

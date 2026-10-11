@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { ModelContract } from '../Contracts/ModelContract.ts';
 
+/**
+ * Custom error class for domain validation failures.
+ */
 export class DomainValidationError extends Error {
   readonly code = 'ERR_DOMAIN_VALIDATION';
 
@@ -10,6 +13,9 @@ export class DomainValidationError extends Error {
   }
 }
 
+/**
+ * Schema for validating patch metadata.
+ */
 const PatchMetadataSchema = z.object({
   name: z.string().min(1).max(64),
   category: z.string().min(1),
@@ -27,8 +33,29 @@ const PatchMetadataSchema = z.object({
   index: z.number().int().min(0).optional()
 });
 
+type PatchMetadata = z.infer<typeof PatchMetadataSchema>;
+
+/**
+ * Validates hardware IDs against a given contract.
+ * @param hardwareIds - The hardware IDs to validate.
+ * @param contract - The contract to validate against.
+ * @param entityName - The name of the entity being validated.
+ */
+function validateHardwareIds(hardwareIds: string[], contract: ModelContract, entityName: string): void {
+  const expectedHardwareIds = new Set([contract.modelId, ...(contract.compatibleModels || [])]);
+  if (hardwareIds.some(id => !expectedHardwareIds.has(id))) {
+    throw new DomainValidationError(`${entityName} hardwareIds are incompatible with ${contract.modelId}`);
+  }
+}
+
+/**
+ * Validates a patch against a given contract.
+ * @param patch - The patch to validate.
+ * @param contract - The contract to validate against.
+ * @param index - Optional index of the patch in the bank.
+ */
 export function validatePatchAgainstContract(
-  patch: unknown,
+  patch: PatchMetadata,
   contract: ModelContract,
   index?: number
 ): void {
@@ -44,10 +71,7 @@ export function validatePatchAgainstContract(
     );
   }
 
-  const expectedHardwareIds = new Set([contract.modelId, ...(contract.compatibleModels || [])]);
-  if (value.hardwareIds.some(id => !expectedHardwareIds.has(id))) {
-    throw new DomainValidationError(`patch hardwareIds are incompatible with ${contract.modelId}`);
-  }
+  validateHardwareIds(value.hardwareIds, contract, 'patch');
 
   if (index !== undefined && contract.parseProgramAddress(value.originAddress) === null) {
     const expectedAddress = contract.getProgramAddress(index);
@@ -57,31 +81,33 @@ export function validatePatchAgainstContract(
   }
 }
 
+/**
+ * Validates a bank against a given contract.
+ * @param bank - The bank to validate.
+ * @param patches - The patches in the bank.
+ * @param contract - The contract to validate against.
+ */
 export function validateBankAgainstContract(
-  bank: unknown,
-  patches: readonly unknown[],
+  bank: { id: string; name: string; modelId: string; hardwareIds?: string[] },
+  patches: readonly PatchMetadata[],
   contract: ModelContract
 ): void {
   if (!bank || typeof bank !== 'object') {
     throw new DomainValidationError('bank must be an object');
   }
 
-  const value = bank as { id?: unknown; name?: unknown; modelId?: unknown; hardwareIds?: unknown };
-  if (typeof value.id !== 'string' || value.id.length === 0) {
+  if (typeof bank.id !== 'string' || bank.id.length === 0) {
     throw new DomainValidationError('bank id is required');
   }
-  if (typeof value.name !== 'string' || value.name.trim().length === 0 || value.name.length > 64) {
+  if (typeof bank.name !== 'string' || bank.name.trim().length === 0 || bank.name.length > 64) {
     throw new DomainValidationError('bank name must contain 1–64 characters');
   }
-  if (value.modelId !== contract.modelId) {
-    throw new DomainValidationError(`bank modelId '${String(value.modelId)}' does not match '${contract.modelId}'`);
+  if (bank.modelId !== contract.modelId) {
+    throw new DomainValidationError(`bank modelId '${bank.modelId}' does not match '${contract.modelId}'`);
   }
 
-  const hardwareIds = Array.isArray(value.hardwareIds) ? value.hardwareIds : [];
-  const expectedHardwareIds = new Set([contract.modelId, ...(contract.compatibleModels || [])]);
-  if (hardwareIds.some(id => typeof id !== 'string' || !expectedHardwareIds.has(id))) {
-    throw new DomainValidationError(`bank hardwareIds are incompatible with ${contract.modelId}`);
-  }
+  const hardwareIds = Array.isArray(bank.hardwareIds) ? bank.hardwareIds : [];
+  validateHardwareIds(hardwareIds, contract, 'bank');
 
   if (patches.length > contract.programsPerBank) {
     throw new DomainValidationError(
@@ -91,13 +117,12 @@ export function validateBankAgainstContract(
 
   const indexes = new Set<number>();
   for (const [position, patch] of patches.entries()) {
-    const candidate = patch as { index?: unknown };
-    const index = candidate.index ?? position;
+    const index = patch.index ?? position;
     if (!Number.isInteger(index) || Number(index) < 0 || Number(index) >= contract.programsPerBank) {
-      throw new DomainValidationError(`patch index '${String(index)}' is outside bank capacity`);
+      throw new DomainValidationError(`patch index '${index}' is outside bank capacity`);
     }
     if (indexes.has(Number(index))) {
-      throw new DomainValidationError(`duplicate patch index '${String(index)}'`);
+      throw new DomainValidationError(`duplicate patch index '${index}'`);
     }
     indexes.add(Number(index));
     validatePatchAgainstContract(patch, contract, Number(index));

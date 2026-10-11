@@ -709,8 +709,7 @@ var CMD_ACK = 35;
 var CMD_NACK = 36;
 var MODEL_IDS2 = {
   "korg-ms2000": 88,
-  "korg-microkorg": 88,
-  // identical SysEx format to MS2000
+  "korg-microkorg": 113,
   "korg-prophecy": 65
 };
 function getBankLetter3(index) {
@@ -727,7 +726,9 @@ function korgChannelByte(channel) {
   return KORG_CHANNEL_BYTE_BASE | value & 15;
 }
 function isKorgSysEx(msg, modelIdByte) {
-  return msg.length >= 5 && msg[0] === 240 && msg[1] === 66 && msg[3] === modelIdByte && (msg[4] === CMD_DUMP2 || msg[4] === CMD_ALL_DUMP);
+  if (msg.length < 5 || msg[0] !== 240 || msg[1] !== 66) return false;
+  const isMatch = Array.isArray(modelIdByte) ? modelIdByte.includes(msg[3]) : msg[3] === modelIdByte;
+  return isMatch && (msg[4] === CMD_DUMP2 || msg[4] === CMD_ALL_DUMP);
 }
 var korgMs2000Contract = {
   modelId: "korg-ms2000",
@@ -764,11 +765,12 @@ var korgMs2000Contract = {
   sysexManufacturerId: SYSEX_MANUFACTURER_ID3,
   formatVersion: FORMAT_VERSION3,
   sysexModelId: { offset: 3, values: [88] },
-  midiDetection: { portPattern: /ms.?2000|microkorg/i, displayName: "Korg MS2000" },
+  midiDetection: { portPattern: /ms.?2000/i, displayName: "Korg MS2000" },
   midi: {
     defaultChannel: 1,
     defaultDeviceId: 88
   },
+  parameterSchemaKey: "korg_ms2000_parameter_spec",
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 3e3,
@@ -777,9 +779,9 @@ var korgMs2000Contract = {
   },
   // Korg uses 7-to-8 packing, no separate checksum
   verifyChecksum(sysex) {
-    const modelId = MODEL_IDS2[this.modelId] || 88;
+    const validModelIds = this.modelId === "korg-microkorg" ? [113, 88] : [MODEL_IDS2[this.modelId] || 88];
     if (sysex.length < 6) return false;
-    if (sysex[0] !== 240 || sysex[1] !== 66 || sysex[3] !== modelId) return false;
+    if (sysex[0] !== 240 || sysex[1] !== 66 || !validModelIds.includes(sysex[3])) return false;
     if (sysex[sysex.length - 1] !== 247) return false;
     const packed = sysex.slice(5, sysex.length - 1);
     if (packed.length === 0) return false;
@@ -798,8 +800,8 @@ var korgMs2000Contract = {
     return new Uint8Array([240, 66, korgChannelByte(channel), modelId, CMD_DUMP2, ...packed, 247]);
   },
   parsePatchSysEx(sysex) {
-    const modelId = MODEL_IDS2[this.modelId] || 88;
-    if (!isKorgSysEx(sysex, modelId)) return null;
+    const validModelIds = this.modelId === "korg-microkorg" ? [113, 88] : [MODEL_IDS2[this.modelId] || 88];
+    if (!isKorgSysEx(sysex, validModelIds)) return null;
     if (sysex[sysex.length - 1] !== 247) return null;
     const packed = sysex.slice(5, sysex.length - 1);
     const unpacked = unpack7to8Tolerant(packed);
@@ -813,8 +815,8 @@ var korgMs2000Contract = {
     return new Uint8Array([240, 66, korgChannelByte(channel), modelId, cmd, 247]);
   },
   parseDumpResponse(sysex) {
-    const modelId = MODEL_IDS2[this.modelId] || 88;
-    const msgs = splitSysexMessages(sysex).filter((m) => isKorgSysEx(m, modelId));
+    const validModelIds = this.modelId === "korg-microkorg" ? [113, 88] : [MODEL_IDS2[this.modelId] || 88];
+    const msgs = splitSysexMessages(sysex).filter((m) => isKorgSysEx(m, validModelIds));
     const results = [];
     for (const msg of msgs) {
       if (msg[4] === CMD_ALL_DUMP) {
@@ -830,25 +832,25 @@ var korgMs2000Contract = {
     return results;
   },
   /**
-   * Acuse del equipo: `F0 42 3n 58 23 F7` (guardado) / `... 24 F7` (error). 6 B y
+   * Acuse del equipo: `F0 42 3n [modelId] 23 F7` (guardado) / `... 24 F7` (error). 6 B y
    * sin payload, así que no se confunde con un dump (`0x40`, 297 B).
    *
    * Ojo: no se reutiliza `isKorgSysEx`, que exige un comando de dump (`0x40`/`0x4C`)
    * en el byte 4 y por eso descarta precisamente estos acuses.
    */
   parseAcknowledgement(sysex) {
-    const modelId = MODEL_IDS2[this.modelId] || 88;
+    const validModelIds = this.modelId === "korg-microkorg" ? [113, 88] : [MODEL_IDS2[this.modelId] || 88];
     if (sysex.length !== 6) return null;
     if (sysex[0] !== 240 || sysex[1] !== 66) return null;
     if ((sysex[2] & 240) !== 48) return null;
-    if (sysex[3] !== modelId || sysex[5] !== 247) return null;
+    if (!validModelIds.includes(sysex[3]) || sysex[5] !== 247) return null;
     if (sysex[4] === CMD_ACK) return { ok: true };
     if (sysex[4] === CMD_NACK) return { ok: false };
     return null;
   },
   parseFile(data, _filename) {
-    const modelId = MODEL_IDS2[this.modelId] || 88;
-    const parsed = splitSysexMessages(data).filter((m) => isKorgSysEx(m, modelId)).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
+    const validModelIds = this.modelId === "korg-microkorg" ? [113, 88] : [MODEL_IDS2[this.modelId] || 88];
+    const parsed = splitSysexMessages(data).filter((m) => isKorgSysEx(m, validModelIds)).map((m) => this.parsePatchSysEx?.(m)).filter((p) => p !== null);
     if (parsed.length === 0) return null;
     const patches = parsed.map((p) => ({
       name: this.extractPatchName?.(p.rawData) || this.getProgramAddress(p.slot),
@@ -905,7 +907,18 @@ var korgMicrokorgContract = {
   modelId: "korg-microkorg",
   displayName: "Korg microKORG",
   thumbnail: "korg-microkorg.webp",
-  compatibleModels: ["korg-ms2000", "abd-sm002"]
+  compatibleModels: ["korg-ms2000", "abd-sm002"],
+  sysexModelId: { offset: 3, values: [113, 88] },
+  midiDetection: { portPattern: /microkorg/i, displayName: "Korg microKORG" },
+  midi: {
+    defaultChannel: 1,
+    defaultDeviceId: 113
+  },
+  legacySysEx: {
+    modelIdByte: 113,
+    buildDumpRequest: (ch) => new Uint8Array([240, 66, korgChannelByte(ch), 113, CMD_REQUEST2, 247]),
+    validateSysEx: (bytes) => bytes.length >= 5 && bytes[0] === 240 && bytes[1] === 66 && (bytes[3] === 113 || bytes[3] === 88)
+  }
 };
 var ABD_MANUFACTURER_ID = [125];
 var ABD_MODEL_ID = 10;
@@ -1185,6 +1198,7 @@ var korgProphecyContract = {
     defaultChannel: 1,
     defaultDeviceId: 65
   },
+  parameterSchemaKey: "korg_prophet_parameter_spec",
   supportsEditBuffer: false,
   interMessageDelayMs: 50,
   dumpTimeoutMs: 5e3,

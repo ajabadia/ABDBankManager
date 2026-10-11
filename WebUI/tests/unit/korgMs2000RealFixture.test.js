@@ -7,8 +7,10 @@ import { describe, it, expect } from 'vitest';
 import { getModelContract } from '../../src/contracts/modelContracts.js';
 
 const models = [
-  { modelId: 'korg-ms2000', modelByte: 0x58, patchSize: 288, programsPerBank: 16, nameOffset: 0x1C, nameLength: 12 },
-  { modelId: 'korg-microkorg', modelByte: 0x58, patchSize: 288, programsPerBank: 16, nameOffset: 0x1C, nameLength: 12 },
+  // 254 B: programa real del MS2000/microKORG (Timbre 1 + Timbre 2 de 108 B),
+  // con el nombre al principio del bloque (0x00), no en 0x1C.
+  { modelId: 'korg-ms2000', modelByte: 0x58, patchSize: 254, programsPerBank: 16, nameOffset: 0x00, nameLength: 12 },
+  { modelId: 'korg-microkorg', modelByte: 0x71, patchSize: 254, programsPerBank: 16, nameOffset: 0x00, nameLength: 12 },
   { modelId: 'korg-prophecy', modelByte: 0x41, patchSize: 535, programsPerBank: 64, nameOffset: 0x00, nameLength: 16 }
 ];
 
@@ -101,6 +103,9 @@ describe('Korg — Cross-model identification', () => {
     expect(ms2000.manufacturer).toBe('Korg');
     expect(microkorg.manufacturer).toBe('Korg');
     expect(prophecy.manufacturer).toBe('Korg');
+
+    expect(ms2000.sysexModelId?.values).toContain(0x58);
+    expect(microkorg.sysexModelId?.values).toContain(0x71);
   });
 
   it('Prophecy model byte is 0x41, not 0x5A', () => {
