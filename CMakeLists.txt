@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.22)
 project(ABDBankManager VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,34 +20,34 @@ if(NOT TARGET juce::juce_core)
     endif()
 endif()
 
-# --- ABDSharedCode (modulos compartidos de la suite ABDSynths) ---
-# Integracion segun ABDSharedCode/INTEGRATION_GUIDE.md: monorepo local si
-# existe al lado, si no FetchContent desde GitHub (CI y clones limpios).
-# Los tests standalone y los modulos que no consumimos se apagan para que el
-# configure de este proyecto no arrastre superficie ajena.
-set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ABDSharedCode")
+# --- ABDShared (modulos compartidos de la suite ABDSynths) ---
+# Prioriza ABDShared/Code (canónico consolidado) y mantiene fallback a ABDSharedCode.
+set(ABDSHARED_BUILD_BANKMANAGER ON)
+set(ABDSHAREDCODE_BUILD_BANKMANAGER ON)
 set(ABDSHAREDCODE_BUILD_DSPCORE_TESTS OFF)
 set(ABDSHAREDCODE_BUILD_DSPEFFECTS_TESTS OFF)
 set(ABDSHAREDCODE_BUILD_SYNTHCORE_TESTS OFF)
 set(ABDSHAREDCODE_BUILD_AUTOUPDATER OFF)
 set(ABDSHAREDCODE_BUILD_AUDIOCOMPARATOR OFF)
-# El modulo BankManager (corte del modulo bancario, DOCS/bank-manager-module-cut.md)
-# vive en ABDSharedCode/BankManager y hace falta AQUI: cpp/ lo enlaza para
-# compilar sus fuentes dentro de ABDBankManagerCore.lib.
-set(ABDSHAREDCODE_BUILD_BANKMANAGER ON)
-if(EXISTS "${ABDSHARED_CODE_DIR}/CMakeLists.txt")
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ABDShared/Code/CMakeLists.txt")
+    set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ABDShared/Code")
+    message(STATUS "ABDShared: using local at ${ABDSHARED_CODE_DIR}")
+    add_subdirectory("${ABDSHARED_CODE_DIR}" "${CMAKE_BINARY_DIR}/ABDShared_build")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ABDSharedCode/CMakeLists.txt")
+    set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ABDSharedCode")
     message(STATUS "ABDSharedCode: using local at ${ABDSHARED_CODE_DIR}")
     add_subdirectory("${ABDSHARED_CODE_DIR}" "${CMAKE_BINARY_DIR}/ABDSharedCode")
 else()
-    message(STATUS "ABDSharedCode: no local copy, fetching from GitHub")
+    message(STATUS "ABDShared: no local copy, fetching from GitHub")
     include(FetchContent)
     FetchContent_Declare(
-        ABDSharedCode
-        GIT_REPOSITORY https://github.com/ajabadia/ABDSharedCode.git
-        GIT_TAG        master
+        ABDShared
+        GIT_REPOSITORY https://github.com/ajabadia/ABDShared.git
+        GIT_TAG        main
         GIT_SHALLOW    TRUE
     )
-    FetchContent_MakeAvailable(ABDSharedCode)
+    FetchContent_MakeAvailable(ABDShared)
 endif()
 
 # --- Bank Manager Core (C++ module for JUCE plugins) ---

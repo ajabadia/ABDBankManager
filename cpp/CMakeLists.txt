@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.22)
 # LANGUAGES CXX C: en standalone, JUCE se añade AQUI y exige el compilador
 # C declarado en el project() de más alto nivel (mismo motivo que el root).
 project(ABDBankManagerCore VERSION 0.1.0 LANGUAGES CXX C)
@@ -24,28 +24,31 @@ if(NOT TARGET juce::juce_core)
 endif()
 
 if(NOT TARGET ABDShared::BankManagerCore)
-    # ../../ABDSharedCode: el hermano del REPO (aqui estamos en cpp/, un
-    # nivel mas abajo que en el root).
-    set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../ABDSharedCode")
+    set(ABDSHARED_BUILD_BANKMANAGER ON)
+    set(ABDSHAREDCODE_BUILD_BANKMANAGER ON)
     set(ABDSHAREDCODE_BUILD_DSPCORE_TESTS OFF)
     set(ABDSHAREDCODE_BUILD_DSPEFFECTS_TESTS OFF)
     set(ABDSHAREDCODE_BUILD_SYNTHCORE_TESTS OFF)
     set(ABDSHAREDCODE_BUILD_AUTOUPDATER OFF)
     set(ABDSHAREDCODE_BUILD_AUDIOCOMPARATOR OFF)
-    set(ABDSHAREDCODE_BUILD_BANKMANAGER ON)
-    if(EXISTS "${ABDSHARED_CODE_DIR}/CMakeLists.txt")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../ABDShared/Code/CMakeLists.txt")
+        set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../ABDShared/Code")
+        message(STATUS "ABDShared: using local at ${ABDSHARED_CODE_DIR}")
+        add_subdirectory("${ABDSHARED_CODE_DIR}" "${CMAKE_BINARY_DIR}/ABDShared_build")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../ABDSharedCode/CMakeLists.txt")
+        set(ABDSHARED_CODE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../ABDSharedCode")
         message(STATUS "ABDSharedCode: using local at ${ABDSHARED_CODE_DIR}")
         add_subdirectory("${ABDSHARED_CODE_DIR}" "${CMAKE_BINARY_DIR}/ABDSharedCode")
     else()
-        message(STATUS "ABDSharedCode: no local copy, fetching from GitHub")
+        message(STATUS "ABDShared: no local copy, fetching from GitHub")
         include(FetchContent)
         FetchContent_Declare(
-            ABDSharedCode
-            GIT_REPOSITORY https://github.com/ajabadia/ABDSharedCode.git
-            GIT_TAG        master
+            ABDShared
+            GIT_REPOSITORY https://github.com/ajabadia/ABDShared.git
+            GIT_TAG        main
             GIT_SHALLOW    TRUE
         )
-        FetchContent_MakeAvailable(ABDSharedCode)
+        FetchContent_MakeAvailable(ABDShared)
     endif()
 endif()
 
